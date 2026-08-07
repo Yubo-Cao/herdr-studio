@@ -1,0 +1,16 @@
+[Unit]
+Description=herdr-gui
+Documentation=https://github.com/powerfooI/herdr-gui
+Wants=network-online.target
+After=network-online.target
+
+[Service]
+Type=simple
+EnvironmentFile=-%h/.config/herdr-gui/herdr-gui.env
+ExecStart=%h/.local/bin/herdr-gui
+Restart=always
+RestartSec=2
+TimeoutStopSec=15
+
+[Install]
+WantedBy=default.target

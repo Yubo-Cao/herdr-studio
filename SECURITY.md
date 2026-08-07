@@ -1,0 +1,32 @@
+# Security Policy
+
+## Supported Versions
+
+Security fixes are provided for the latest released version.
+
+## Reporting a Vulnerability
+
+Do not open a public issue for a suspected vulnerability. Use the repository's
+private security advisory feature and include affected versions, reproduction
+steps, and expected impact. If private advisories are unavailable, contact the
+maintainer through the address listed on their GitHub profile.
+
+## Trust Model
+
+herdr-gui is a privileged local administration tool. A connected browser can
+interact with terminal sessions, run repository hooks, read session data, and
+upload or delete workspace files. Anyone who can access the UI should be
+treated as having the same authority as the user running herdr-gui.
+
+The server binds to `127.0.0.1` by default. Do not expose it directly to the
+public internet. When binding to a non-loopback address:
+
+- Set a strong `HERDR_GUI_PASSWORD`.
+- Prefer `HERDR_GUI_PASSWORD` over the `--password` flag so the password is not
+  exposed in process arguments.
+- Put the service behind HTTPS or a trusted VPN.
+- Restrict network access with a firewall or reverse proxy.
+- Treat worktree hook configuration as executable code.
+
+The built-in password protects application access but does not provide TLS,
+rate limiting, multi-user authorization, or sandboxing.

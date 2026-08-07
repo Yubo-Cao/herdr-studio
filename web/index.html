@@ -1,0 +1,23 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover"
+    />
+    <link rel="icon" type="image/png" href="/herdr-icon.png" />
+    <link rel="apple-touch-icon" href="/herdr-icon.png" />
+    <title>herdr-gui</title>
+  </head>
+  <body>
+    <div id="root"></div>
+    <script>
+      window.__log = [];
+      const _ol = console.log, _oe = console.error;
+      console.log = (...a) => { window.__log.push(a.map(x => String(x)).join(" ")); _ol.apply(console, a); };
+      console.error = (...a) => { window.__log.push("ERR: " + a.map(x => String(x)).join(" ")); _oe.apply(console, a); };
+    </script>
+    <script type="module" src="/src/main.tsx"></script>
+  </body>
+</html>
