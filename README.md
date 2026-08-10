@@ -92,9 +92,16 @@ Additional runtime settings:
 
 | Environment variable | Purpose |
 | --- | --- |
-| `HERDR_GUI_UPDATE_BASE_URL` | Override the latest release asset directory |
+| `HERDR_GUI_UPDATE_BASE_URL` | Override the latest release asset directory (HTTPS; loopback HTTP allowed) |
 | `HERDR_GUI_DISABLE_UPDATE_CHECK=1` | Disable update checks |
 | `HERDR_GUI_RESTART_SUPERVISOR=0\|1` | Declare or override external supervisor detection |
+
+A custom update mirror uses the same flat asset layout as GitHub Releases. It
+must provide each platform archive, its `.sha256` file, and the corresponding
+`herdr-gui-<platform>.update.json` metadata file. Update base URLs containing
+credentials, query strings, or fragments are rejected so secrets cannot leak
+through update status responses or process arguments. HTTPS is required except
+for mirrors bound to the local loopback interface.
 
 ```bash
 # local use (no auth)
@@ -102,7 +109,7 @@ Additional runtime settings:
 
 # listen on all interfaces with a generated token
 ./herdr-gui --host 0.0.0.0 --port 8787
-# prints URLs such as http://192.168.1.23:8787/?token=<token>
+# prints URLs such as http://192.0.2.23:8787/?token=<token>
 
 # optionally use a fixed password and the login page instead
 ./herdr-gui --host 0.0.0.0 --port 8787 --password 's3cr3t'
@@ -166,8 +173,9 @@ ExecStart=
 ExecStart=/absolute/path/service-wrapper -- %h/.local/bin/herdr-gui --host 0.0.0.0
 ```
 
-The updater replaces the binary and exits; it never starts a replacement
-process. See the detailed [user-service guide](./USAGE.md#使用用户服务管理) for
+The updater saves the replaced executable as `herdr-gui.previous`, atomically
+installs the verified binary, and exits; it never starts a replacement process.
+See the detailed [user-service guide](./USAGE.md#使用用户服务管理) for
 generated file locations, installation, verification, logging, and update
 behavior. Subsequent `herdr-gui service install` runs preserve a custom
 `ExecStart` from a managed unit when it still invokes the same herdr-gui binary.

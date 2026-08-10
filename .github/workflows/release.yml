@@ -84,6 +84,16 @@ jobs:
             fi
           done
 
+          manifest="dist/herdr-gui-$platform.update.json"
+          test -f "$manifest"
+          if command -v sha256sum >/dev/null 2>&1; then
+            archive_digest="$(sha256sum "dist/$latest_archive" | awk '{ print $1 }')"
+          else
+            archive_digest="$(shasum -a 256 "dist/$latest_archive" | awk '{ print $1 }')"
+          fi
+          expected_manifest="{\"schema\":1,\"name\":\"herdr-gui\",\"version\":\"$version\",\"platform\":\"$platform\",\"archive\":\"$latest_archive\",\"sha256\":\"$archive_digest\"}"
+          grep -Fx "$expected_manifest" "$manifest"
+
           extract_dir="$RUNNER_TEMP/herdr-gui-release"
           mkdir -p "$extract_dir"
           tar -xJf "dist/$versioned_archive" -C "$extract_dir"
@@ -106,7 +116,9 @@ jobs:
       - uses: actions/upload-artifact@v7
         with:
           name: herdr-gui-${{ matrix.platform }}
-          path: dist/*.tar.xz*
+          path: |
+            dist/*.tar.xz*
+            dist/*.update.json
           if-no-files-found: error
           retention-days: 7
 

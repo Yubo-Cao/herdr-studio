@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { createAgentSessionFileAccess } from "./session-file-access";
 
-const remotePath = "/home/dev/.pi/agent/sessions/project/pi-session.jsonl";
+const remotePath = "/srv/herdr-gui-test/sessions/pi-session.jsonl";
 const metadata = `42\t1784872800\t${Buffer.from(remotePath).toString("base64")}\n`;
 
 function quote(value: string) {
@@ -12,7 +12,7 @@ describe("agent session file access", () => {
   test("reads reported session files through SSH", async () => {
     const commands: string[] = [];
     const files = createAgentSessionFileAccess({
-      sshHost: "dev@example",
+      sshHost: "operator@example.com",
       shQuote: quote,
       async runBinaryProcessWithTimeout(argv) {
         commands.push(argv.join(" "));
@@ -45,14 +45,16 @@ describe("agent session file access", () => {
         await new Response(await files.readDownloadBody(remotePath)).arrayBuffer(),
       ),
     ).toContain('"type":"message"');
-    expect(commands.every((command) => command.startsWith("ssh dev@example"))).toBe(
-      true,
-    );
+    expect(
+      commands.every((command) =>
+        command.startsWith("ssh operator@example.com"),
+      ),
+    ).toBe(true);
   });
 
   test("returns null when a remote session file is missing", async () => {
     const files = createAgentSessionFileAccess({
-      sshHost: "dev@example",
+      sshHost: "operator@example.com",
       shQuote: quote,
       async runBinaryProcessWithTimeout() {
         return { code: 44, stdout: Buffer.alloc(0), stderr: "" };

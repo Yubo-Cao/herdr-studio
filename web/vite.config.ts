@@ -13,11 +13,17 @@ export default defineConfig({
   server: {
     port: 5173,
     proxy: {
-      "/ws": { target: "http://127.0.0.1:8787", ws: true },
-      "/api": { target: "http://127.0.0.1:8787" },
+      // Preserve the browser-facing authority so the bridge can validate the
+      // Origin header for HTTP and WebSocket requests.
+      "/ws": {
+        target: "http://127.0.0.1:8787",
+        ws: true,
+        changeOrigin: false,
+      },
+      "/api": { target: "http://127.0.0.1:8787", changeOrigin: false },
       // Let an unauthenticated dev client reach the bridge login page instead
       // of repeatedly loading the Vite SPA at /login and redirecting again.
-      "/login": { target: "http://127.0.0.1:8787" },
+      "/login": { target: "http://127.0.0.1:8787", changeOrigin: false },
     },
   },
 });

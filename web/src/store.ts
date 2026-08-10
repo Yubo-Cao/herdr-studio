@@ -1,5 +1,10 @@
 import { useSyncExternalStore } from "react";
 import { bridge, type ConnectionStatus } from "./api";
+import {
+  clearTerminalRelayViewports,
+  forgetTerminalRelayViewportsExcept,
+  terminalRelayViewportForTab,
+} from "./terminalResize";
 import type {
   Pane,
   PaneLayout,
@@ -54,7 +59,8 @@ export interface UpdateInfo {
   can_auto_update: boolean;
   reason?: string;
   platform: string;
-  source_url: string;
+  source_url?: string;
+  metadata_url?: string;
 }
 
 export interface BridgeStatus {
@@ -527,6 +533,9 @@ async function refreshNow() {
     const workspaces: Workspace[] = wsRes?.workspaces ?? [];
     const tabs: Tab[] = tabRes?.tabs ?? [];
     const panes: Pane[] = paneRes?.panes ?? [];
+    forgetTerminalRelayViewportsExcept(
+      new Set(tabs.map((tab) => tab.tab_id)),
+    );
     const completedPanes = trackTaskCompletions(panes);
 
     const next: Partial<State> = {
@@ -682,7 +691,10 @@ async function checkForUpdate(showErrors = false) {
     return;
   }
   try {
-    const r = await fetch("/api/update/check", { credentials: "same-origin" });
+    const r = await fetch("/api/update/check", {
+      credentials: "same-origin",
+      headers: { "x-herdr-gui-update": "1" },
+    });
     if (!r.ok) {
       if (showErrors) {
         const body = await r.json().catch(() => null);
@@ -917,6 +929,7 @@ export const store = {
     if (initialized) return;
     initialized = true;
     bridge.onStatus((s) => {
+      if (s === "disconnected") clearTerminalRelayViewports();
       const resumed =
         s === "connected" &&
         !state.connectionPaused &&
@@ -1040,9 +1053,26 @@ export const store = {
 
   focusTab(tabId: string) {
     const workspaceId = state.tabs.find((t) => t.tab_id === tabId)?.workspace_id;
+    const targetPane =
+      state.panes.find((pane) => pane.tab_id === tabId && pane.focused) ??
+      state.panes.find((pane) => pane.tab_id === tabId);
     if (workspaceId) set({ pendingFocusWorkspaceId: workspaceId });
     return action(
       () => enqueueFocusAction(async () => {
+        const relaySize = terminalRelayViewportForTab(tabId);
+        if (relaySize) {
+          // Pre-size background runtimes for the target tab while the current
+          // tab's direct attachments are still locked. The bridge confirms the
+          // projected viewport through pane.layout before focus proceeds, so
+          // the target is stable before it becomes visible.
+          await bridge
+            .call("terminal.relay_resize", {
+              cols: relaySize.cols,
+              rows: relaySize.rows,
+              ...(targetPane ? { pane_id: targetPane.pane_id } : {}),
+            })
+            .catch(() => null);
+        }
         if (workspaceId) {
           await bridge.call("workspace.focus", { workspace_id: workspaceId });
         }
@@ -1557,6 +1587,7 @@ export const store = {
       const r = await fetch("/api/update/install", {
         method: "POST",
         credentials: "same-origin",
+        headers: { "x-herdr-gui-update": "1" },
       });
       const body = await r.json().catch(() => null);
       if (!r.ok) {

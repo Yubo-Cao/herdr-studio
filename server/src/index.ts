@@ -52,8 +52,14 @@ const APP_VERSION = packageJson.version;
 const serviceCommandExitCode = runServiceCommand(process.argv.slice(2));
 if (serviceCommandExitCode !== null) process.exit(serviceCommandExitCode);
 const config = loadServerConfig(APP_VERSION);
-const { isAuthed, handleTokenLogin, handleLogin, loginPage } =
-  createAuthHandlers({
+const {
+  isAllowedRequestHost,
+  isAllowedRequestOrigin,
+  isAuthed,
+  handleTokenLogin,
+  handleLogin,
+  loginPage,
+} = createAuthHandlers({
     authRequired: config.authRequired,
     password: config.password,
     urlLoginToken: config.generatedAuthToken,
@@ -317,11 +323,32 @@ const terminalBridge = createTerminalBridge({
   safeSend,
   clientLabel,
   markRpcError,
+  confirmRelayResize: async ({ cols, rows, paneId }) => {
+    if (!paneId) return false;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      try {
+        const result = await herdr.call("pane.layout", { pane_id: paneId });
+        const area = result?.layout?.area;
+        if (
+          area &&
+          Number(area.x) + Number(area.width) === cols &&
+          Number(area.y) + Number(area.height) === rows
+        ) {
+          return true;
+        }
+      } catch {
+        return false;
+      }
+      await Bun.sleep(50);
+    }
+    return false;
+  },
 });
 
 function cleanupWs(ws: ServerWebSocket<unknown>) {
   clients.delete(ws);
   terminalBridge.cleanupWs(ws);
+  terminalBridge.browserClientCountChanged(clients.size);
 }
 
 function safeSend(
@@ -776,6 +803,22 @@ async function main() {
     async fetch(req, server) {
       const url = new URL(req.url);
 
+      // Reject foreign browser origins before serving even health or login
+      // routes. The loopback Host allowlist also prevents a hostile web origin
+      // from DNS-rebinding to 127.0.0.1 and controlling the privileged API.
+      if (!isAllowedRequestHost(req)) {
+        return new Response("invalid host", {
+          status: 421,
+          headers: { "cache-control": "no-store" },
+        });
+      }
+      if (!isAllowedRequestOrigin(req)) {
+        return new Response("invalid origin", {
+          status: 403,
+          headers: { "cache-control": "no-store" },
+        });
+      }
+
       const tokenLoginResponse = handleTokenLogin(req);
       if (tokenLoginResponse) return tokenLoginResponse;
 
@@ -816,13 +859,13 @@ async function main() {
       }
       if (url.pathname === "/api/update/check" && req.method === "GET") {
         server.timeout(req, UPDATE_HTTP_IDLE_TIMEOUT_SECONDS);
-        return handleUpdateCheck();
+        return handleUpdateCheck(req);
       }
       if (url.pathname === "/api/update/install" && req.method === "POST") {
         // Binary download and verification can exceed Bun's default ten-second
         // request timeout. Keep the larger budget scoped to update requests.
         server.timeout(req, UPDATE_HTTP_IDLE_TIMEOUT_SECONDS);
-        return handleUpdateInstall();
+        return handleUpdateInstall(req);
       }
       if (url.pathname === "/api/herdr-info" && req.method === "GET") {
         return handleHerdrInfo();
@@ -898,6 +941,7 @@ async function main() {
           `client=${label}`,
           `clients=${clients.size}`,
         );
+        terminalBridge.browserClientCountChanged(clients.size);
         safeSend(ws, JSON.stringify({ hello: true, socket: socketPath }), "hello");
       },
       message(ws, message) {
