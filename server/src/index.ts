@@ -52,8 +52,14 @@ const APP_VERSION = packageJson.version;
 const serviceCommandExitCode = runServiceCommand(process.argv.slice(2));
 if (serviceCommandExitCode !== null) process.exit(serviceCommandExitCode);
 const config = loadServerConfig(APP_VERSION);
-const { isAuthed, handleTokenLogin, handleLogin, loginPage } =
-  createAuthHandlers({
+const {
+  isAllowedRequestHost,
+  isAllowedRequestOrigin,
+  isAuthed,
+  handleTokenLogin,
+  handleLogin,
+  loginPage,
+} = createAuthHandlers({
     authRequired: config.authRequired,
     password: config.password,
     urlLoginToken: config.generatedAuthToken,
@@ -796,6 +802,22 @@ async function main() {
     hostname: config.host,
     async fetch(req, server) {
       const url = new URL(req.url);
+
+      // Reject foreign browser origins before serving even health or login
+      // routes. The loopback Host allowlist also prevents a hostile web origin
+      // from DNS-rebinding to 127.0.0.1 and controlling the privileged API.
+      if (!isAllowedRequestHost(req)) {
+        return new Response("invalid host", {
+          status: 421,
+          headers: { "cache-control": "no-store" },
+        });
+      }
+      if (!isAllowedRequestOrigin(req)) {
+        return new Response("invalid origin", {
+          status: 403,
+          headers: { "cache-control": "no-store" },
+        });
+      }
 
       const tokenLoginResponse = handleTokenLogin(req);
       if (tokenLoginResponse) return tokenLoginResponse;
