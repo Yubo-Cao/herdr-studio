@@ -22,12 +22,12 @@ afterEach(async () => {
   );
 });
 
-function terminalFrame() {
+function terminalFrame(width = 100, height = 30) {
   const writer = new BinWriter();
   writer.variant(2);
   writer.varint(1);
-  writer.varint(100);
-  writer.varint(30);
+  writer.varint(width);
+  writer.varint(height);
   writer.bool(true);
   writer.bytes(Buffer.from("frame"));
   return encodeFrame(writer.toBuffer());
@@ -47,6 +47,13 @@ async function startThinServer(
     appWelcomeError?: string;
     skipAppWelcome?: boolean;
     directClipboardOnResize?: string;
+    directFrameDelayMs?: number;
+    tracker?: {
+      appConnects: number;
+      appCloses: number;
+      appSizes: string[];
+      events: string[];
+    };
   } = {},
 ) {
   const socketPath = path.join(
@@ -57,9 +64,13 @@ async function startThinServer(
   const server = net.createServer((socket) => {
     serverConnections.add(socket);
     let input = Buffer.alloc(0);
+    let isAppSocket = false;
+    let socketCols = 100;
+    let socketRows = 30;
     socket.on("close", () => {
       serverConnections.delete(socket);
       if (appSocket === socket) appSocket = null;
+      if (isAppSocket && options.tracker) options.tracker.appCloses += 1;
     });
     socket.on("data", (chunk) => {
       input = Buffer.concat([
@@ -74,13 +85,21 @@ async function startThinServer(
         const variant = reader.variant();
         if (variant === 0) {
           const protocol = reader.varint();
-          reader.varint(); // cols
-          reader.varint(); // rows
+          const helloCols = reader.varint();
+          const helloRows = reader.varint();
           reader.varint(); // cell width
           reader.varint(); // cell height
           reader.varint(); // encoding
           reader.varint(); // keybindings
           const launchMode = reader.varint();
+          socketCols = helloCols;
+          socketRows = helloRows;
+          if (launchMode === 0 && options.tracker) {
+            isAppSocket = true;
+            options.tracker.appConnects += 1;
+            options.tracker.appSizes.push(`${helloCols}x${helloRows}`);
+            options.tracker.events.push("appHello");
+          }
           const writer = new BinWriter();
           writer.variant(0);
           writer.varint(protocol);
@@ -94,6 +113,9 @@ async function startThinServer(
             if (launchMode === 0 && options.skipAppWelcome) return;
             if (launchMode === 0) appSocket = socket;
             socket.write(encodeFrame(writer.toBuffer()));
+            if (launchMode === 0) {
+              socket.write(terminalFrame(socketCols, socketRows));
+            }
           };
           if (launchMode === 0 && (options.appWelcomeDelayMs ?? 0) > 0) {
             setTimeout(sendWelcome, options.appWelcomeDelayMs);
@@ -105,7 +127,28 @@ async function startThinServer(
             appSocket?.write(clipboardFrame(options.clipboardData));
           }
         } else if (variant === 3 || variant === 5) {
-          socket.write(terminalFrame());
+          if (variant === 3) {
+            const resizeCols = reader.varint();
+            const resizeRows = reader.varint();
+            socketCols = resizeCols;
+            socketRows = resizeRows;
+            if (isAppSocket && options.tracker) {
+              options.tracker.appSizes.push(`${resizeCols}x${resizeRows}`);
+            }
+          } else if (options.tracker) {
+            options.tracker.events.push("attach");
+            options.tracker.events.push("terminalFrame");
+          }
+          const sendTerminalFrame = () => {
+            if (!socket.destroyed) {
+              socket.write(terminalFrame(socketCols, socketRows));
+            }
+          };
+          if (variant === 5 && (options.directFrameDelayMs ?? 0) > 0) {
+            setTimeout(sendTerminalFrame, options.directFrameDelayMs);
+          } else {
+            sendTerminalFrame();
+          }
           if (variant === 3 && options.directClipboardOnResize) {
             socket.write(clipboardFrame(options.directClipboardOnResize));
           }
@@ -395,6 +438,238 @@ describe("terminal bridge sharing", () => {
         .map((message) => JSON.parse(message))
         .find((message) => message.id === "attach")?.result,
     ).toEqual({ ok: true });
+    bridge.cleanupWs(browser);
+  });
+
+  test("keeps the clipboard relay alive across terminal detaches", async () => {
+    const tracker = {
+      appConnects: 0,
+      appCloses: 0,
+      appSizes: [] as string[],
+      events: [] as string[],
+    };
+    const socketPath = await startThinServer({ tracker });
+    const browser = {} as ServerWebSocket<unknown>;
+    const bridge = createTerminalBridge({
+      clientSocketPath: socketPath,
+      herdrProtocol: async () => 17,
+      safeSend: () => true,
+      clientLabel: () => "browser",
+      markRpcError: () => undefined,
+    });
+
+    await bridge.handleTerminalRpc(browser, "attach-1", "terminal.attach", {
+      terminal_id: "term_1",
+      cols: 100,
+      rows: 30,
+    });
+    expect(tracker.appConnects).toBe(1);
+    // The first terminal frame proves that Herdr processed AttachTerminal and
+    // installed its resize lock before the app relay becomes foreground.
+    expect(tracker.events.indexOf("terminalFrame")).toBeGreaterThanOrEqual(0);
+    expect(tracker.events.indexOf("terminalFrame")).toBeLessThan(
+      tracker.events.indexOf("appHello"),
+    );
+
+    // Detaching the last viewer must not tear down the relay: its reconnect
+    // churn is what reflows background pane runtimes on every tab switch.
+    await bridge.handleTerminalRpc(browser, "detach-1", "terminal.detach", {
+      terminal_id: "term_1",
+    });
+    expect(tracker.appCloses).toBe(0);
+
+    await bridge.handleTerminalRpc(browser, "attach-2", "terminal.attach", {
+      terminal_id: "term_2",
+      cols: 100,
+      rows: 30,
+    });
+    expect(tracker.appConnects).toBe(1);
+
+    // The relay follows the latest viewer size so the server's shared pane
+    // geometry stays pinned to the visible window.
+    await bridge.handleTerminalRpc(browser, "resize-1", "terminal.resize", {
+      terminal_id: "term_2",
+      cols: 120,
+      rows: 40,
+    });
+    for (
+      let attempt = 0;
+      attempt < 50 && !tracker.appSizes.includes("120x40");
+      attempt += 1
+    ) {
+      await Bun.sleep(2);
+    }
+    expect(tracker.appSizes).toContain("120x40");
+
+    // Once no browser is connected the relay has no consumer and closes.
+    bridge.browserClientCountChanged(0);
+    for (let attempt = 0; attempt < 50 && tracker.appCloses === 0; attempt += 1) {
+      await Bun.sleep(2);
+    }
+    expect(tracker.appCloses).toBe(1);
+
+    bridge.browserClientCountChanged(1);
+    await bridge.handleTerminalRpc(browser, "attach-3", "terminal.attach", {
+      terminal_id: "term_3",
+      cols: 100,
+      rows: 30,
+    });
+    expect(tracker.appConnects).toBe(2);
+    bridge.cleanupWs(browser);
+  });
+
+  test("sizes the relay only from the active split pane viewport", async () => {
+    const tracker = {
+      appConnects: 0,
+      appCloses: 0,
+      appSizes: [] as string[],
+      events: [] as string[],
+    };
+    const socketPath = await startThinServer({ tracker });
+    const browser = {} as ServerWebSocket<unknown>;
+    const confirmedRelaySizes: Array<{
+      cols: number;
+      rows: number;
+      paneId: string | null;
+    }> = [];
+    const bridge = createTerminalBridge({
+      clientSocketPath: socketPath,
+      herdrProtocol: async () => 17,
+      safeSend: () => true,
+      clientLabel: () => "browser",
+      markRpcError: () => undefined,
+      confirmRelayResize: async (request) => {
+        confirmedRelaySizes.push(request);
+        return true;
+      },
+    });
+
+    await bridge.handleTerminalRpc(browser, "inactive", "terminal.attach", {
+      terminal_id: "term_inactive",
+      cols: 70,
+      rows: 44,
+      relay_active: false,
+    });
+    expect(tracker.appConnects).toBe(0);
+
+    await bridge.handleTerminalRpc(browser, "active", "terminal.attach", {
+      terminal_id: "term_active",
+      cols: 70,
+      rows: 44,
+      relay_active: true,
+      relay_cols: 168,
+      relay_rows: 45,
+    });
+    expect(tracker.appConnects).toBe(1);
+    expect(tracker.appSizes).toEqual(["168x45"]);
+
+    await bridge.handleTerminalRpc(
+      browser,
+      "relay-resize",
+      "terminal.relay_resize",
+      { cols: 170, rows: 46, pane_id: "pane_active" },
+    );
+    expect(confirmedRelaySizes).toEqual([
+      { cols: 170, rows: 46, paneId: "pane_active" },
+    ]);
+    for (
+      let attempt = 0;
+      attempt < 50 && !tracker.appSizes.includes("170x46");
+      attempt += 1
+    ) {
+      await Bun.sleep(2);
+    }
+    expect(tracker.appSizes).toEqual(["168x45", "170x46"]);
+
+    await bridge.handleTerminalRpc(browser, "inactive-resize", "terminal.resize", {
+      terminal_id: "term_inactive",
+      cols: 72,
+      rows: 44,
+      relay_active: false,
+    });
+    await Bun.sleep(5);
+    expect(tracker.appSizes).toEqual(["168x45", "170x46"]);
+
+    await bridge.handleTerminalRpc(browser, "active-resize", "terminal.resize", {
+      terminal_id: "term_active",
+      cols: 72,
+      rows: 44,
+      relay_active: true,
+      relay_cols: 172,
+      relay_rows: 45,
+    });
+    for (
+      let attempt = 0;
+      attempt < 50 && !tracker.appSizes.includes("172x45");
+      attempt += 1
+    ) {
+      await Bun.sleep(2);
+    }
+    expect(tracker.appSizes).toEqual([
+      "168x45",
+      "170x46",
+      "172x45",
+    ]);
+    bridge.cleanupWs(browser);
+  });
+
+  test("does not let a delayed attach overwrite a newer relay target", async () => {
+    const tracker = {
+      appConnects: 0,
+      appCloses: 0,
+      appSizes: [] as string[],
+      events: [] as string[],
+    };
+    const socketPath = await startThinServer({
+      tracker,
+      directFrameDelayMs: 25,
+    });
+    const browser = {} as ServerWebSocket<unknown>;
+    const bridge = createTerminalBridge({
+      clientSocketPath: socketPath,
+      herdrProtocol: async () => 17,
+      safeSend: () => true,
+      clientLabel: () => "browser",
+      markRpcError: () => undefined,
+      confirmRelayResize: async () => true,
+    });
+
+    await bridge.handleTerminalRpc(browser, "initial", "terminal.attach", {
+      terminal_id: "term_initial",
+      cols: 100,
+      rows: 30,
+      relay_cols: 100,
+      relay_rows: 30,
+    });
+    const delayedAttach = bridge.handleTerminalRpc(
+      browser,
+      "delayed",
+      "terminal.attach",
+      {
+        terminal_id: "term_delayed",
+        cols: 120,
+        rows: 40,
+        relay_cols: 120,
+        relay_rows: 40,
+      },
+    );
+    await Bun.sleep(5);
+    await bridge.handleTerminalRpc(
+      browser,
+      "new-target",
+      "terminal.relay_resize",
+      { cols: 140, rows: 50, pane_id: "pane_target" },
+    );
+    await delayedAttach;
+    for (
+      let attempt = 0;
+      attempt < 50 && !tracker.appSizes.includes("140x50");
+      attempt += 1
+    ) {
+      await Bun.sleep(2);
+    }
+    expect(tracker.appSizes).toContain("140x50");
+    expect(tracker.appSizes).not.toContain("120x40");
     bridge.cleanupWs(browser);
   });
 

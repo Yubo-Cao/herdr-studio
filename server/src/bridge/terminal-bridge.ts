@@ -10,6 +10,8 @@ type TerminalSession = {
 type SharedTerminalSession = {
   thin: ThinClient;
   connecting: Promise<void> | null;
+  firstFrame: Promise<boolean>;
+  resolveFirstFrame: ((seen: boolean) => void) | null;
   terminalId: string;
   cols: number;
   rows: number;
@@ -28,6 +30,7 @@ type ClipboardTarget = {
 
 const CLIPBOARD_INPUT_WINDOW_MS = 30_000;
 const CLIPBOARD_RELAY_READY_WAIT_MS = 500;
+const TERMINAL_FIRST_FRAME_WAIT_MS = 20_000;
 // Herdr rejects OSC 52 bodies above 256 KiB before emitting Clipboard.
 const MAX_TERMINAL_CLIPBOARD_BASE64_CHARS = 256 * 1024;
 const STANDARD_BASE64_RE =
@@ -47,6 +50,11 @@ export function createTerminalBridge(args: {
     id: string | null | undefined,
     detail?: string,
   ) => void;
+  confirmRelayResize?: (request: {
+    cols: number;
+    rows: number;
+    paneId: string | null;
+  }) => Promise<boolean>;
 }) {
   const terminals = new Map<ServerWebSocket<unknown>, TerminalSession>();
   const terminalViewers = new Map<ServerWebSocket<unknown>, Set<string>>();
@@ -54,6 +62,8 @@ export function createTerminalBridge(args: {
   let clipboardRelay: ThinClient | null = null;
   let clipboardRelayConnecting: Promise<void> | null = null;
   let clipboardTarget: ClipboardTarget | null = null;
+  let clipboardRelaySize: { cols: number; rows: number } | null = null;
+  let clipboardRelayRevision = 0;
 
   function formatBytes(bytes: number): string {
     if (bytes < 1024) return `${bytes}B`;
@@ -106,12 +116,74 @@ export function createTerminalBridge(args: {
     args.safeSend(target, payload, "terminal-clipboard");
   }
 
-  function stopClipboardRelayIfIdle() {
-    if (sharedTerminals.size > 0) return;
+  function closeClipboardRelay() {
     clipboardTarget = null;
     clipboardRelay?.close();
     clipboardRelay = null;
     clipboardRelayConnecting = null;
+    clipboardRelaySize = null;
+    clipboardRelayRevision += 1;
+  }
+
+  // The clipboard relay doubles as the server's foreground app client, whose
+  // size drives the shared pane-runtime resize cascade for every background
+  // tab. Keep it pinned to the active tab's projected full-layout viewport so
+  // individual split panes cannot drag the shared geometry to their own size.
+  function syncClipboardRelaySize(cols: number, rows: number) {
+    if (!clipboardRelay || clipboardRelay.isClosed) return false;
+    if (
+      clipboardRelaySize?.cols === cols &&
+      clipboardRelaySize?.rows === rows
+    ) {
+      return false;
+    }
+    clipboardRelaySize = { cols, rows };
+    clipboardRelay.resize(cols, rows);
+    return true;
+  }
+
+  async function resizeClipboardRelayAndConfirm(
+    cols: number,
+    rows: number,
+    paneId: string | null,
+  ) {
+    if (!clipboardRelay || clipboardRelay.isClosed) return false;
+    syncClipboardRelaySize(cols, rows);
+    return args.confirmRelayResize
+      ? args.confirmRelayResize({ cols, rows, paneId })
+      : false;
+  }
+
+  function relaySizeFromParams(
+    params: Record<string, unknown>,
+    fallback: { cols: number; rows: number },
+  ): { cols: number; rows: number } | null {
+    // New clients explicitly mark inactive split panes so a single app relay
+    // is sized only by the browser's active pane. Missing flags retain
+    // compatibility with older embedded frontends.
+    if (params.relay_active === false) return null;
+    const cols = Number(params.relay_cols);
+    const rows = Number(params.relay_rows);
+    if (
+      Number.isInteger(cols) &&
+      Number.isInteger(rows) &&
+      cols > 0 &&
+      rows > 0 &&
+      cols <= 65_535 &&
+      rows <= 65_535
+    ) {
+      return { cols, rows };
+    }
+    return fallback;
+  }
+
+  function browserClientCountChanged(count: number) {
+    // The relay outlives individual terminal attaches on purpose: reconnecting
+    // it on every tab switch makes it flap the server's foreground client,
+    // which reflows every pane runtime through the UI pane geometry (sidebar
+    // and tab bar inset) and shows up as visible width jumps. Once no browser
+    // is connected the relay has no consumer and can go away.
+    if (count === 0) closeClipboardRelay();
   }
 
   function ensureClipboardRelay(cols: number, rows: number) {
@@ -121,6 +193,7 @@ export function createTerminalBridge(args: {
 
     const relay = new ThinClient(args.clientSocketPath, args.herdrProtocol);
     clipboardRelay = relay;
+    clipboardRelaySize = { cols, rows };
     relay.on("clipboard", ({ data }) => forwardClipboard(data));
     relay.on("error", (error) =>
       console.error("[clipboard-relay]", (error as Error).message ?? error),
@@ -129,6 +202,7 @@ export function createTerminalBridge(args: {
       if (clipboardRelay !== relay) return;
       clipboardRelay = null;
       clipboardRelayConnecting = null;
+      clipboardRelaySize = null;
     });
 
     // Herdr routes client-local side effects such as OSC 52 only to its
@@ -141,7 +215,10 @@ export function createTerminalBridge(args: {
         console.log("[bridge] clipboard relay connected");
       })
       .catch((error) => {
-        if (clipboardRelay === relay) clipboardRelay = null;
+        if (clipboardRelay === relay) {
+          clipboardRelay = null;
+          clipboardRelaySize = null;
+        }
         if (sharedTerminals.size > 0) {
           console.error(
             "[clipboard-relay] connect failed:",
@@ -156,7 +233,11 @@ export function createTerminalBridge(args: {
     return connecting;
   }
 
-  async function waitForClipboardRelay(cols: number, rows: number) {
+  async function waitForClipboardRelay(
+    cols: number,
+    rows: number,
+    revision?: number,
+  ) {
     const connecting = ensureClipboardRelay(cols, rows);
     let timer: ReturnType<typeof setTimeout> | null = null;
     let timedOut = false;
@@ -174,7 +255,59 @@ export function createTerminalBridge(args: {
       console.warn(
         "[clipboard-relay] still connecting; terminal attach will continue",
       );
+      return false;
     }
+    if (!clipboardRelay || clipboardRelay.isClosed) return false;
+    if (revision !== undefined && revision !== clipboardRelayRevision) {
+      return false;
+    }
+    // A concurrent active viewer may have requested a newer viewport while
+    // this relay was connecting. Apply the latest requested size once ready.
+    syncClipboardRelaySize(cols, rows);
+    return true;
+  }
+
+  async function waitForTerminalFirstFrame(
+    shared: SharedTerminalSession,
+  ): Promise<boolean> {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    let timedOut = false;
+    const seen = await Promise.race([
+      shared.firstFrame,
+      new Promise<boolean>((resolve) => {
+        timer = setTimeout(() => {
+          timedOut = true;
+          resolve(false);
+        }, TERMINAL_FIRST_FRAME_WAIT_MS);
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (timedOut) {
+      console.warn(
+        "[bridge] terminal first frame still pending; clipboard relay deferred",
+        `terminal=${shared.terminalId}`,
+      );
+    }
+    return seen;
+  }
+
+  async function syncClipboardRelayAfterAttach(
+    shared: SharedTerminalSession,
+    size: { cols: number; rows: number },
+    revision: number,
+  ) {
+    // The first direct terminal frame is the protocol-level evidence that
+    // Herdr processed AttachTerminal and installed its resize lock. Only then
+    // may the app-mode relay become foreground or resize the shared layout.
+    if (!(await waitForTerminalFirstFrame(shared))) return;
+    // A newer tab switch/resize owns the relay now; never let this delayed
+    // attach move it back to a stale tab's viewport.
+    if (revision !== clipboardRelayRevision) return;
+    if (clipboardRelay && !clipboardRelay.isClosed) {
+      syncClipboardRelaySize(size.cols, size.rows);
+      return;
+    }
+    await waitForClipboardRelay(size.cols, size.rows, revision);
   }
 
   function detachTerminalViewer(
@@ -199,7 +332,6 @@ export function createTerminalBridge(args: {
       terminalViewers.delete(ws);
       terminals.delete(ws);
       if (clipboardTarget?.ws === ws) clipboardTarget = null;
-      stopClipboardRelayIfIdle();
       return;
     }
     if (current?.terminalId && !viewed.has(current.terminalId)) {
@@ -209,7 +341,6 @@ export function createTerminalBridge(args: {
         rows: current.rows,
       });
     }
-    stopClipboardRelayIfIdle();
   }
 
   function getSharedTerminal(
@@ -225,9 +356,15 @@ export function createTerminalBridge(args: {
     }
 
     const thin = new ThinClient(args.clientSocketPath, args.herdrProtocol);
+    let resolveFirstFrame!: (seen: boolean) => void;
+    const firstFrame = new Promise<boolean>((resolve) => {
+      resolveFirstFrame = resolve;
+    });
     const shared: SharedTerminalSession = {
       thin,
       connecting: null,
+      firstFrame,
+      resolveFirstFrame,
       terminalId,
       cols,
       rows,
@@ -238,7 +375,6 @@ export function createTerminalBridge(args: {
       lastFrameLogAt: 0,
     };
     sharedTerminals.set(terminalId, shared);
-    const clipboardReady = waitForClipboardRelay(cols, rows);
     console.log(
       "[bridge] thin connecting",
       `terminal=${terminalId}`,
@@ -247,6 +383,11 @@ export function createTerminalBridge(args: {
     );
 
     thin.on("terminal", (t) => {
+      const resolve = shared.resolveFirstFrame;
+      if (resolve) {
+        shared.resolveFirstFrame = null;
+        resolve(true);
+      }
       shared.frames += 1;
       shared.bytes += t.bytes.length;
       const now = Date.now();
@@ -297,6 +438,11 @@ export function createTerminalBridge(args: {
       console.error("[thin]", terminalId, (e as Error).message ?? e),
     );
     thin.on("close", () => {
+      const resolve = shared.resolveFirstFrame;
+      if (resolve) {
+        shared.resolveFirstFrame = null;
+        resolve(false);
+      }
       console.log(
         "[bridge] thin closed",
         `terminal=${terminalId}`,
@@ -305,7 +451,6 @@ export function createTerminalBridge(args: {
       );
       if (sharedTerminals.get(terminalId)?.thin === thin) {
         sharedTerminals.delete(terminalId);
-        stopClipboardRelayIfIdle();
       }
     });
     const terminalReady = thin
@@ -313,9 +458,7 @@ export function createTerminalBridge(args: {
       .then(() => {
         thin.attach(terminalId, true);
       });
-    // Give the relay a short head start so an immediate first copy is reliable,
-    // but keep terminal availability independent from an optional side channel.
-    shared.connecting = Promise.all([terminalReady, clipboardReady])
+    shared.connecting = terminalReady
       .then(() => undefined)
       .catch((e) => {
         if (sharedTerminals.get(terminalId)?.thin === thin) {
@@ -354,6 +497,8 @@ export function createTerminalBridge(args: {
         const cols = Number(params.cols ?? 100);
         const rows = Number(params.rows ?? 30);
         if (!terminalId) return fail("terminal_id required");
+        const relaySize = relaySizeFromParams(params, { cols, rows });
+        const relayRevision = relaySize ? ++clipboardRelayRevision : null;
 
         const existingShared = sharedTerminals.get(terminalId);
         const sharedMode =
@@ -396,6 +541,13 @@ export function createTerminalBridge(args: {
             `size=${cols}x${rows}`,
           );
         }
+        if (relaySize && relayRevision !== null) {
+          await syncClipboardRelayAfterAttach(
+            shared,
+            relaySize,
+            relayRevision,
+          );
+        }
         console.log(
           "[bridge] terminal attached",
           `client=${args.clientLabel(ws)}`,
@@ -405,6 +557,32 @@ export function createTerminalBridge(args: {
           `shared=${sharedMode}`,
         );
         return reply({ ok: true });
+      }
+
+      if (method === "terminal.relay_resize") {
+        const cols = Number(params.cols);
+        const rows = Number(params.rows);
+        if (
+          !Number.isInteger(cols) ||
+          !Number.isInteger(rows) ||
+          cols <= 0 ||
+          rows <= 0 ||
+          cols > 65_535 ||
+          rows > 65_535
+        ) {
+          return fail("valid relay cols and rows required");
+        }
+        const paneId =
+          typeof params.pane_id === "string" && params.pane_id
+            ? params.pane_id
+            : null;
+        clipboardRelayRevision += 1;
+        const confirmed = await resizeClipboardRelayAndConfirm(
+          cols,
+          rows,
+          paneId,
+        );
+        return reply({ ok: true, confirmed });
       }
 
       const session = terminals.get(ws);
@@ -452,9 +630,14 @@ export function createTerminalBridge(args: {
         if (!thin || !shared) return fail("no terminal attached");
         const cols = Number(params.cols ?? 100);
         const rows = Number(params.rows ?? 30);
+        const relaySize = relaySizeFromParams(params, { cols, rows });
         thin.resize(cols, rows);
         shared.cols = cols;
         shared.rows = rows;
+        if (relaySize) {
+          clipboardRelayRevision += 1;
+          syncClipboardRelaySize(relaySize.cols, relaySize.rows);
+        }
         console.log(
           "[bridge] terminal resized",
           `client=${args.clientLabel(ws)}`,
@@ -500,5 +683,6 @@ export function createTerminalBridge(args: {
     cleanupWs,
     viewedTerminals,
     statusTerminals,
+    browserClientCountChanged,
   };
 }

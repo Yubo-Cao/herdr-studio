@@ -317,11 +317,32 @@ const terminalBridge = createTerminalBridge({
   safeSend,
   clientLabel,
   markRpcError,
+  confirmRelayResize: async ({ cols, rows, paneId }) => {
+    if (!paneId) return false;
+    for (let attempt = 0; attempt < 6; attempt += 1) {
+      try {
+        const result = await herdr.call("pane.layout", { pane_id: paneId });
+        const area = result?.layout?.area;
+        if (
+          area &&
+          Number(area.x) + Number(area.width) === cols &&
+          Number(area.y) + Number(area.height) === rows
+        ) {
+          return true;
+        }
+      } catch {
+        return false;
+      }
+      await Bun.sleep(50);
+    }
+    return false;
+  },
 });
 
 function cleanupWs(ws: ServerWebSocket<unknown>) {
   clients.delete(ws);
   terminalBridge.cleanupWs(ws);
+  terminalBridge.browserClientCountChanged(clients.size);
 }
 
 function safeSend(
@@ -898,6 +919,7 @@ async function main() {
           `client=${label}`,
           `clients=${clients.size}`,
         );
+        terminalBridge.browserClientCountChanged(clients.size);
         safeSend(ws, JSON.stringify({ hello: true, socket: socketPath }), "hello");
       },
       message(ws, message) {

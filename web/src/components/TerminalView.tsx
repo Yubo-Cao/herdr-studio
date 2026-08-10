@@ -54,6 +54,13 @@ import {
   TerminalImeFallbackTracker,
 } from "../terminalIme";
 import { terminalPageScroll, terminalWheelScroll } from "../terminalScroll";
+import {
+  TerminalAttachFrameWatchdog,
+  TerminalResizeSync,
+  rememberTerminalRelayViewport,
+  terminalAttachWatchdogMs,
+  terminalRelayViewportSize,
+} from "../terminalResize";
 
 const SYSTEM_CLIPBOARD = "c" as ClipboardSelectionType;
 
@@ -401,15 +408,22 @@ export function TerminalView({
     loading: false,
     error: null,
   });
-  const containerRef = useCallback((el: HTMLDivElement | null) =>
-    setContainer(el), []);
+  const containerRef = useCallback(
+    (el: HTMLDivElement | null) => setContainer(el),
+    [],
+  );
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const attachedRef = useRef<string | null>(null);
   const attachingRef = useRef<string | null>(null);
   const desiredTerminalRef = useRef<string | null>(null);
+  const renderedTerminalRef = useRef<string | null>(null);
+  const resizeSyncRef = useRef<TerminalResizeSync | null>(null);
   const terminalAttachEpochRef = useRef(s.terminalAttachEpoch);
-  const attachFrameTimeoutRef = useRef<number | null>(null);
+  const attachWatchdogRef = useRef<TerminalAttachFrameWatchdog | null>(null);
+  if (attachWatchdogRef.current === null) {
+    attachWatchdogRef.current = new TerminalAttachFrameWatchdog();
+  }
   const attachTimeoutCountRef = useRef(0);
   const attachTimeoutTerminalRef = useRef<string | null>(null);
   const pathPreviewDialogRef = useRef<HTMLDivElement | null>(null);
@@ -442,18 +456,26 @@ export function TerminalView({
   const previewWorkspaceIdRef = useRef(pane?.workspace_id);
   const paneTerminalIdRef = useRef(pane?.terminal_id);
   const paneIdRef = useRef(pane?.pane_id);
-  useEffect(() => {
+  const paneTabIdRef = useRef(pane?.tab_id);
+  const paneLayoutRef = useRef(s.layout);
+  useLayoutEffect(() => {
     isActivePaneRef.current = isActivePane;
   }, [isActivePane]);
   useLayoutEffect(() => {
     previewWorkspaceIdRef.current = pane?.workspace_id;
   }, [pane?.workspace_id]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     paneTerminalIdRef.current = pane?.terminal_id;
   }, [pane?.terminal_id]);
-  useEffect(() => {
+  useLayoutEffect(() => {
     paneIdRef.current = pane?.pane_id;
   }, [pane?.pane_id]);
+  useLayoutEffect(() => {
+    paneTabIdRef.current = pane?.tab_id;
+  }, [pane?.tab_id]);
+  useLayoutEffect(() => {
+    paneLayoutRef.current = s.layout;
+  }, [s.layout]);
   const focusTerminalSoon = useCallback(() => {
     if (!isActivePaneRef.current) return;
     if (shouldAvoidVirtualKeyboard()) return;
@@ -468,6 +490,38 @@ export function TerminalView({
       }, 0);
     });
   }, []);
+  // Fits the xterm to its container, unless the container is hidden or
+  // unmounted (e.g. the diff/files view covers it with display:none). Fitting
+  // a hidden container would collapse the terminal to a 2x1 minimum and leak a
+  // bogus resize to the server, so callers must treat null as "keep the last
+  // known size everywhere".
+  const fitVisibleTerminal = useCallback(() => {
+    const term = termRef.current;
+    const fit = fitRef.current;
+    if (!term || !fit) return null;
+    if (!container || !container.isConnected) return null;
+    if (container.clientWidth === 0 || container.clientHeight === 0) {
+      return null;
+    }
+    try {
+      fit.fit();
+    } catch {}
+    return { cols: term.cols, rows: term.rows };
+  }, [container]);
+  const relayViewportFor = useCallback(
+    (size: { cols: number; rows: number }) => {
+      if (!isActivePaneRef.current) return null;
+      const relaySize = terminalRelayViewportSize(
+        size,
+        paneLayoutRef.current,
+        paneIdRef.current,
+      );
+      const tabId = paneTabIdRef.current;
+      if (tabId) rememberTerminalRelayViewport(tabId, relaySize);
+      return relaySize;
+    },
+    [],
+  );
   useEffect(() => {
     if (isActivePane) focusTerminalSoon();
   }, [focusTerminalSoon, isActivePane]);
@@ -536,12 +590,6 @@ export function TerminalView({
     e.preventDefault();
     e.currentTarget.blur();
   };
-
-  const clearAttachFrameTimeout = useCallback(() => {
-    if (attachFrameTimeoutRef.current === null) return;
-    window.clearTimeout(attachFrameTimeoutRef.current);
-    attachFrameTimeoutRef.current = null;
-  }, []);
 
   const previewPathInDialog = useCallback((path: string) => {
     const workspaceId = previewWorkspaceIdRef.current;
@@ -711,7 +759,7 @@ export function TerminalView({
       // Fast terminal switches can produce late frames from the previous attach.
       // Drop them instead of painting stale content over the newly selected pane.
       if (t.terminal_id && desiredTerminalRef.current !== t.terminal_id) return;
-      clearAttachFrameTimeout();
+      attachWatchdogRef.current?.markFrame();
       attachTimeoutCountRef.current = 0;
       setTerminalLoading(false);
       setTerminalAttachError("");
@@ -726,35 +774,39 @@ export function TerminalView({
       }
     });
 
+    const resizeSync = new TerminalResizeSync((size) => {
+      const terminalId = attachedRef.current;
+      if (!terminalId) return false;
+      const relaySize = relayViewportFor(size);
+      bridge
+        .call("terminal.resize", {
+          terminal_id: terminalId,
+          cols: size.cols,
+          rows: size.rows,
+          relay_active: relaySize !== null,
+          ...(relaySize
+            ? { relay_cols: relaySize.cols, relay_rows: relaySize.rows }
+            : {}),
+        })
+        .catch(() => {
+          if (attachedRef.current === terminalId) resizeSync.markFailed(size);
+        });
+      return true;
+    });
+    resizeSyncRef.current = resizeSync;
+
     const densityQuery = window.matchMedia("(max-width: 768px)");
     const applyDensity = () => {
       term.options = terminalDensity();
-      try {
-        fit.fit();
-      } catch {}
-      if (!attachedRef.current) return;
-      bridge
-        .call("terminal.resize", {
-          terminal_id: attachedRef.current,
-          cols: term.cols,
-          rows: term.rows,
-        })
-        .catch(() => {});
+      const size = fitVisibleTerminal();
+      if (size) resizeSync.sendNow(size);
     };
     densityQuery.addEventListener("change", applyDensity);
 
     const ro = new ResizeObserver(() => {
-      try {
-        fit.fit();
-      } catch {}
-      if (!attachedRef.current) return;
-      bridge
-        .call("terminal.resize", {
-          terminal_id: attachedRef.current,
-          cols: term.cols,
-          rows: term.rows,
-        })
-        .catch(() => {});
+      const size = fitVisibleTerminal();
+      if (!size) return;
+      resizeSync.schedule(size);
     });
     ro.observe(container);
 
@@ -1090,7 +1142,9 @@ export function TerminalView({
       offClipboard();
       densityQuery.removeEventListener("change", applyDensity);
       ro.disconnect();
-      clearAttachFrameTimeout();
+      resizeSync.dispose();
+      resizeSyncRef.current = null;
+      attachWatchdogRef.current?.cancel();
       term.textarea?.removeEventListener("input", onTerminalTextInput, {
         capture: true,
       });
@@ -1129,12 +1183,14 @@ export function TerminalView({
       attachedRef.current = null;
       attachingRef.current = null;
       desiredTerminalRef.current = null;
+      renderedTerminalRef.current = null;
     };
   }, [
-    clearAttachFrameTimeout,
     container,
+    fitVisibleTerminal,
     focusTerminalSoon,
     previewPathInDialog,
+    relayViewportFor,
     resolveRelativeFilePaths,
     scrollPage,
   ]);
@@ -1142,7 +1198,6 @@ export function TerminalView({
   // attach / re-attach when the rendered pane changes
   useEffect(() => {
     const term = termRef.current;
-    const fit = fitRef.current;
     const paneTerminalId = pane?.terminal_id ?? null;
     if (terminalAttachEpochRef.current !== s.terminalAttachEpoch) {
       terminalAttachEpochRef.current = s.terminalAttachEpoch;
@@ -1150,10 +1205,11 @@ export function TerminalView({
       attachingRef.current = null;
       attachTimeoutCountRef.current = 0;
       attachTimeoutTerminalRef.current = null;
-      clearAttachFrameTimeout();
+      attachWatchdogRef.current?.cancel();
     }
     if (!paneTerminalId) {
       desiredTerminalRef.current = null;
+      attachWatchdogRef.current?.cancel();
       setTerminalLoading(false);
       setTerminalAttachError("");
       return;
@@ -1162,11 +1218,12 @@ export function TerminalView({
     if (s.status !== "connected") {
       attachedRef.current = null;
       attachingRef.current = null;
+      attachWatchdogRef.current?.cancel();
       setTerminalLoading(false);
       setTerminalAttachError("");
       return;
     }
-    if (!term || !fit) return;
+    if (!term) return;
     focusTerminalSoon();
     if (attachedRef.current === paneTerminalId) return;
     if (attachingRef.current === paneTerminalId) return;
@@ -1194,16 +1251,29 @@ export function TerminalView({
     attachingRef.current = terminalId;
     setTerminalLoading(true);
     setTerminalAttachError("");
-    clearAttachFrameTimeout();
-    try {
-      fit.fit();
-    } catch {}
-    term.reset();
+    const attachAttempt = attachWatchdogRef.current!.begin();
+    const fitSize = fitVisibleTerminal();
+    const cols = fitSize?.cols ?? term.cols;
+    const rows = fitSize?.rows ?? term.rows;
+    const relaySize = relayViewportFor({ cols, rows });
+    // Keep the current buffer when re-attaching the same terminal (watchdog
+    // retry, reconnect): the server repaints a full frame anyway, and keeping
+    // the buffer avoids a blank flash plus losing local scrollback.
+    if (renderedTerminalRef.current !== terminalId) {
+      term.reset();
+      renderedTerminalRef.current = terminalId;
+    }
+    resizeSyncRef.current?.markAttached({ cols, rows });
+    const attachStartedAt = performance.now();
     bridge
       .call("terminal.attach", {
         terminal_id: terminalId,
-        cols: term.cols,
-        rows: term.rows,
+        cols,
+        rows,
+        relay_active: relaySize !== null,
+        ...(relaySize
+          ? { relay_cols: relaySize.cols, relay_rows: relaySize.rows }
+          : {}),
       })
       .then(
         () => {
@@ -1211,24 +1281,35 @@ export function TerminalView({
           if (desiredTerminalRef.current === terminalId) {
             attachedRef.current = terminalId;
             focusTerminalSoon();
-            attachFrameTimeoutRef.current = window.setTimeout(() => {
-              if (desiredTerminalRef.current !== terminalId) return;
-              attachTimeoutCountRef.current += 1;
-              attachedRef.current = null;
-              attachingRef.current = null;
-              void bridge
-                .call("terminal.detach", { terminal_id: terminalId })
-                .catch(() => null);
-              if (attachTimeoutCountRef.current > 2) {
-                setTerminalLoading(false);
-                return;
-              }
-              setAttachRetry((value) => value + 1);
-            }, 3500);
+            // Resizes observed while the attach was in flight are dropped by
+            // the sync's send guard; push the settled size now (deduped).
+            const settledSize = fitVisibleTerminal();
+            if (settledSize) resizeSyncRef.current?.sendNow(settledSize);
+            const watchdogMs = terminalAttachWatchdogMs(
+              performance.now() - attachStartedAt,
+            );
+            attachWatchdogRef.current?.arm(
+              attachAttempt,
+              watchdogMs,
+              () => {
+                if (desiredTerminalRef.current !== terminalId) return;
+                attachTimeoutCountRef.current += 1;
+                attachedRef.current = null;
+                attachingRef.current = null;
+                void bridge
+                  .call("terminal.detach", { terminal_id: terminalId })
+                  .catch(() => null);
+                if (attachTimeoutCountRef.current > 2) {
+                  setTerminalLoading(false);
+                  return;
+                }
+                setAttachRetry((value) => value + 1);
+              },
+            );
           }
         },
         (e) => {
-          clearAttachFrameTimeout();
+          attachWatchdogRef.current?.cancel(attachAttempt);
           if (attachingRef.current === terminalId) attachingRef.current = null;
           if (desiredTerminalRef.current === terminalId) {
             attachedRef.current = null;
@@ -1242,32 +1323,23 @@ export function TerminalView({
       );
   }, [
     container,
+    fitVisibleTerminal,
     focusTerminalSoon,
     pane?.terminal_id,
+    relayViewportFor,
     s.status,
     s.terminalAttachEpoch,
     attachRetry,
-    clearAttachFrameTimeout,
   ]);
 
   useEffect(() => {
-    const term = termRef.current;
-    const fit = fitRef.current;
-    if (!term || !fit) return;
-    requestAnimationFrame(() => {
-      try {
-        fit.fit();
-      } catch {}
-      if (!attachedRef.current) return;
-      bridge
-        .call("terminal.resize", {
-          terminal_id: attachedRef.current,
-          cols: term.cols,
-          rows: term.rows,
-        })
-        .catch(() => {});
+    if (!termRef.current || !fitRef.current) return;
+    const frame = requestAnimationFrame(() => {
+      const size = fitVisibleTerminal();
+      if (size) resizeSyncRef.current?.schedule(size);
     });
-  }, [agentHistoryOpen]);
+    return () => cancelAnimationFrame(frame);
+  }, [agentHistoryOpen, fitVisibleTerminal]);
 
   if (!pane) {
     return (
