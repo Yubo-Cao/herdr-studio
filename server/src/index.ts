@@ -859,13 +859,13 @@ async function main() {
       }
       if (url.pathname === "/api/update/check" && req.method === "GET") {
         server.timeout(req, UPDATE_HTTP_IDLE_TIMEOUT_SECONDS);
-        return handleUpdateCheck();
+        return handleUpdateCheck(req);
       }
       if (url.pathname === "/api/update/install" && req.method === "POST") {
         // Binary download and verification can exceed Bun's default ten-second
         // request timeout. Keep the larger budget scoped to update requests.
         server.timeout(req, UPDATE_HTTP_IDLE_TIMEOUT_SECONDS);
-        return handleUpdateInstall();
+        return handleUpdateInstall(req);
       }
       if (url.pathname === "/api/herdr-info" && req.method === "GET") {
         return handleHerdrInfo();

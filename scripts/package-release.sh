@@ -38,6 +38,7 @@ versioned_archive="$root_dir/dist/herdr-gui-v$version-$platform.tar.xz"
 latest_archive="$root_dir/dist/herdr-gui-$platform.tar.xz"
 versioned_checksum="$versioned_archive.sha256"
 latest_checksum="$latest_archive.sha256"
+update_manifest="$root_dir/dist/herdr-gui-$platform.update.json"
 
 cd "$root_dir"
 bun run "$build_script"
@@ -52,7 +53,8 @@ rm -f \
   "$versioned_archive" \
   "$latest_archive" \
   "$versioned_checksum" \
-  "$latest_checksum"
+  "$latest_checksum" \
+  "$update_manifest"
 
 # Avoid macOS extended headers without passing bsdtar-only flags on Linux.
 tar_options=()
@@ -68,25 +70,33 @@ COPYFILE_DISABLE=1 tar "${tar_options[@]}" \
 
 cp "$versioned_archive" "$latest_archive"
 
-checksum_for() {
+digest_for() {
   archive="$1"
-  output="$2"
   if command -v shasum >/dev/null 2>&1; then
-    digest="$(shasum -a 256 "$archive" | awk '{ print $1 }')"
+    shasum -a 256 "$archive" | awk '{ print $1 }'
   elif command -v sha256sum >/dev/null 2>&1; then
-    digest="$(sha256sum "$archive" | awk '{ print $1 }')"
+    sha256sum "$archive" | awk '{ print $1 }'
   else
     echo "shasum or sha256sum is required" >&2
     exit 1
   fi
-  printf '%s  %s\n' "$digest" "$(basename "$archive")" > "$output"
 }
 
-checksum_for "$versioned_archive" "$versioned_checksum"
-checksum_for "$latest_archive" "$latest_checksum"
-cat "$versioned_checksum" "$latest_checksum"
+archive_digest="$(digest_for "$versioned_archive")"
+printf '%s  %s\n' \
+  "$archive_digest" \
+  "$(basename "$versioned_archive")" > "$versioned_checksum"
+printf '%s  %s\n' \
+  "$archive_digest" \
+  "$(basename "$latest_archive")" > "$latest_checksum"
+printf '%s\n' \
+  "{\"schema\":1,\"name\":\"herdr-gui\",\"version\":\"$version\",\"platform\":\"$platform\",\"archive\":\"$(basename "$latest_archive")\",\"sha256\":\"$archive_digest\"}" \
+  > "$update_manifest"
+
+cat "$versioned_checksum" "$latest_checksum" "$update_manifest"
 ls -lh \
   "$versioned_archive" \
   "$versioned_checksum" \
   "$latest_archive" \
-  "$latest_checksum"
+  "$latest_checksum" \
+  "$update_manifest"

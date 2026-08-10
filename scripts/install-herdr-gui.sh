@@ -11,7 +11,7 @@ fail() {
   exit 1
 }
 
-for command in curl tar install uname awk; do
+for command in curl tar install uname awk cat mktemp; do
   command -v "$command" >/dev/null 2>&1 ||
     fail "required command not found: $command"
 done
@@ -61,38 +61,97 @@ elif [ -n "$requested_version" ]; then
 else
   release_base="https://github.com/$github_repository/releases/latest/download"
 fi
-release_base="${release_base%/}"
+while [ "${release_base%/}" != "$release_base" ]; do
+  release_base="${release_base%/}"
+done
+case "$release_base" in
+  *\?* | *\#*)
+    fail "release base URL must not contain a query or fragment"
+    ;;
+esac
+release_authority="${release_base#*://}"
+release_authority="${release_authority%%/*}"
+[ -n "$release_authority" ] || fail "invalid release base URL"
+case "$release_authority" in
+  *@*) fail "release base URL must not contain credentials" ;;
+esac
+case "$release_base" in
+  https://*)
+    curl_protocol="=https"
+    ;;
+  http://*)
+    case "$release_authority" in
+      localhost | localhost:* | 127.0.0.1 | 127.0.0.1:* | "[::1]" | "[::1]":*) ;;
+      *) fail "release base URL must use HTTPS unless the mirror is loopback" ;;
+    esac
+    curl_protocol="=http"
+    ;;
+  *) fail "release base URL must be an HTTP(S) URL" ;;
+esac
 package_dir="herdr-gui-${platform}"
+mkdir -p "$install_dir"
+target="$install_dir/herdr-gui"
+if { [ -e "$target" ] || [ -L "$target" ]; } && \
+   { [ ! -f "$target" ] || [ -L "$target" ]; }; then
+  fail "install target exists but is not a regular file"
+fi
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/herdr-gui-install.XXXXXX")"
 target_tmp=""
+backup_tmp=""
 
 cleanup() {
   rm -rf "$tmp"
   if [ -n "${target_tmp:-}" ]; then
     rm -f "$target_tmp"
   fi
+  if [ -n "${backup_tmp:-}" ]; then
+    rm -f "$backup_tmp"
+  fi
 }
-trap cleanup EXIT HUP INT TERM
+trap cleanup EXIT
+trap 'exit 1' HUP INT TERM
 
 archive="$tmp/$archive_name"
 checksum="$archive.sha256"
 printf 'Downloading herdr-gui for %s...\n' "$platform"
-curl -fsSL "$release_base/$archive_name" -o "$archive"
-curl -fsSL "$release_base/$archive_name.sha256" -o "$checksum"
-(
-  cd "$tmp"
-  if [ "$checksum_tool" = "shasum" ]; then
-    shasum -a 256 -c "$(basename "$checksum")"
-  else
-    sha256sum -c "$(basename "$checksum")"
-  fi
-)
-tar -xJf "$archive" -C "$tmp"
+curl --proto "$curl_protocol" --proto-redir "$curl_protocol" \
+  -fsSL "$release_base/$archive_name" -o "$archive"
+curl --proto "$curl_protocol" --proto-redir "$curl_protocol" \
+  --max-filesize 4096 -fsSL \
+  "$release_base/$archive_name.sha256" -o "$checksum"
+checksum_line="$(cat "$checksum")" || fail "unable to read package checksum"
+set -f
+set -- $checksum_line
+set +f
+[ "$#" -eq 2 ] || fail "invalid package checksum file"
+expected_checksum="$1"
+checksum_name="$2"
+[ "${#expected_checksum}" -eq 64 ] || fail "invalid package checksum file"
+case "$expected_checksum" in
+  *[!0-9A-Fa-f]*) fail "invalid package checksum file" ;;
+esac
+expected_checksum="$(printf '%s\n' "$expected_checksum" | awk '{ print tolower($0) }')"
+[ "$checksum_name" = "$archive_name" ] || fail "invalid package checksum file"
+if [ "$checksum_tool" = "shasum" ]; then
+  actual_checksum="$(shasum -a 256 "$archive" | awk 'NR == 1 { print $1 }')"
+else
+  actual_checksum="$(sha256sum "$archive" | awk 'NR == 1 { print $1 }')"
+fi
+[ "$actual_checksum" = "$expected_checksum" ] || fail "package checksum mismatch"
 
-version_file="$tmp/$package_dir/VERSION"
-binary="$tmp/$package_dir/herdr-gui"
-[ -f "$version_file" ] || fail "package VERSION file is missing"
-[ -x "$binary" ] || fail "package binary is missing or not executable"
+tar -xJf "$archive" -C "$tmp" \
+  "$package_dir/VERSION" \
+  "$package_dir/herdr-gui"
+
+extracted_package_dir="$tmp/$package_dir"
+version_file="$extracted_package_dir/VERSION"
+binary="$extracted_package_dir/herdr-gui"
+[ -d "$extracted_package_dir" ] && [ ! -L "$extracted_package_dir" ] ||
+  fail "package directory is invalid"
+[ -f "$version_file" ] && [ ! -L "$version_file" ] ||
+  fail "package VERSION file is missing or invalid"
+[ -f "$binary" ] && [ ! -L "$binary" ] && [ -x "$binary" ] ||
+  fail "package binary is missing, invalid, or not executable"
 
 package_name=""
 package_version=""
@@ -108,18 +167,31 @@ read -r package_name package_version package_platform extra_version_field \
 [ -z "$requested_version" ] || [ "$package_version" = "$requested_version" ] ||
   fail "package version is $package_version, expected $requested_version"
 
-binary_version="$("$binary" --version | awk '{ print $2; exit }')"
-[ "$binary_version" = "$package_version" ] ||
-  fail "binary reports $binary_version, expected $package_version"
+binary_version="$("$binary" --version)"
+[ "$binary_version" = "herdr-gui $package_version" ] ||
+  fail "binary version does not match package VERSION"
 
-mkdir -p "$install_dir"
-target="$install_dir/herdr-gui"
-target_tmp="$install_dir/.herdr-gui.new.$$"
+if { [ -e "$target" ] || [ -L "$target" ]; } && \
+   { [ ! -f "$target" ] || [ -L "$target" ]; }; then
+  fail "install target changed during installation"
+fi
+target_tmp="$(mktemp "$install_dir/.herdr-gui.new.XXXXXX")"
 install -m 0755 "$binary" "$target_tmp"
+backup=""
+if [ -f "$target" ] && [ ! -L "$target" ]; then
+  backup="$target.previous"
+  backup_tmp="$(mktemp "$install_dir/.herdr-gui.previous.XXXXXX")"
+  install -m 0755 "$target" "$backup_tmp"
+  mv -f "$backup_tmp" "$backup"
+  backup_tmp=""
+fi
 mv -f "$target_tmp" "$target"
 target_tmp=""
 
 printf 'Installed herdr-gui %s to %s\n' "$package_version" "$target"
+if [ -n "$backup" ]; then
+  printf 'Previous binary saved to %s\n' "$backup"
+fi
 case ":${PATH:-}:" in
   *":$install_dir:"*) ;;
   *)

@@ -59,7 +59,8 @@ export interface UpdateInfo {
   can_auto_update: boolean;
   reason?: string;
   platform: string;
-  source_url: string;
+  source_url?: string;
+  metadata_url?: string;
 }
 
 export interface BridgeStatus {
@@ -690,7 +691,10 @@ async function checkForUpdate(showErrors = false) {
     return;
   }
   try {
-    const r = await fetch("/api/update/check", { credentials: "same-origin" });
+    const r = await fetch("/api/update/check", {
+      credentials: "same-origin",
+      headers: { "x-herdr-gui-update": "1" },
+    });
     if (!r.ok) {
       if (showErrors) {
         const body = await r.json().catch(() => null);
@@ -1583,6 +1587,7 @@ export const store = {
       const r = await fetch("/api/update/install", {
         method: "POST",
         credentials: "same-origin",
+        headers: { "x-herdr-gui-update": "1" },
       });
       const body = await r.json().catch(() => null);
       if (!r.ok) {
