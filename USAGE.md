@@ -56,7 +56,10 @@ curl -fsSL "https://github.com/powerfooI/herdr-gui/releases/latest/download/inst
 ```
 
 可以通过 `HERDR_GUI_INSTALL_DIR` 修改安装目录，通过
-`HERDR_GUI_RELEASE_BASE_URL` 使用其他平铺发布镜像。
+`HERDR_GUI_RELEASE_BASE_URL` 使用其他平铺发布镜像。发布镜像必须使用 HTTPS；
+仅绑定在本机 loopback 的测试镜像可以使用 HTTP。URL 不可包含凭据、query 或
+fragment。覆盖已有安装时，安装脚本和应用内更新都会把原 binary 保留为同目录下的
+`herdr-gui.previous`，便于新版本无法启动时手动恢复。
 
 ### 旧版本更新
 
@@ -119,7 +122,7 @@ http://127.0.0.1:8787
 `~/.config/herdr-gui/auth-token`，并打印带 token 的内网访问地址，例如：
 
 ```text
-http://192.168.1.23:8781/?token=<token>
+http://192.0.2.23:8781/?token=<token>
 ```
 
 在手机浏览器中打开即可自动登录。登录成功后地址栏中的 token 会立即被移除，
@@ -175,7 +178,10 @@ Host devbox
 
 更新相关环境变量：
 
-- `HERDR_GUI_UPDATE_BASE_URL`：覆盖 latest 归档所在目录。
+- `HERDR_GUI_UPDATE_BASE_URL`：覆盖 latest 发布资产所在目录。自定义镜像必须以
+  flat layout 提供各平台归档、`.sha256` 和对应的
+  `herdr-gui-<platform>.update.json` 元数据；除本机 loopback HTTP 镜像外必须使用
+  HTTPS，且 URL 不可包含凭据、query 或 fragment。
 - `HERDR_GUI_DISABLE_UPDATE_CHECK=1`：关闭更新检查。
 - `HERDR_GUI_RESTART_SUPERVISOR=0|1`：覆盖 systemd/launchd 自动识别结果。
   对无法自动识别的外部 supervisor，设置为 `1` 后才允许应用内更新。

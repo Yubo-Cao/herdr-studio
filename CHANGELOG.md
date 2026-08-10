@@ -2,6 +2,33 @@
 
 ## Unreleased
 
+### Changed
+
+- Check for releases through small, bounded platform manifests instead of
+  repeatedly downloading full application archives, while retaining a legacy
+  fallback for older releases and mirrors.
+
+### Fixed
+
+- Harden automatic updates by binding version, platform, archive name, and
+  checksum metadata before narrowly extracting, backing up, and atomically
+  replacing the executable. Browser update checks and installs now require an explicit
+  same-origin request header, and custom update URLs cannot expose embedded
+  credentials or use unauthenticated remote transports.
+- Block cross-origin WebSocket control and DNS-rebinding access to the
+  privileged API by validating browser origins and accepting only loopback
+  request hosts when herdr-gui runs without authentication.
+- Stop terminals from repainting through stale intermediate widths on tab
+  switches, especially over slow remote connections. Resize updates are now
+  deduplicated and debounced, hidden views cannot collapse a terminal to 2x1,
+  and the adaptive attach watchdog handles frames arriving before or after the
+  attach response without starting a false retry loop.
+- Keep the clipboard relay stable across tab switches, project its viewport
+  from the complete active pane layout, and pre-size a previously visited
+  target tab before focusing it. Late attach responses can no longer restore
+  stale relay dimensions, including when switching between single and split
+  pane tabs.
+
 ## 0.3.0 - 2026-08-07
 
 ### Added
