@@ -221,8 +221,8 @@ function resolvePublicDir(args: CliArgs): string {
 export function getLanIPs(): string[] {
   return Object.values(networkInterfaces())
     .flatMap((ifaces) => ifaces ?? [])
-    .filter((iface) => iface.family === "IPv4" && !iface.internal)
-    .map((iface) => iface.address);
+    .filter(({ family, internal }) => family === "IPv4" && !internal)
+    .map(({ address }) => address);
 }
 
 export function isAnyHost(host: string): boolean {

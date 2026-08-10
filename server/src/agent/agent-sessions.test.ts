@@ -12,6 +12,7 @@ import type { AgentSessionFileAccess } from "./session-file-access";
 import type { HerdrCall } from "./session-types";
 
 const tempDirectories: string[] = [];
+const remotePiSessionPath = "/srv/herdr-gui-test/sessions/pi-session.jsonl";
 
 afterEach(async () => {
   await Promise.all(
@@ -76,7 +77,7 @@ async function createPiSession() {
 }
 
 function remotePiFiles(text: string): AgentSessionFileAccess {
-  const path = "/home/dev/.pi/agent/sessions/project/pi-session.jsonl";
+  const path = remotePiSessionPath;
   const bytes = Buffer.from(text);
   return {
     remote: true,
@@ -223,7 +224,7 @@ describe("Pi agent sessions", () => {
     ]
       .map((record) => JSON.stringify(record))
       .join("\n");
-    const path = "/home/dev/.pi/agent/sessions/project/pi-session.jsonl";
+    const path = remotePiSessionPath;
     const files = remotePiFiles(`${text}\n`);
     const call = piAgentCall(path);
 
