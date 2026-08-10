@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.1 - 2026-08-10
+
 ### Changed
 
 - Check for releases through small, bounded platform manifests instead of
