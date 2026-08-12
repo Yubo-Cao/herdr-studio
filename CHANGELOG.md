@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.3.3 - 2026-08-13
+
 ### Added
 
 - Customize the mobile terminal shortcut panel through a direct 2-by-8 slot editor:
