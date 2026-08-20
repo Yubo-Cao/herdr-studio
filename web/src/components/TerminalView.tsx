@@ -65,6 +65,7 @@ import {
   TerminalImeTextareaFallbackTracker,
 } from "../terminalIme";
 import { terminalPageScroll, terminalWheelScroll } from "../terminalScroll";
+import { terminalFocusBlockedByOverlay } from "../terminalFocus";
 import {
   TerminalAttachFrameWatchdog,
   TerminalResizeSync,
@@ -486,6 +487,7 @@ export function TerminalView({
     (el: HTMLDivElement | null) => setContainer(el),
     [],
   );
+  const pasteFromClipboardRef = useRef<(() => void) | null>(null);
   const termRef = useRef<Terminal | null>(null);
   const fitRef = useRef<FitAddon | null>(null);
   const attachedRef = useRef<string | null>(null);
@@ -578,6 +580,9 @@ export function TerminalView({
         const activeIsTerminalInput = !!activeElement?.closest(".xterm");
         if (!term || (isEditableElement(active) && !activeIsTerminalInput))
           return;
+        // Streaming frames must not steal focus from an open popover, dialog,
+        // or menu: moving focus out of an overlay dismisses it.
+        if (terminalFocusBlockedByOverlay(activeElement, document)) return;
         term.focus();
       }, 0);
     });
@@ -1149,6 +1154,11 @@ export function TerminalView({
         clipboardPasteInFlight = false;
       }
     };
+    pasteFromClipboardRef.current = () => {
+      void pasteFromBrowserClipboard().catch((error) => {
+        setUploadError(`Paste failed: ${(error as Error).message}`);
+      });
+    };
     const applePlatform = isApplePlatform();
     const appleTouchPlatform = applePlatform && navigator.maxTouchPoints > 0;
     const shouldHandleCtrlVPaste = !applePlatform;
@@ -1683,6 +1693,7 @@ export function TerminalView({
       document.removeEventListener("pointerdown", onDocumentPointerDown, {
         capture: true,
       });
+      pasteFromClipboardRef.current = null;
       imeFallback.dispose();
       linkProvider.dispose();
       const terminalId = attachedRef.current ?? desiredTerminalRef.current;
@@ -1866,6 +1877,9 @@ export function TerminalView({
     if (!execution) return;
     if (execution.type === "scroll") {
       scrollPage(execution.direction, execution.amount);
+    } else if (execution.type === "paste") {
+      if (shouldAvoidVirtualKeyboard()) blurTerminalInput();
+      pasteFromClipboardRef.current?.();
     } else {
       sendControl(execution.bytes);
     }
