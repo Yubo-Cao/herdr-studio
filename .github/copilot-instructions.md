@@ -1,0 +1,55 @@
+# Copilot Instructions
+
+## Project overview
+
+herdr-gui is a web GUI client for Herdr. It has two parts:
+
+- `server/src`: Bun-powered local bridge server (HTTP + WebSocket) that talks
+  to the local Herdr socket.
+- `web/src`: React + Vite frontend dashboard. Reusable UI lives in
+  `web/src/components`, assets in `web/src/assets`, global styling in
+  `web/src/styles.css`.
+- `scripts/`: release and packaging helpers.
+
+Generated build output lives in `server/public`,
+`server/src/public-files.gen.ts`, `server/herdr-gui*`, and `dist/`. These are
+build artifacts; they must not be edited or committed.
+
+## Review priorities
+
+When reviewing pull requests, focus on:
+
+- Correctness of the Bun bridge: HTTP/WebSocket message handling, socket
+  lifecycle, reconnection and error paths, and cleanup of listeners, timers,
+  and subprocesses.
+- React state management: prefer the existing store and bridge helpers in
+  `web/src` over new abstractions; watch for missing effect cleanup and stale
+  closures over socket state.
+- Security: the server binds locally and executes local processes; flag any
+  path traversal, unvalidated message payloads, or injection-prone command
+  construction.
+- Cross-platform behavior: releases target linux-x64, linux-arm64,
+  darwin-x64, and darwin-arm64; avoid OS-specific assumptions in shared code.
+
+## Style and conventions
+
+- TypeScript everywhere; React function components; keep components small and
+  focused under `web/src/components`.
+- Formatting is enforced by the root `biome.json` (2-space indent, LF, double
+  quotes, semicolons, trailing commas). Do not suggest style changes that
+  conflict with it.
+- Keep edits ASCII unless the file already contains non-ASCII text.
+- Use the existing CSS class naming style; no CSS-in-JS or new styling
+  systems.
+
+## Verification
+
+Changes are expected to pass, from the repo root:
+
+- `bun run format:check`
+- `bun run lint`
+- `bun run test`
+- `cd web && bun run typecheck` and `cd server && bun run typecheck`
+- For frontend-facing changes: `cd web && bun run build`
+
+Call out missing verification when a PR touches these areas without it.
