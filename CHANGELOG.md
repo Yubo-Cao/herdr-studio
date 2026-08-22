@@ -2,6 +2,32 @@
 
 ## Unreleased
 
+### Added
+
+- Add a checkout-scoped Workspace Inspector for Files, Changes, and Agent
+  History, with right/bottom docks, expanded and responsive modes, resizable
+  navigation, shared checkout identity, and a `Cmd+Shift+B` toggle.
+
+### Changed
+
+- Keep the Workspace tree and terminal mounted while using or retargeting the
+  Inspector, restoring each checkout's isolated view and layout preferences.
+- Nest Agent sessions under their Workspace by default, with shared tab/tree
+  status icons, quieter status labels, context menus, and an optional persisted
+  separate Agents panel.
+- Streamline desktop and mobile navigation, pane controls, embedded resource
+  headers, responsive Diff controls, and the mobile Workspaces shortcut.
+- Improve keyboard and focus behavior for Workspace/Agent trees, dialogs,
+  resizers, mobile controls, and Inspector open/close flows.
+
+### Fixed
+
+- Isolate Files/Changes caches and asynchronous requests by connection and
+  checkout, automatically load Diff content, and retire stale results after
+  refresh, cleanup, or worktree lifecycle changes.
+- Preserve completed Agent History when live status is unknown and prevent stale
+  Agent or lifecycle state from leaking across pane and dialog contexts.
+
 ## 0.4.2 - 2026-08-20
 
 ### Added
