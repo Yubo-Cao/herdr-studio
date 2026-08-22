@@ -33,8 +33,8 @@ When reviewing pull requests, focus on:
 
 ## Style and conventions
 
-- TypeScript everywhere; React function components; keep components small and
-  focused under `web/src/components`.
+- Use TypeScript for application code; use React function components; keep components
+  small and focused under `web/src/components`.
 - Formatting is enforced by the root `biome.json` (2-space indent, LF, double
   quotes, semicolons, trailing commas). Do not suggest style changes that
   conflict with it.
