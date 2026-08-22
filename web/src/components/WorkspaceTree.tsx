@@ -1,4 +1,4 @@
-import { useStore, store } from "../store";
+import { shallowEqual, store, useStoreSelector } from "../store";
 import type { GitStatusSummary, Pane, Workspace } from "../types";
 import { shortId } from "../utils";
 import { useEffect, useMemo, useRef, useState } from "react";
@@ -180,7 +180,18 @@ export function WorkspaceTree({
   onReviewChangesForAgent?: (pane: Pane) => void;
   onViewAgentHistory?: (pane: Pane) => void;
 }) {
-  const s = useStore();
+  const s = useStoreSelector(
+    (state) => ({
+      activeConnectionId: state.activeConnectionId,
+      lastRefresh: state.lastRefresh,
+      layout: state.layout,
+      panes: state.panes,
+      selectedPaneId: state.selectedPaneId,
+      status: state.status,
+      workspaces: state.workspaces,
+    }),
+    shallowEqual,
+  );
   const connectionClient = useConnectionClient();
   const [menu, setMenu] = useState<ContextMenuState | null>(null);
   const [agentMenu, setAgentMenu] = useState<AgentMenuState | null>(null);
@@ -548,7 +559,12 @@ function WorkspaceRow({
 }) {
   const children = childrenByParent.get(w.workspace_id) ?? [];
   const agents = agentsByWorkspace.get(w.workspace_id) ?? [];
-  const s = useStore();
+  const s = useStoreSelector(
+    (state) => ({
+      pendingFocusWorkspaceId: state.pendingFocusWorkspaceId,
+    }),
+    shallowEqual,
+  );
   const isChild = depth > 0;
   const hasChildren = children.length > 0;
   const hasNestedItems = hasChildren || agents.length > 0;

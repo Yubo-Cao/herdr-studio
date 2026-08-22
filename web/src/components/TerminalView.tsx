@@ -17,7 +17,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import { Columns2, Keyboard, Maximize2, Rows2, X } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
-import { store, useStore } from "../store";
+import { shallowEqual, store, useStoreSelector } from "../store";
 import { paneCanClose } from "../paneJump";
 import { bridge, type ConnectionClient } from "../api";
 import { connectionHttpPath } from "../connectionHttp";
@@ -150,6 +150,8 @@ const RESET_FOREGROUND = "\x1b[39m";
 const ANSI_SEQUENCE_RE =
   /\x1b\][\s\S]*?(?:\x07|\x1b\\)|\x1b\[[0-?]*[ -/]*[@-~]|\x1b[@-Z\\-_]/g;
 const CLIPBOARD_READ_TIMEOUT_MS = 2000;
+const TERMINAL_EVICTION_WINDOW_MS = 60_000;
+const TERMINAL_EVICTION_MAX_RETRIES = 3;
 
 function terminalDensity() {
   const compact =
@@ -429,7 +431,20 @@ export function TerminalView({
   onAgentHistoryOpenChange?: (open: boolean) => void;
   onOpenWorkspaceFile?: (request: TerminalWorkspaceFileRequest) => void;
 }) {
-  const s = useStore();
+  const s = useStoreSelector(
+    (state) => ({
+      activeConnectionId: state.activeConnectionId,
+      connectionGeneration: state.connectionGeneration,
+      connectionPaused: state.connectionPaused,
+      connections: state.connections,
+      layout: state.layout,
+      panes: state.panes,
+      selectedPaneId: state.selectedPaneId,
+      status: state.status,
+      terminalAttachEpoch: state.terminalAttachEpoch,
+    }),
+    shallowEqual,
+  );
   const terminalIdentity = useMemo<TerminalConnectionIdentity>(
     () => ({
       connectionId: s.activeConnectionId,
@@ -496,6 +511,7 @@ export function TerminalView({
   const attachingRef = useRef<string | null>(null);
   const desiredTerminalRef = useRef<string | null>(null);
   const renderedTerminalRef = useRef<string | null>(null);
+  const attachEvictionsRef = useRef<number[]>([]);
   const resizeSyncRef = useRef<TerminalResizeSync | null>(null);
   const terminalAttachEpochRef = useRef(s.terminalAttachEpoch);
   const attachWatchdogRef = useRef<TerminalAttachFrameWatchdog | null>(null);
@@ -871,6 +887,40 @@ export function TerminalView({
       if (text !== null && connectionClient.isCurrent()) {
         clipboardProvider.writeText(SYSTEM_CLIPBOARD, text);
       }
+    });
+    const offClosed = bridge.onTerminalClosed((closed) => {
+      if (
+        !terminalPushMatches(
+          terminalIdentity,
+          connectionClient,
+          desiredTerminalRef.current,
+          closed,
+        )
+      ) {
+        return;
+      }
+      // Herdr closes the direct attach when another client takes the
+      // terminal over (or its stream dies). Re-attach, but bound takeover
+      // wars between two clients so they cannot evict each other forever.
+      attachedRef.current = null;
+      attachingRef.current = null;
+      const now = Date.now();
+      attachEvictionsRef.current = attachEvictionsRef.current.filter(
+        (at) => now - at < TERMINAL_EVICTION_WINDOW_MS,
+      );
+      attachEvictionsRef.current.push(now);
+      if (attachEvictionsRef.current.length > TERMINAL_EVICTION_MAX_RETRIES) {
+        attachWatchdogRef.current?.cancel();
+        setTerminalLoading(false);
+        setTerminalAttachError(
+          typeof closed.reason === "string" &&
+            closed.reason.includes("taken over")
+            ? "Terminal stream was taken over by another herdr-gui client"
+            : "Terminal stream closed by the server",
+        );
+        return;
+      }
+      setAttachRetry((value) => value + 1);
     });
     let disposedByConnectionLease = false;
     const unregisterConnectionDisposer = registerTerminalConnectionDisposer(
@@ -1585,6 +1635,7 @@ export function TerminalView({
       terminalEffectDisposed = true;
       off();
       offClipboard();
+      offClosed();
       unregisterConnectionDisposer();
       densityQuery.removeEventListener("change", applyDensity);
       ro.disconnect();

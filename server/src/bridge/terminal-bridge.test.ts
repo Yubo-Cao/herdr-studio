@@ -49,7 +49,7 @@ async function startThinServer(
     directClipboardOnResize?: string;
     directFrameDelayMs?: number;
     skipDirectFrame?: boolean;
-    onDirectAttach?: () => void;
+    onDirectAttach?: (socket: net.Socket) => void;
     tracker?: {
       appConnects: number;
       appCloses: number;
@@ -143,7 +143,7 @@ async function startThinServer(
           } else {
             options.tracker?.events.push("attach");
             options.tracker?.events.push("terminalFrame");
-            options.onDirectAttach?.();
+            options.onDirectAttach?.(socket);
           }
           const sendTerminalFrame = () => {
             if (!socket.destroyed) {
@@ -273,6 +273,65 @@ describe("terminal bridge sharing", () => {
 
     bridge.cleanupWs(firstBrowser);
     bridge.cleanupWs(secondBrowser);
+  });
+
+  test("notifies viewers to re-attach when Herdr closes the terminal stream", async () => {
+    const direct: { socket: net.Socket | null } = { socket: null };
+    const socketPath = await startThinServer({
+      onDirectAttach: (socket) => {
+        direct.socket = socket;
+      },
+    });
+    const browser = {} as ServerWebSocket<unknown>;
+    const messages: string[] = [];
+    const bridge = createTerminalBridge({
+      clientSocketPath: socketPath,
+      herdrProtocol: async () => 17,
+      safeSend: (ws, payload) => {
+        messages.push(payload);
+        return true;
+      },
+      clientLabel: () => "browser",
+      markRpcError: () => undefined,
+    });
+
+    await bridge.handleTerminalRpc(browser, "attach", "terminal.attach", {
+      terminal_id: "term_1",
+      cols: 100,
+      rows: 30,
+    });
+    await waitForTerminalFrame(messages);
+
+    // Herdr closes the direct attach when another client takes the terminal
+    // over; the viewer must be told so its UI can re-attach.
+    expect(direct.socket).not.toBeNull();
+    (direct.socket as net.Socket).destroy();
+    await waitForCondition(
+      () =>
+        messages
+          .map((message) => JSON.parse(message))
+          .some((message) => message.terminal_closed?.terminal_id === "term_1"),
+      "timed out waiting for terminal_closed",
+    );
+    const closed = messages
+      .map((message) => JSON.parse(message))
+      .find((message) => message.terminal_closed);
+    expect(closed.terminal_closed).toMatchObject({
+      terminal_id: "term_1",
+      reason: "stream_closed",
+    });
+
+    // A re-attach after the close must build a fresh stream.
+    messages.length = 0;
+    await bridge.handleTerminalRpc(browser, "reattach", "terminal.attach", {
+      terminal_id: "term_1",
+      cols: 100,
+      rows: 30,
+    });
+    const frame = await waitForTerminalFrame(messages);
+    expect(frame).toMatchObject({ terminal_id: "term_1", full: true });
+
+    bridge.cleanupWs(browser);
   });
 
   test("routes Herdr clipboard messages from the app relay to the input owner", async () => {

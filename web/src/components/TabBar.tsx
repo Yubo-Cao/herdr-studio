@@ -1,4 +1,4 @@
-import { useStore, store } from "../store";
+import { shallowEqual, store, useStoreSelector } from "../store";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { PanelRight } from "lucide-react";
@@ -48,7 +48,14 @@ export function TabBar({
   inspectorOpen?: boolean;
   onToggleInspector?: () => void;
 }) {
-  const s = useStore();
+  const s = useStoreSelector(
+    (state) => ({
+      panes: state.panes,
+      tabs: state.tabs,
+      workspaces: state.workspaces,
+    }),
+    shallowEqual,
+  );
   const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(
     null,
   );

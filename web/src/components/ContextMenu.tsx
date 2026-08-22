@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from "react";
 import type { Workspace } from "../types";
-import { store, useStore } from "../store";
+import { store, useStoreSelector } from "../store";
 import { luckyWorktreeBranchName } from "../luckyName";
 import { ConfirmDialog, TextInputDialog } from "./ModalDialogs";
 import { WorktreeHooksDialog } from "./WorktreeHooksDialog";
@@ -60,7 +60,7 @@ export function ContextMenu({
   onReviewChanges?: (workspace: Workspace) => void;
   onClose: () => void;
 }) {
-  const workspaces = useStore().workspaces;
+  const workspaces = useStoreSelector((state) => state.workspaces);
   const ref = useRef<HTMLDivElement>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [openWorktreeWorkspaceId, setOpenWorktreeWorkspaceId] = useState<

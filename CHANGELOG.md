@@ -2,6 +2,29 @@
 
 ## Unreleased
 
+### Performance
+
+- Stop the idle-state render churn that made the UI hitch every second:
+  removed a leftover background poll that read 200 lines of scrollback per
+  visible pane every 1.5s without any consumer, skip broadcasting store
+  updates when a refresh returns unchanged data, slow the metadata fallback
+  poll to 5s and suspend it while the page is hidden.
+- Subscribe components to just the state slices they read via a new
+  `useStoreSelector` hook, so a store update no longer re-renders the whole
+  app.
+
+### Fixed
+
+- Re-attach the terminal when Herdr closes its stream after another herdr-gui
+  client takes the terminal over (e.g. a second GUI instance viewing the same
+  pane): the bridge now tells viewers when the stream closes and the frontend
+  re-attaches with a bounded retry instead of leaving a blank terminal until
+  the page was refreshed; sustained takeover wars surface an explicit error.
+- Re-arm the metadata and update polls when the connection settles: they were
+  stopped by the initial switch from the legacy placeholder connection and
+  never restarted, leaving status updates and update checks without their
+  fallback poll until the next manual action.
+
 ## 0.4.4 - 2026-08-22
 
 ### Added

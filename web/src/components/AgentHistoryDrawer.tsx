@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Bot, Copy, Download, Eye, RefreshCw, X } from "lucide-react";
-import { useStore } from "../store";
+import { useStoreSelector } from "../store";
 import { useConnectionClient } from "../useConnectionClient";
 import type { Pane } from "../types";
 import { formatUiRelativeTime, UI_LOCALE } from "../uiLocale";
@@ -163,12 +163,11 @@ export function AgentHistoryDrawer({
   embedded?: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
-  const appState = useStore();
+  const workspaces = useStoreSelector((state) => state.workspaces);
   const connectionClient = useConnectionClient();
   const workspaceLabel =
-    appState.workspaces.find(
-      (workspace) => workspace.workspace_id === pane.workspace_id,
-    )?.label ?? pane.workspace_id;
+    workspaces.find((workspace) => workspace.workspace_id === pane.workspace_id)
+      ?.label ?? pane.workspace_id;
   const [history, setHistory] = useState<AgentHistory | null>(null);
   const [session, setSession] = useState<AgentSessionSummary | null>(null);
   const [drawerTab, setDrawerTab] = useState<"messages" | "details">(

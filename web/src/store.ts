@@ -1,4 +1,4 @@
-import { useSyncExternalStore } from "react";
+import { useRef, useSyncExternalStore } from "react";
 import {
   bridge,
   type ConnectionClient,
@@ -26,8 +26,6 @@ export interface ServerSessionState {
   tabs: Tab[];
   panes: Pane[];
   layout: PaneLayout | null;
-  /** Latest visible text of each pane currently shown in the layout. */
-  paneContents: Record<string, string>;
   selectedPaneId: string | null;
   recentPaneIds: string[];
   error: string | null;
@@ -135,7 +133,6 @@ export function emptyServerSessionState(
     tabs: [],
     panes: [],
     layout: null,
-    paneContents: {},
     selectedPaneId: null,
     recentPaneIds: [],
     error: null,
@@ -296,7 +293,6 @@ const SERVER_SESSION_KEYS: Array<keyof ServerSessionState> = [
   "tabs",
   "panes",
   "layout",
-  "paneContents",
   "selectedPaneId",
   "recentPaneIds",
   "error",
@@ -312,7 +308,6 @@ function serverSessionFromState(snapshot: State): ServerSessionState {
     tabs: snapshot.tabs,
     panes: snapshot.panes,
     layout: snapshot.layout,
-    paneContents: snapshot.paneContents,
     selectedPaneId: snapshot.selectedPaneId,
     recentPaneIds: snapshot.recentPaneIds,
     error: snapshot.error,
@@ -897,6 +892,77 @@ function enqueueFocusAction<T>(fn: () => Promise<T>): Promise<T> {
   return task;
 }
 
+/**
+ * Structural equality for JSON-shaped values. Fails open (reports unequal)
+ * when a value cannot be serialized, so callers fall back to publishing.
+ */
+function jsonDeepEqual(a: unknown, b: unknown): boolean {
+  if (a === b) return true;
+  try {
+    return JSON.stringify(a) === JSON.stringify(b);
+  } catch {
+    return false;
+  }
+}
+
+function serverSessionEqual(
+  a: ServerSessionState,
+  b: ServerSessionState,
+): boolean {
+  for (const key of SERVER_SESSION_KEYS) {
+    if (a[key] === b[key]) continue;
+    if (!jsonDeepEqual(a[key], b[key])) return false;
+  }
+  return true;
+}
+
+const REFRESH_SLICE_KEYS = ["workspaces", "tabs", "panes", "layout"] as const;
+const REFRESH_SCALAR_KEYS = [
+  "error",
+  "pendingFocusWorkspaceId",
+  "selectedPaneId",
+] as const;
+
+/**
+ * Reuse the previous reference for every refresh slice whose content is
+ * unchanged so memoized consumers stay valid, and return null when nothing
+ * changed at all so the caller can skip broadcasting a no-op state. Scalars
+ * are only adopted when their value actually moved.
+ */
+export function stabilizeRefreshPatch(
+  snapshot: State,
+  next: Partial<State>,
+): Partial<State> | null {
+  const patch: Partial<State> = {};
+  let changed = false;
+  const adoptSlice = <K extends (typeof REFRESH_SLICE_KEYS)[number]>(
+    key: K,
+  ) => {
+    if (!(key in next)) return;
+    const incoming = next[key] as State[K];
+    const current = snapshot[key];
+    if (incoming === current || jsonDeepEqual(incoming, current)) {
+      patch[key] = current;
+    } else {
+      patch[key] = incoming;
+      changed = true;
+    }
+  };
+  for (const key of REFRESH_SLICE_KEYS) adoptSlice(key);
+  const adoptScalar = <K extends (typeof REFRESH_SCALAR_KEYS)[number]>(
+    key: K,
+  ) => {
+    if (!(key in next)) return;
+    if (next[key] === snapshot[key]) return;
+    patch[key] = next[key] as State[K];
+    changed = true;
+  };
+  for (const key of REFRESH_SCALAR_KEYS) adoptScalar(key);
+  if (!changed) return null;
+  patch.lastRefresh = next.lastRefresh ?? Date.now();
+  return patch;
+}
+
 async function refreshNow(lease = captureConnectionLease()) {
   if (
     state.connectionPaused ||
@@ -982,10 +1048,13 @@ async function refreshNow(lease = captureConnectionLease()) {
       next.layout = null;
     }
 
-    if (!setForConnection(lease, next)) return;
+    const patch = stabilizeRefreshPatch(state, next);
+    if (patch) {
+      if (!setForConnection(lease, patch)) return;
+    } else if (!leaseIsCurrent(lease)) {
+      return;
+    }
     notifyCompletedTasks(lease, completedPanes, workspaces, tabs);
-    // Fetch the visible text for every pane in the layout right away.
-    void refreshContents(lease);
   } catch (error) {
     setForConnection(lease, { error: (error as Error).message });
   } finally {
@@ -1012,72 +1081,39 @@ async function refreshBridgeStatus() {
     const r = await bridge.call("bridge.status");
     if (state.connectionPaused || state.status !== "connected") return;
     applyConnectionCatalog(r, requestSeq);
-    set({
-      bridgeStatus: {
-        clients: Number(r?.clients ?? 0),
-        terminals: Array.isArray(r?.terminals) ? r.terminals : [],
-      },
-    });
+    const nextBridgeStatus: BridgeStatus = {
+      clients: Number(r?.clients ?? 0),
+      terminals: Array.isArray(r?.terminals) ? r.terminals : [],
+    };
+    if (!jsonDeepEqual(state.bridgeStatus, nextBridgeStatus)) {
+      set({ bridgeStatus: nextBridgeStatus });
+    }
   } catch {
     // Keep the last good count; status polling should never interrupt the UI.
   }
 }
 
-/** Read recent scrollback of every pane in the current layout. */
-async function refreshContents(lease = captureConnectionLease()) {
-  if (
-    state.connectionPaused ||
-    state.status !== "connected" ||
-    !leaseIsCurrent(lease)
-  ) {
-    return;
-  }
-  const layout = state.layout;
-  if (!layout || layout.panes.length === 0) return;
-  const next: Record<string, string> = { ...state.paneContents };
-  await Promise.all(
-    layout.panes.map(async (layoutPane) => {
-      try {
-        const result = await lease.client.call("pane.read", {
-          pane_id: layoutPane.pane_id,
-          source: "visible",
-          lines: 200,
-          format: "ansi",
-        });
-        next[layoutPane.pane_id] = (result?.read?.text ?? "") as string;
-      } catch {
-        // Keep the last good content for this pane.
-      }
-      return undefined;
-    }),
-  );
-  setForConnection(lease, { paneContents: next });
-}
-
-let contentTimer: ReturnType<typeof setInterval> | null = null;
 let metadataTimer: ReturnType<typeof setInterval> | null = null;
 let updateTimer: ReturnType<typeof setInterval> | null = null;
-function startContentPolling() {
-  if (contentTimer) return;
-  contentTimer = setInterval(() => {
-    if (
-      state.status === "connected" &&
-      catalogReadyForConnection &&
-      state.layout
-    ) {
-      refreshContents();
-    }
-  }, 1500);
-}
+
+// Push events and post-action refreshes carry live updates; the metadata poll
+// is only a backstop, so it can run slowly and skip ticks while hidden.
+const METADATA_POLL_MS = 5000;
 
 function startMetadataPolling() {
   if (metadataTimer) return;
   metadataTimer = setInterval(() => {
+    if (
+      typeof document !== "undefined" &&
+      document.visibilityState === "hidden"
+    ) {
+      return;
+    }
     if (state.status === "connected") {
       if (catalogReadyForConnection) scheduleRefresh();
       void refreshBridgeStatus();
     }
-  }, 1000);
+  }, METADATA_POLL_MS);
 }
 
 async function checkForUpdate(showErrors = false) {
@@ -1161,10 +1197,6 @@ function stopPolling() {
     clearTimeout(refreshTimer);
     refreshTimer = null;
   }
-  if (contentTimer) {
-    clearInterval(contentTimer);
-    contentTimer = null;
-  }
   if (metadataTimer) {
     clearInterval(metadataTimer);
     metadataTimer = null;
@@ -1177,7 +1209,6 @@ function stopPolling() {
 }
 
 function startPolling() {
-  startContentPolling();
   startMetadataPolling();
   startUpdatePolling();
 }
@@ -1351,12 +1382,42 @@ function applyConnectionCatalog(result: unknown, requestSeq: number) {
     return;
   }
 
+  // Steady-state catalog polls rebuild identical DTOs every tick. Publish
+  // only real changes so unchanged slices keep their references and idle
+  // polls do not re-render every subscriber.
+  const stableConnections = jsonDeepEqual(state.connections, connections)
+    ? state.connections
+    : connections;
+  const previousSessions = state.sessionsByConnectionId;
+  const nextSessions = reconciliation.sessionsByConnectionId;
+  let sessionsChanged =
+    reconciliation.invalidatedConnectionIds.length > 0 ||
+    Object.keys(nextSessions).length !== Object.keys(previousSessions).length;
+  const stableSessions: Record<string, ServerSessionState> = {};
+  for (const [id, session] of Object.entries(nextSessions)) {
+    const previous = previousSessions[id];
+    if (previous && serverSessionEqual(previous, session)) {
+      stableSessions[id] = previous;
+    } else {
+      stableSessions[id] = session;
+      sessionsChanged = true;
+    }
+  }
+  if (
+    stableConnections === state.connections &&
+    !sessionsChanged &&
+    defaultConnectionId === state.defaultConnectionId
+  ) {
+    if (!nextActive) selectConnectionNow(defaultConnectionId);
+    return;
+  }
+
   state = {
     ...state,
     ...(reconciliation.activeSession ?? {}),
-    connections,
+    connections: stableConnections,
     defaultConnectionId,
-    sessionsByConnectionId: reconciliation.sessionsByConnectionId,
+    sessionsByConnectionId: stableSessions,
   };
   emit();
   if (!nextActive) selectConnectionNow(defaultConnectionId);
@@ -1621,6 +1682,9 @@ export const store = {
             },
       );
       if (s === "connected" && !state.connectionPaused) {
+        // Polling may have been stopped by the hello-driven initial
+        // connection switch; every settled connection must re-arm it.
+        startPolling();
         void refreshConnectionCatalog().then((catalogReady) => {
           if (
             !catalogReady ||
@@ -1663,6 +1727,7 @@ export const store = {
     const refreshOnReturn = () => {
       if (state.connectionPaused || state.status !== "connected") return;
       void refreshNow();
+      void refreshBridgeStatus();
     };
     if (typeof document !== "undefined") {
       document.addEventListener("visibilitychange", () => {
@@ -2557,4 +2622,66 @@ export const __storeTesting = {
 
 export function useStore(): State {
   return useSyncExternalStore(store.subscribe, store.get);
+}
+
+/** Shallowly compares own enumerable values; pair with useStoreSelector. */
+export function shallowEqual<T>(a: T, b: T): boolean {
+  if (Object.is(a, b)) return true;
+  if (
+    typeof a !== "object" ||
+    a === null ||
+    typeof b !== "object" ||
+    b === null
+  ) {
+    return false;
+  }
+  const aKeys = Object.keys(a);
+  const bKeys = Object.keys(b);
+  if (aKeys.length !== bKeys.length) return false;
+  for (const key of aKeys) {
+    if (!Object.prototype.hasOwnProperty.call(b, key)) return false;
+    if (
+      !Object.is(
+        (a as Record<string, unknown>)[key],
+        (b as Record<string, unknown>)[key],
+      )
+    ) {
+      return false;
+    }
+  }
+  return true;
+}
+
+/**
+ * Subscribe to a derived slice of the store. The selector result is cached
+ * and reused while `isEqual` reports equality, so inline selectors are safe
+ * as long as they keep stable semantics; object-returning selectors should
+ * pass a shallow equality to avoid re-rendering on every emit.
+ */
+export function useStoreSelector<T>(
+  selector: (state: State) => T,
+  isEqual: (a: T, b: T) => boolean = Object.is,
+): T {
+  const cacheRef = useRef<{
+    state: State;
+    selector: (state: State) => T;
+    value: T;
+  } | null>(null);
+
+  const getSnapshot = () => {
+    const snapshot = store.get();
+    const cache = cacheRef.current;
+    if (cache && cache.state === snapshot && cache.selector === selector) {
+      return cache.value;
+    }
+    const value = selector(snapshot);
+    if (cache && isEqual(cache.value, value)) {
+      cacheRef.current = { state: snapshot, selector, value: cache.value };
+      return cache.value;
+    }
+    cacheRef.current = { state: snapshot, selector, value };
+    return value;
+  };
+
+  return useSyncExternalStore(store.subscribe, getSnapshot);
 }

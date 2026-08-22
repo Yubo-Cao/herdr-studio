@@ -18,7 +18,7 @@ import {
   SplitSquareVertical,
   X,
 } from "lucide-react";
-import { useStore, store } from "../store";
+import { shallowEqual, store, useStoreSelector } from "../store";
 import type { FileExplorerEntry, Pane, Tab, Workspace } from "../types";
 import { basename, shortId } from "../utils";
 import { luckyWorktreeBranchName } from "../luckyName";
@@ -234,7 +234,16 @@ export function CommandCombobox({
   onOpenFile?: (workspaceId: string, entry: FileExplorerEntry) => void;
   onOpenDiffViewer?: (workspaceId?: string) => void;
 }) {
-  const s = useStore();
+  const s = useStoreSelector(
+    (state) => ({
+      layout: state.layout,
+      panes: state.panes,
+      selectedPaneId: state.selectedPaneId,
+      tabs: state.tabs,
+      workspaces: state.workspaces,
+    }),
+    shallowEqual,
+  );
   const [open, setOpen] = useState(false);
   const [search, setSearch] = useState("");
   const [selectedActionValue, setSelectedActionValue] = useState("");
