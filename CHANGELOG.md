@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+### Added
+
+- Allow resizing the Files/Changes navigation list in docked Inspectors too.
+
 ### Fixed
 
 - Retry workspace, agent, and tab switches once the bridge connection is back
@@ -11,9 +15,11 @@
   terminals that stayed blank after switching between desktop and mobile
   layouts or resuming the mobile app from the lock screen until the app was
   refreshed.
+- Keep file and session downloads inside the app on iOS/PWA instead of
+  navigating into the system document handler with no way back.
+- Stop terminal selections from growing on mouse moves after a lost mouseup.
 - Fix terminal attach against Herdr 0.8.2 (protocol 20), which renumbered the
-  `TerminalAttach` launch-mode wire value and rejected direct attaches with
-  "connection is not pending terminal attach".
+  `TerminalAttach` launch-mode wire value.
 
 ## 0.4.3 - 2026-08-22
 
