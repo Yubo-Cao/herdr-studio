@@ -22,7 +22,7 @@ import type { ConnectionClient } from "../api";
 import { connectionHttpPath } from "../connectionHttp";
 import { connectionStorageKey } from "../connectionStorage";
 import { downloadFileFromUrl } from "../downloadFile";
-import { store, useStore } from "../store";
+import { store, useStoreSelector } from "../store";
 import {
   connectionClientScopeKey,
   useConnectionClient,
@@ -775,11 +775,11 @@ function FileExplorerContent({
     meta?: FilePreviewSelectionMeta,
   ) => void;
 }) {
-  const s = useStore();
+  const workspaces = useStoreSelector((state) => state.workspaces);
   const connectionClient = useConnectionClient();
-  const focusedWorkspace = s.workspaces.find((w) => w.focused);
+  const focusedWorkspace = workspaces.find((w) => w.focused);
   const workspace = workspaceId
-    ? s.workspaces.find((w) => w.workspace_id === workspaceId)
+    ? workspaces.find((w) => w.workspace_id === workspaceId)
     : focusedWorkspace;
   const cacheWorkspaceId = workspace?.workspace_id;
   const cacheResourceKey = resourceKey ?? cacheWorkspaceId;

@@ -14,6 +14,7 @@ import {
   noticeAutoDismissDelay,
   numberedCreatedTabRename,
   reconcileConnectionCatalogSessions,
+  stabilizeRefreshPatch,
   type ServerSessionState,
   type State,
   store,
@@ -156,7 +157,6 @@ function session(
       },
     ],
     panes: [pane(label, "idle")],
-    paneContents: { "same-pane": `${label} contents` },
     selectedPaneId: "same-pane",
     recentPaneIds: [`${label}-recent`, "same-pane"],
     pendingFocusWorkspaceId: `${label}-pending`,
@@ -333,13 +333,11 @@ describe("connection-partitioned store state", () => {
 
     expect(beta.activeConnectionId).toBe("beta");
     expect(beta.workspaces[0]?.label).toBe("beta");
-    expect(beta.paneContents["same-pane"]).toBe("beta contents");
     expect(beta.pendingFocusWorkspaceId).toBe("beta-pending");
     expect(beta.recentPaneIds).toEqual(["beta-recent", "same-pane"]);
 
     const restoredAlpha = activateConnectionState(beta, "alpha", 12);
     expect(restoredAlpha.workspaces[0]?.label).toBe("alpha");
-    expect(restoredAlpha.paneContents["same-pane"]).toBe("alpha contents");
     expect(restoredAlpha.pendingFocusWorkspaceId).toBe("alpha-pending");
     expect(restoredAlpha.recentPaneIds).toEqual(["alpha-recent", "same-pane"]);
   });
@@ -361,7 +359,6 @@ describe("connection-partitioned store state", () => {
       tabs: [],
       panes: [],
       layout: null,
-      paneContents: {},
       selectedPaneId: null,
       pendingFocusWorkspaceId: null,
     });
@@ -413,7 +410,6 @@ describe("connection-partitioned store state", () => {
         tabs: [],
         panes: [],
         layout: null,
-        paneContents: {},
         selectedPaneId: null,
       });
     } finally {
@@ -680,6 +676,111 @@ describe("connection-partitioned store state", () => {
     } finally {
       bridge.connection = originalConnection;
       bridge.setActiveConnection = originalSetActiveConnection;
+      __storeTesting.replaceState(partitionState());
+    }
+  });
+});
+
+describe("stabilizeRefreshPatch", () => {
+  test("returns null when a refresh reproduces the current state", () => {
+    const snapshot = partitionState();
+    expect(
+      stabilizeRefreshPatch(snapshot, {
+        workspaces: structuredClone(snapshot.workspaces),
+        tabs: structuredClone(snapshot.tabs),
+        panes: structuredClone(snapshot.panes),
+        layout: structuredClone(snapshot.layout),
+        error: null,
+        lastRefresh: Date.now(),
+      }),
+    ).toBeNull();
+  });
+
+  test("keeps unchanged slice references and adopts changed ones", () => {
+    const snapshot = partitionState();
+    const panes = [pane("alpha", "working")];
+    const patch = stabilizeRefreshPatch(snapshot, {
+      workspaces: structuredClone(snapshot.workspaces),
+      tabs: structuredClone(snapshot.tabs),
+      panes,
+      layout: null,
+      error: null,
+      lastRefresh: 123,
+    });
+
+    expect(patch?.workspaces).toBe(snapshot.workspaces);
+    expect(patch?.tabs).toBe(snapshot.tabs);
+    expect(patch?.layout).toBe(snapshot.layout);
+    expect(patch?.panes).toBe(panes);
+    expect(patch?.lastRefresh).toBe(123);
+    expect(patch).not.toHaveProperty("error");
+  });
+
+  test("publishes scalar-only transitions like selection or error moves", () => {
+    const snapshot = partitionState();
+    const cleared = stabilizeRefreshPatch(snapshot, {
+      selectedPaneId: null,
+      error: null,
+      lastRefresh: 5,
+    });
+    expect(cleared).toMatchObject({ selectedPaneId: null, lastRefresh: 5 });
+
+    const failed = stabilizeRefreshPatch(snapshot, {
+      error: "boom",
+      lastRefresh: 6,
+    });
+    expect(failed).toMatchObject({ error: "boom", lastRefresh: 6 });
+    expect(failed).not.toHaveProperty("selectedPaneId");
+  });
+
+  test("returns null when scalar values already match", () => {
+    const snapshot = partitionState();
+    expect(
+      stabilizeRefreshPatch(snapshot, {
+        selectedPaneId: snapshot.selectedPaneId,
+        error: snapshot.error,
+        lastRefresh: Date.now(),
+      }),
+    ).toBeNull();
+  });
+
+  test("keeps the store silent when an idle refresh changes nothing", async () => {
+    const originalConnection = bridge.connection;
+    const snapshot = partitionState();
+    bridge.connection = (() => ({
+      connectionId: "alpha",
+      generation: 10,
+      isCurrent: () => true,
+      call: (async (method: string) => {
+        if (method === "workspace.list") {
+          return { workspaces: structuredClone(snapshot.workspaces) };
+        }
+        if (method === "tab.list") {
+          return { tabs: structuredClone(snapshot.tabs) };
+        }
+        if (method === "pane.list") {
+          return { panes: structuredClone(snapshot.panes) };
+        }
+        if (method === "pane.layout") return { layout: null };
+        return {};
+      }) as ConnectionClient["call"],
+    })) as typeof bridge.connection;
+    try {
+      __storeTesting.replaceState(snapshot);
+      let emissions = 0;
+      const unsubscribe = store.subscribe(() => {
+        emissions += 1;
+      });
+      try {
+        const before = store.get();
+        await store.refresh();
+        expect(store.get()).toBe(before);
+        expect(emissions).toBe(0);
+      } finally {
+        unsubscribe();
+      }
+    } finally {
+      bridge.connection = originalConnection;
       __storeTesting.replaceState(partitionState());
     }
   });

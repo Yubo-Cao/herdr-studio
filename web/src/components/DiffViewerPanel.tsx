@@ -22,7 +22,7 @@ import type {
   GitDiffKind,
   GitDiffSummary,
 } from "../types";
-import { useStore } from "../store";
+import { useStoreSelector } from "../store";
 import {
   connectionClientScopeKey,
   useConnectionClient,
@@ -610,11 +610,11 @@ export function DiffViewerPanel({
     meta?: DiffSelectionMeta,
   ) => void;
 }) {
-  const s = useStore();
+  const workspaces = useStoreSelector((state) => state.workspaces);
   const connectionClient = useConnectionClient();
-  const focusedWorkspace = s.workspaces.find((w) => w.focused);
+  const focusedWorkspace = workspaces.find((w) => w.focused);
   const workspace = workspaceId
-    ? s.workspaces.find((w) => w.workspace_id === workspaceId)
+    ? workspaces.find((w) => w.workspace_id === workspaceId)
     : focusedWorkspace;
   const cacheWorkspaceId = workspace?.workspace_id;
   const cacheResourceKey = resourceKey ?? cacheWorkspaceId;

@@ -8,7 +8,7 @@ import {
   Info,
   Wrench,
 } from "lucide-react";
-import { useStore } from "../store";
+import { useStoreSelector } from "../store";
 import type { Pane } from "../types";
 import { UI_LOCALE } from "../uiLocale";
 import { useConnectionClient } from "../useConnectionClient";
@@ -100,7 +100,7 @@ export function AgentSessionPreviewDialog({
   error: string;
   onClose: () => void;
 }) {
-  const appState = useStore();
+  const workspaces = useStoreSelector((state) => state.workspaces);
   const connectionClient = useConnectionClient();
   const dialogRef = useRef<HTMLDivElement>(null);
   const [mode, setMode] = useState<"timeline" | "atif" | "raw">("timeline");
@@ -130,9 +130,8 @@ export function AgentSessionPreviewDialog({
   if (!pane) return null;
 
   const workspaceLabel =
-    appState.workspaces.find(
-      (workspace) => workspace.workspace_id === pane.workspace_id,
-    )?.label ?? pane.workspace_id;
+    workspaces.find((workspace) => workspace.workspace_id === pane.workspace_id)
+      ?.label ?? pane.workspace_id;
   const usage = summary?.stats.token_usage;
   const text = summary?.text ?? "";
   const atifText = summary?.trajectory

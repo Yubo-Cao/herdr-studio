@@ -24,6 +24,8 @@ type SharedTerminalSession = {
   bytes: number;
   firstFrameLogged: boolean;
   lastFrameLogAt: number;
+  /** Last error Herdr reported on the stream, e.g. a takeover notice. */
+  lastError: string | null;
 };
 
 type ClipboardTarget = {
@@ -421,6 +423,7 @@ export function createTerminalBridge(args: {
       bytes: 0,
       firstFrameLogged: false,
       lastFrameLogAt: 0,
+      lastError: null,
     };
     sharedTerminals.set(terminalId, shared);
     console.log(
@@ -486,14 +489,15 @@ export function createTerminalBridge(args: {
       if (w.error) parts.push(`error=${formatError(w.error)}`);
       console.log(...parts);
     });
-    thin.on("error", (error) =>
+    thin.on("error", (error) => {
+      shared.lastError = formatError(error);
       console.error(
         "[thin]",
         connectionDetail,
         formatError(terminalId),
         formatError(error),
-      ),
-    );
+      );
+    });
     thin.on("close", () => {
       const resolve = shared.resolveFirstFrame;
       if (resolve) {
@@ -509,6 +513,27 @@ export function createTerminalBridge(args: {
       );
       if (sharedTerminals.get(terminalId)?.thin === thin) {
         sharedTerminals.delete(terminalId);
+      }
+      // Herdr closes a direct attach whose terminal another client takes
+      // over, and the stream can also die with the server. Viewers only see
+      // silence otherwise, so tell them to re-attach instead of leaving a
+      // blank terminal behind.
+      if (isCurrent(creationRevision) && shared.viewers.size > 0) {
+        console.log(
+          "[bridge] terminal stream closed with live viewers",
+          connectionDetail,
+          `terminal=${terminalId}`,
+          `viewers=${shared.viewers.size}`,
+        );
+        const closedPayload = serialize({
+          terminal_closed: {
+            terminal_id: terminalId,
+            reason: shared.lastError ?? "stream_closed",
+          },
+        });
+        for (const viewer of Array.from(shared.viewers)) {
+          args.safeSend(viewer, closedPayload, "terminal-closed");
+        }
       }
     });
     const terminalReady = thin

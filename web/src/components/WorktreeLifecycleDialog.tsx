@@ -3,7 +3,7 @@ import { createPortal } from "react-dom";
 import { FolderOpen, GitBranch, RefreshCw, Settings } from "lucide-react";
 import { luckyWorktreeBranchName } from "../luckyName";
 import { useConnectionClient } from "../useConnectionClient";
-import { store, useStore } from "../store";
+import { store, useStoreSelector } from "../store";
 import type { Workspace, WorktreeList } from "../types";
 import { resolveWorktreeOpenSource, worktreeCreationSource } from "../worktree";
 import {
@@ -86,13 +86,13 @@ export function WorktreeLifecycleDialog({
   workspaceId?: string | null;
   onClose: () => void;
 }) {
-  const s = useStore();
+  const workspaces = useStoreSelector((state) => state.workspaces);
   const connectionClient = useConnectionClient();
-  const selectedWorkspace = s.workspaces.find(
+  const selectedWorkspace = workspaces.find(
     (workspace) => workspace.workspace_id === workspaceId,
   );
   const actionSourceWorkspace = selectedWorkspace
-    ? worktreeCreationSource(s.workspaces, selectedWorkspace)
+    ? worktreeCreationSource(workspaces, selectedWorkspace)
     : undefined;
   // Listing and repository settings accept linked workspaces. Creating or
   // opening a worktree does not, so keep those two contexts independent.
@@ -259,8 +259,8 @@ export function WorktreeLifecycleDialog({
   }, [hooksOpen, newWorktreeOpen, onClose, open, openWorktreeOpen, removeRow]);
 
   const rows = useMemo(
-    () => (list ? buildWorktreeLifecycleRows(list, s.workspaces) : []),
-    [list, s.workspaces],
+    () => (list ? buildWorktreeLifecycleRows(list, workspaces) : []),
+    [list, workspaces],
   );
   const configuredHooks = hooks?.hooks
     ? Object.values(hooks.hooks).filter(Boolean).length

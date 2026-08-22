@@ -189,6 +189,13 @@ export interface TerminalClipboardPush {
   data: string;
 }
 
+export interface TerminalClosedPush {
+  connection_id: string;
+  connection_generation?: number;
+  terminal_id: string;
+  reason?: string;
+}
+
 export interface BridgeControlMsg {
   type: "pause_connection";
   reason?: string;
@@ -307,6 +314,9 @@ export class Bridge {
   private terminalHandlers = new Set<(t: TerminalPush) => void>();
   private terminalClipboardHandlers = new Set<
     (clipboard: TerminalClipboardPush) => void
+  >();
+  private terminalClosedHandlers = new Set<
+    (closed: TerminalClosedPush) => void
   >();
   private statusHandlers = new Set<(s: ConnectionStatus) => void>();
   private controlHandlers = new Set<(c: BridgeControlMsg) => void>();
@@ -606,6 +616,7 @@ export class Bridge {
     const hasEvent = owns("event");
     const hasTerminal = owns("terminal");
     const hasClipboard = owns("terminal_clipboard");
+    const hasTerminalClosed = owns("terminal_closed");
     const hasControl = owns("control");
     const kindCount = [
       hasHello,
@@ -613,6 +624,7 @@ export class Bridge {
       hasEvent,
       hasTerminal,
       hasClipboard,
+      hasTerminalClosed,
       hasControl,
     ].filter(Boolean).length;
     if (kindCount !== 1) return;
@@ -768,6 +780,31 @@ export class Bridge {
       );
       if (clipboard) {
         this.terminalClipboardHandlers.forEach((handler) => handler(clipboard));
+      }
+      return;
+    }
+
+    if (hasTerminalClosed) {
+      if (
+        !msg.terminal_closed ||
+        typeof msg.terminal_closed !== "object" ||
+        typeof msg.terminal_closed.terminal_id !== "string" ||
+        msg.terminal_closed.terminal_id.length === 0 ||
+        !this.pushGenerationMatches(
+          msg.connection_id,
+          msg.connection_generation,
+        )
+      ) {
+        return;
+      }
+      const closed = scopedPayload(
+        msg.connection_id,
+        msg.connection_generation,
+        msg.terminal_closed,
+        this._hello?.capabilities?.connection_runtime_generation === true,
+      );
+      if (closed) {
+        this.terminalClosedHandlers.forEach((handler) => handler(closed));
       }
       return;
     }
@@ -930,6 +967,11 @@ export class Bridge {
   ): () => void {
     this.terminalClipboardHandlers.add(cb);
     return () => this.terminalClipboardHandlers.delete(cb);
+  }
+
+  onTerminalClosed(cb: (closed: TerminalClosedPush) => void): () => void {
+    this.terminalClosedHandlers.add(cb);
+    return () => this.terminalClosedHandlers.delete(cb);
   }
 
   onStatus(cb: (status: ConnectionStatus) => void): () => void {

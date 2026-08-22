@@ -78,11 +78,12 @@ import {
   isTaskNotificationTarget,
   type Notice,
   noticeAutoDismissDelay,
+  shallowEqual,
   store,
   TASK_NOTIFICATION_ACTIVATE_EVENT,
   type TaskNotificationTarget,
   taskNotificationTargetFromNotice,
-  useStore,
+  useStoreSelector,
   WORKTREE_REMOVED_EVENT,
   type WorktreeRemovedTarget,
 } from "./store";
@@ -608,7 +609,16 @@ function TerminalPaneLayout({
   onAgentHistoryOpenChange: (open: boolean) => void;
   onOpenWorkspaceFile: (request: TerminalWorkspaceFileRequest) => void;
 }) {
-  const s = useStore();
+  const s = useStoreSelector(
+    (state) => ({
+      activeConnectionId: state.activeConnectionId,
+      connectionGeneration: state.connectionGeneration,
+      layout: state.layout,
+      panes: state.panes,
+      selectedPaneId: state.selectedPaneId,
+    }),
+    shallowEqual,
+  );
   const mobile = useMobileLayout();
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const layout = s.layout;
@@ -839,7 +849,24 @@ function TerminalPaneLayout({
 }
 
 export default function App() {
-  const s = useStore();
+  const s = useStoreSelector(
+    (state) => ({
+      connectionPaused: state.connectionPaused,
+      lastRefresh: state.lastRefresh,
+      layout: state.layout,
+      notice: state.notice,
+      panes: state.panes,
+      pendingFocusWorkspaceId: state.pendingFocusWorkspaceId,
+      recentPaneIds: state.recentPaneIds,
+      selectedPaneId: state.selectedPaneId,
+      status: state.status,
+      tabs: state.tabs,
+      updateInfo: state.updateInfo,
+      updateInstalling: state.updateInstalling,
+      workspaces: state.workspaces,
+    }),
+    shallowEqual,
+  );
   const connectionClient = useConnectionClient();
   useVisualViewportCssVars();
   const mobile = useMobileLayout();

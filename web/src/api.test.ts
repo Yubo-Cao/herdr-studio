@@ -341,6 +341,46 @@ describe("bridge connection lifecycle", () => {
     ]);
   });
 
+  test("routes terminal_closed pushes to closed listeners", async () => {
+    class ManualWebSocket extends HangingWebSocket {
+      static instance: ManualWebSocket;
+
+      constructor() {
+        super();
+        ManualWebSocket.instance = this;
+        queueMicrotask(() => {
+          this.readyState = ManualWebSocket.OPEN;
+          this.onopen?.();
+        });
+      }
+    }
+    installBrowserGlobals(ManualWebSocket as unknown as typeof WebSocket);
+    const bridge = createTestBridge();
+    const closed: unknown[] = [];
+    const terminals: unknown[] = [];
+    bridge.onTerminalClosed((push) => closed.push(push));
+    bridge.onTerminal((terminal) => terminals.push(terminal));
+    bridge.connect();
+    await Bun.sleep(1);
+    sendHello(ManualWebSocket.instance);
+
+    ManualWebSocket.instance.onmessage?.({
+      data: JSON.stringify({
+        connection_id: "legacy-default",
+        terminal_closed: { terminal_id: "term_1", reason: "stream_closed" },
+      }),
+    } as MessageEvent);
+
+    expect(closed).toEqual([
+      {
+        connection_id: "legacy-default",
+        terminal_id: "term_1",
+        reason: "stream_closed",
+      },
+    ]);
+    expect(terminals).toEqual([]);
+  });
+
   test("keeps event and terminal listeners compatible with scoped pushes", async () => {
     class ManualWebSocket extends HangingWebSocket {
       static instance: ManualWebSocket;

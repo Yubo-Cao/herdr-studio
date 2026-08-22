@@ -28,7 +28,7 @@ import {
   sshConnectionProfilePayload,
   suggestConnectionId,
 } from "../connectionProfiles";
-import { store, useStore } from "../store";
+import { shallowEqual, store, useStoreSelector } from "../store";
 import { CloseButton } from "./CloseButton";
 import { focusDialogElement } from "./dialogFocus";
 import { ConfirmDialog } from "./ModalDialogs";
@@ -150,7 +150,13 @@ function trapDialogTab(event: KeyboardEvent, dialog: HTMLElement | null) {
 }
 
 function BrowserTransportStatus() {
-  const state = useStore();
+  const state = useStoreSelector(
+    (snapshot) => ({
+      connectionPaused: snapshot.connectionPaused,
+      status: snapshot.status,
+    }),
+    shallowEqual,
+  );
   const label = state.connectionPaused
     ? "Browser sync paused"
     : state.status === "connected"
@@ -490,7 +496,7 @@ function SshProfileForm({
 }
 
 function ConnectionManagerDialog({ onClose }: { onClose: () => void }) {
-  const state = useStore();
+  const connections = useStoreSelector((snapshot) => snapshot.connections);
   const [editing, setEditing] = useState<
     ConnectionSummary | "new-local" | "new-ssh" | null
   >(null);
@@ -744,7 +750,7 @@ function ConnectionManagerDialog({ onClose }: { onClose: () => void }) {
           </div>
         ) : null}
         <div className="connection-manager-list">
-          {state.connections.map((connection) => {
+          {connections.map((connection) => {
             const capabilities = connectionProfileCapabilities(connection);
             const status = connectionLifecycleLabel(connection.state);
             return (
@@ -966,7 +972,14 @@ function ConnectionManagerDialog({ onClose }: { onClose: () => void }) {
 }
 
 export function ConnectionSwitcher() {
-  const state = useStore();
+  const state = useStoreSelector(
+    (snapshot) => ({
+      activeConnectionId: snapshot.activeConnectionId,
+      connections: snapshot.connections,
+      defaultConnectionId: snapshot.defaultConnectionId,
+    }),
+    shallowEqual,
+  );
   const [open, setOpen] = useState(false);
   const [manageOpen, setManageOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);

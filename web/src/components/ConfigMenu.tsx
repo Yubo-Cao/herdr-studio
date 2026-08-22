@@ -23,7 +23,7 @@ import packageJson from "../../package.json";
 import type { Theme } from "../App";
 import { ACCENT_OPTIONS, type AccentColor } from "../appearance";
 import { connectionHttpPath } from "../connectionHttp";
-import { store, useStore } from "../store";
+import { shallowEqual, store, useStoreSelector } from "../store";
 import { useConnectionClient } from "../useConnectionClient";
 import {
   mobileTerminalShortcutCount,
@@ -76,7 +76,18 @@ export function ConfigMenu({
   onMobileTerminalShortcutsChange,
   onMobileTerminalSideShortcutsChange,
 }: ConfigMenuProps) {
-  const s = useStore();
+  const s = useStoreSelector(
+    (state) => ({
+      bridgeStatus: state.bridgeStatus,
+      connectionPaused: state.connectionPaused,
+      status: state.status,
+      taskNotificationPermission: state.taskNotificationPermission,
+      taskNotificationsEnabled: state.taskNotificationsEnabled,
+      updateInfo: state.updateInfo,
+      updateInstalling: state.updateInstalling,
+    }),
+    shallowEqual,
+  );
   const connectionClient = useConnectionClient();
   const updateAvailable = !!s.updateInfo?.update_available;
   const canInstallUpdate = updateAvailable && s.updateInfo?.can_auto_update;
