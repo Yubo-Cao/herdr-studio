@@ -25,9 +25,9 @@ When reviewing pull requests, focus on:
 - React state management: prefer the existing store and bridge helpers in
   `web/src` over new abstractions; watch for missing effect cleanup and stale
   closures over socket state.
-- Security: the server binds locally and executes local processes; flag any
-  path traversal, unvalidated message payloads, or injection-prone command
-  construction.
+- Security: the server runs locally by default but can bind to a non-loopback
+  address; it also executes local processes. Flag any path traversal,
+  unvalidated message payloads, or injection-prone command construction.
 - Cross-platform behavior: releases target linux-x64, linux-arm64,
   darwin-x64, and darwin-arm64; avoid OS-specific assumptions in shared code.
 
