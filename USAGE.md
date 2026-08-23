@@ -6,7 +6,7 @@ herdr-gui 是 Herdr 的 Web 图形界面。它启动一个本地 bridge 服务�
 ## 前置条件
 
 - 已安装并启动 Herdr。
-- 本机默认 Herdr socket 存在于 `~/.config/herdr/herdr.sock`。
+- 本机默认 Herdr socket 位于 Unix 的 `~/.config/herdr/herdr.sock` 或 Windows 的 `%APPDATA%\herdr\herdr.sock`。
 - 如果使用源码开发，需要安装 Bun。
 - 如果使用 standalone binary，不需要在目标机器安装 Bun。
 
@@ -118,8 +118,9 @@ http://127.0.0.1:8787
 ./herdr-gui --host 0.0.0.0 --port 8781
 ```
 
-未设置密码时，herdr-gui 会把随机 token 保存在权限为 `0600` 的
-`~/.config/herdr-gui/auth-token`，并打印带 token 的内网访问地址，例如：
+未设置密码时，herdr-gui 会把随机 token 保存在 Unix 的
+`~/.config/herdr-gui/auth-token`（权限 `0600`）或 Windows 的
+`%APPDATA%\herdr-gui\auth-token`，并打印带 token 的内网访问地址，例如：
 
 ```text
 http://192.0.2.23:8781/?token=<token>
@@ -128,20 +129,22 @@ http://192.0.2.23:8781/?token=<token>
 在手机浏览器中打开即可自动登录。登录成功后地址栏中的 token 会立即被移除，
 后续使用 HttpOnly session cookie。也可以通过 `--password` 或
 `HERDR_GUI_PASSWORD` 设置固定密码，继续使用登录页面。需要轮换随机 token
-时，先停止服务，删除 `~/.config/herdr-gui/auth-token`，然后重新启动。
+时，先停止服务，删除上述平台对应的 `auth-token` 文件，然后重新启动。
 
 ## 多连接与远程 Herdr
 
 标题旁的连接选择器可以添加、测试、连接、断开、编辑和删除 Herdr server。
 Profile 由同一个 bridge 的所有已认证浏览器共享，但每个浏览器独立选择当前展示的
-连接。Local profile 只附着已经存在的 Unix socket，不会启动 Herdr。创建首个
+连接。Local profile 只附着已经存在的 Unix socket 或 Windows named pipe，不会启动 Herdr。创建首个
 profile 时，默认本地 server 会以可写的 `Local` profile 保留在列表中，而不是被
 移除。
 
 SSH profile 要求远端 Herdr server 已经运行，并填写 OpenSSH Host alias 或
 `user@host`。远端 control/render socket 路径可留空：herdr-gui 会在连接时通过
 SSH 解析远端 home 目录下的默认 socket（`~/.config/herdr/herdr.sock` 与
-`~/.config/herdr/herdr-client.sock`）。例如：
+`~/.config/herdr/herdr-client.sock`）。SSH profile 与 `--ssh-host` 当前要求
+herdr-gui 运行在 Linux 或 macOS；当前 stream-local transport 无法把远端 Unix
+socket 暴露为本地 Windows named pipe，因此 Windows 当前只支持本机 Herdr 连接。例如：
 
 ```text
 SSH destination: devbox
@@ -232,30 +235,32 @@ herdr-gui service uninstall
 | --- | --- |
 | `service install` | 创建或更新当前平台的用户服务定义，随后启动服务 |
 | `service install --force` | 强制替换不是由 herdr-gui 生成的同名服务定义 |
-| `service status` | 展示 systemd 或 launchd 返回的当前服务状态 |
+| `service status` | 展示 systemd、launchd 或 Task Scheduler 返回的当前服务状态 |
 | `service restart` | 重启进程；修改 `herdr-gui.env` 后使用此命令 |
-| `service reload` | 让服务管理器重新读取 unit/plist，然后重启进程 |
+| `service reload` | 让服务管理器重新读取平台定义，然后重启进程 |
 | `service uninstall` | 停止服务并删除服务定义，但保留环境配置和登录 token |
 
 `service install` 仅支持 standalone binary，不能从 `bun run` 的开发进程中
 安装。它会根据平台生成以下文件：
 
-| 用途 | Linux | macOS |
-| --- | --- | --- |
-| 服务定义 | `~/.config/systemd/user/herdr-gui.service` | `~/Library/LaunchAgents/dev.herdr.herdr-gui.plist` |
-| 环境配置 | `~/.config/herdr-gui/herdr-gui.env` | `~/.config/herdr-gui/herdr-gui.env` |
-| 登录 token | `~/.config/herdr-gui/auth-token` | `~/.config/herdr-gui/auth-token` |
+| 用途 | Linux | macOS | Windows |
+| --- | --- | --- | --- |
+| 服务定义 | `~/.config/systemd/user/herdr-gui.service` | `~/Library/LaunchAgents/dev.herdr.herdr-gui.plist` | `%APPDATA%\herdr-gui\herdr-gui-task.ps1` |
+| 环境配置 | `~/.config/herdr-gui/herdr-gui.env` | `~/.config/herdr-gui/herdr-gui.env` | `%APPDATA%\herdr-gui\herdr-gui.env` |
+| 登录 token | `~/.config/herdr-gui/auth-token` | `~/.config/herdr-gui/auth-token` | `%APPDATA%\herdr-gui\auth-token` |
 
-Linux 自动使用 systemd user service，macOS 自动使用 launchd LaunchAgent。
+Linux 自动使用 systemd user service，macOS 自动使用 launchd LaunchAgent，
+Windows 自动注册当前用户的 Task Scheduler 登录任务。Windows 任务以普通权限运行、
+登录时启动，并由 Task Scheduler 在异常退出后重试。
 `install` 会默认监听 `0.0.0.0:8787`，创建持久化随机 token，打印带
-`?token=...` 的 localhost 和内网访问地址，然后启动服务。首次运行会创建权限为
-`0600` 的 `~/.config/herdr-gui/herdr-gui.env`；token 单独保存在权限同样为
-`0600` 的 `~/.config/herdr-gui/auth-token`。重新安装和卸载均保留环境文件。
-修改配置后运行 `herdr-gui service restart`。命令不会覆盖非 herdr-gui 生成的
-service 定义，确实需要替换时使用
-`herdr-gui service install --force`。
-修改 systemd unit 或 launchd plist 后运行 `herdr-gui service reload`，该命令
-会让服务管理器重新读取 definition 并重启进程。
+`?token=...` 的 localhost 和内网访问地址，然后启动服务。Unix 上首次创建的配置
+和 token 权限为 `0600`；Windows 使用当前用户的 `%APPDATA%`。重新安装和卸载均
+保留环境文件。修改配置后运行 `herdr-gui service restart`。命令不会覆盖非
+herdr-gui 生成的 service 定义，确实需要替换时使用
+`herdr-gui service install --force`。修改平台定义后运行
+`herdr-gui service reload`，该命令会重新读取 definition 并重启进程。Windows
+首次运行如出现防火墙提示，只建议允许 Private networks；仅本机使用可先把
+`HOST` 改为 `127.0.0.1`。
 
 仓库中的 [`deploy/systemd/herdr-gui.service`](deploy/systemd/herdr-gui.service)
 是一个 systemd user service 示例。它使用 `Restart=always` 管理进程。herdr-gui

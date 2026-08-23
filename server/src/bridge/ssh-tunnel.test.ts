@@ -1,8 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+  assertSshTunnelPlatformSupported,
   classifySshTunnelFailure,
-  createSshTunnelManager,
+  createSshTunnelManager as createPlatformSshTunnelManager,
   readBoundedStderr,
+  SshTunnelError,
 } from "./ssh-tunnel";
 
 function deferred<T>() {
@@ -21,6 +23,15 @@ async function waitUntil(predicate: () => boolean) {
   }
 }
 
+function createSshTunnelManager(
+  args: Parameters<typeof createPlatformSshTunnelManager>[0],
+) {
+  return createPlatformSshTunnelManager({
+    ...args,
+    dependencies: { ...args.dependencies, platform: "linux" },
+  });
+}
+
 function config() {
   return {
     socketPath: "/tmp/herdr-control.sock",
@@ -33,6 +44,24 @@ function config() {
 }
 
 describe("SSH tunnel readiness lifecycle", () => {
+  test("rejects Windows before constructing an invalid stream-local forward", () => {
+    let failure: unknown;
+    try {
+      assertSshTunnelPlatformSupported("win32");
+    } catch (error) {
+      failure = error;
+    }
+    expect(failure).toBeInstanceOf(SshTunnelError);
+    expect(failure).toMatchObject({
+      retryable: false,
+      kind: "unsupported",
+      message: expect.stringContaining(
+        "cannot create a local Windows named pipe",
+      ),
+    });
+    expect(() => assertSshTunnelPlatformSupported("linux")).not.toThrow();
+  });
+
   test("classifies permanent and transient OpenSSH failures without raw stderr", () => {
     expect(
       classifySshTunnelFailure(255, "Permission denied (publickey)."),

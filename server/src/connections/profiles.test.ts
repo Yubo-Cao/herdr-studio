@@ -33,13 +33,20 @@ afterEach(() => {
   }
 });
 
+function localSocketPath(id: string, client = false): string {
+  const name = `${id}${client ? "-client" : ""}.sock`;
+  return process.platform === "win32"
+    ? `\\\\.\\pipe\\herdr-gui-test-${name}`
+    : `/tmp/${name}`;
+}
+
 function local(id = "alpha") {
   return {
     id,
     label: id === "alpha" ? "Alpha" : "Beta",
     type: "local" as const,
-    control_socket_path: `/tmp/${id}.sock`,
-    client_socket_path: `/tmp/${id}-client.sock`,
+    control_socket_path: localSocketPath(id),
+    client_socket_path: localSocketPath(id, true),
     auto_connect: true,
   };
 }
@@ -67,6 +74,20 @@ function registry(): PersistedConnectionRegistry {
 describe("connection profile validation", () => {
   test("accepts the bounded versioned local schema", () => {
     expect(validateConnectionRegistry(registry())).toEqual(registry());
+  });
+
+  test("normalizes Windows local profiles to native named pipes", () => {
+    const windowsProfile = {
+      ...local(),
+      control_socket_path: String.raw`C:\Users\tester\AppData\Roaming\herdr\herdr.sock`,
+      client_socket_path: String.raw`C:\Users\tester\AppData\Roaming\herdr\herdr-client.sock`,
+    };
+
+    expect(validateLocalConnectionProfile(windowsProfile, "win32")).toEqual({
+      ...windowsProfile,
+      control_socket_path: String.raw`\\.\pipe\C:\Users\tester\AppData\Roaming\herdr\herdr.sock`,
+      client_socket_path: String.raw`\\.\pipe\C:\Users\tester\AppData\Roaming\herdr\herdr-client.sock`,
+    });
   });
 
   test("rejects unsupported versions, duplicates, and missing defaults", () => {
@@ -190,7 +211,10 @@ describe("connection profile validation", () => {
     expect(() =>
       validateLocalConnectionProfile({
         ...local(),
-        control_socket_path: "/tmp/../secret.sock",
+        control_socket_path:
+          process.platform === "win32"
+            ? "C:\\tmp\\..\\secret.sock"
+            : "/tmp/../secret.sock",
       }),
     ).toThrow("parent traversal");
     expect(() =>
@@ -205,8 +229,10 @@ describe("connection profile persistence", () => {
     const store = new ConnectionProfileStore({ path });
     await store.save(registry());
     expect(store.load()).toEqual(registry());
-    expect(lstatSync(path).mode & 0o777).toBe(0o600);
-    expect(lstatSync(join(path, "..")).mode & 0o777).toBe(0o700);
+    if (process.platform !== "win32") {
+      expect(lstatSync(path).mode & 0o777).toBe(0o600);
+      expect(lstatSync(join(path, "..")).mode & 0o777).toBe(0o700);
+    }
   });
 
   test("failed replacement preserves the previous complete file", async () => {
@@ -242,6 +268,7 @@ describe("connection profile persistence", () => {
   });
 
   test("rejects insecure override permissions without changing them", async () => {
+    if (process.platform === "win32") return;
     const root = tempRoot();
     const path = join(root, "connections.json");
     writeFileSync(path, JSON.stringify(registry()), { mode: 0o644 });
@@ -256,6 +283,7 @@ describe("connection profile persistence", () => {
   });
 
   test("does not chmod or write through an existing shared parent", async () => {
+    if (process.platform === "win32") return;
     const root = tempRoot();
     expect(lstatSync(root).mode & 0o077).not.toBe(0);
     await expect(
