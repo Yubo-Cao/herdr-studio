@@ -4,7 +4,15 @@
 
 ### Added
 
+- Add a preference to disable automatic update checks while keeping manual
+  update checks available from the application menu.
 - Add a native Windows ARM64 release package.
+
+### Changed
+
+- Group the application, workspace, and agent menus into clearer sections;
+  workspace and agent context menus now identify their target and isolate
+  destructive actions.
 
 ### Fixed
 

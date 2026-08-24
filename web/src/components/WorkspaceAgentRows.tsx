@@ -19,6 +19,18 @@ export interface AgentMenuState {
   y: number;
 }
 
+type AgentContextMenuItem = {
+  label: string;
+  danger?: boolean;
+  action: () => void;
+};
+
+type AgentContextMenuGroup = {
+  label: string;
+  items: AgentContextMenuItem[];
+  danger?: boolean;
+};
+
 export function AgentRow({
   pane,
   selected,
@@ -224,29 +236,56 @@ export function AgentContextMenu({
 
   if (!state) return null;
 
-  const items = [
-    { label: "Open Terminal", action: () => onFocus(state.pane) },
+  const groups: AgentContextMenuGroup[] = [
     {
-      label: "Browse Files at Agent CWD",
-      action: () => onBrowseFiles?.(state.pane),
+      label: "Open",
+      items: [
+        { label: "Open terminal", action: () => onFocus(state.pane) },
+        {
+          label: "Browse files at agent CWD",
+          action: () => onBrowseFiles?.(state.pane),
+        },
+        {
+          label: "Review workspace changes",
+          action: () => onReviewChanges?.(state.pane),
+        },
+      ],
     },
     {
-      label: "Review Workspace Changes",
-      action: () => onReviewChanges?.(state.pane),
+      label: "Session",
+      items: [
+        {
+          label: "View agent history",
+          action: () => onViewHistory?.(state.pane),
+        },
+        {
+          label: "Export session",
+          action: () => onExportSession(state.pane),
+        },
+      ],
     },
     {
-      label: "View Agent History",
-      action: () => onViewHistory?.(state.pane),
-    },
-    { label: "Export session", action: () => onExportSession(state.pane) },
-    {
-      label: "Close pane",
+      label: "Pane",
       danger: true,
-      action: () => onClosePane(state.pane),
+      items: [
+        {
+          label: "Close pane",
+          danger: true,
+          action: () => onClosePane(state.pane),
+        },
+      ],
     },
   ];
   const menuMargin = 8;
-  const menuWidth = 200;
+  const menuWidth = 244;
+  const itemCount = groups.reduce(
+    (total, group) => total + group.items.length,
+    0,
+  );
+  const estimatedHeight = Math.min(
+    window.innerHeight - menuMargin * 2,
+    58 + groups.length * 25 + itemCount * 34,
+  );
   const style: React.CSSProperties = {
     position: "fixed",
     left: Math.max(
@@ -255,24 +294,51 @@ export function AgentContextMenu({
     ),
     top: Math.max(
       menuMargin,
-      Math.min(state.y, window.innerHeight - items.length * 34 - menuMargin),
+      Math.min(state.y, window.innerHeight - estimatedHeight - menuMargin),
     ),
     zIndex: 1000,
   };
+  const agentName = state.pane.agent ?? "Agent";
+  const agentLocation = state.pane.foreground_cwd ?? state.pane.cwd;
 
   return (
-    <div ref={ref} className="context-menu" style={style}>
-      {items.map((item) => (
-        <button
-          key={item.label}
-          className={`context-menu-item ${item.danger ? "is-danger" : ""}`}
-          onClick={() => {
-            onClose();
-            item.action();
-          }}
+    <div
+      ref={ref}
+      className="context-menu context-menu--grouped"
+      style={style}
+      role="menu"
+      aria-label={`Actions for ${agentName}`}
+    >
+      <div className="context-menu-header">
+        <span>Agent</span>
+        <strong title={agentName}>{agentName}</strong>
+        <small>
+          {state.pane.agent_status}
+          {agentLocation ? ` · ${basename(agentLocation)}` : ""}
+        </small>
+      </div>
+      {groups.map((group) => (
+        <div
+          key={group.label}
+          className={`context-menu-group ${group.danger ? "is-danger" : ""}`}
+          role="group"
+          aria-label={group.label}
         >
-          {item.label}
-        </button>
+          <div className="context-menu-group-title">{group.label}</div>
+          {group.items.map((item) => (
+            <button
+              key={item.label}
+              role="menuitem"
+              className={`context-menu-item ${item.danger ? "is-danger" : ""}`}
+              onClick={() => {
+                onClose();
+                item.action();
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       ))}
     </div>
   );

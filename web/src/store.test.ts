@@ -3,6 +3,7 @@ import { bridge, type ConnectionClient } from "./api";
 import {
   __storeTesting,
   activateConnectionState,
+  automaticUpdateChecksEnabledFromStorage,
   bindTaskNotificationActivation,
   connectionEventIsActive,
   DEFAULT_NOTICE_AUTO_DISMISS_MS,
@@ -27,6 +28,32 @@ import {
   worktreeRemovalCompletionNotice,
 } from "./store";
 import type { Pane } from "./types";
+
+describe("automatic update check preference", () => {
+  test("defaults to enabled and honors an explicit disabled value", () => {
+    expect(automaticUpdateChecksEnabledFromStorage(undefined)).toBe(true);
+    expect(
+      automaticUpdateChecksEnabledFromStorage({
+        getItem: () => "false",
+      }),
+    ).toBe(false);
+    expect(
+      automaticUpdateChecksEnabledFromStorage({
+        getItem: () => "true",
+      }),
+    ).toBe(true);
+  });
+
+  test("falls back to enabled when browser storage is unavailable", () => {
+    expect(
+      automaticUpdateChecksEnabledFromStorage({
+        getItem: () => {
+          throw new Error("storage denied");
+        },
+      }),
+    ).toBe(true);
+  });
+});
 
 describe("task notification activation", () => {
   test("closes the system notification, focuses the window, and dispatches its pane target", () => {
@@ -197,6 +224,7 @@ function partitionState(): State {
     notice: null,
     taskNotificationsEnabled: false,
     taskNotificationPermission: "unsupported",
+    automaticUpdateChecksEnabled: true,
     updateInfo: null,
     updateInstalling: false,
     pendingRestartVersion: null,
