@@ -115,10 +115,18 @@ export function ConfirmDialog({
     const onKey = (e: KeyboardEvent) => {
       const target = e.target instanceof Node ? e.target : null;
       const isInsideDialog = !!target && !!dialogRef.current?.contains(target);
-      const action = dialogKeyAction(e.key, isInsideDialog);
+      const focusOnButton = target instanceof HTMLButtonElement;
+      const action = dialogKeyAction(e.key, isInsideDialog, focusOnButton);
       if (action === "close") {
         e.preventDefault();
         e.stopPropagation();
+        onCloseRef.current();
+        return;
+      }
+      if (action === "confirm") {
+        e.preventDefault();
+        e.stopPropagation();
+        onConfirmRef.current();
         onCloseRef.current();
         return;
       }
@@ -186,6 +194,9 @@ export function MessageDialog({
   onClose: () => void;
 }) {
   const dialogRef = useRef<HTMLDivElement>(null);
+  const onCloseRef = useRef(onClose);
+
+  onCloseRef.current = onClose;
 
   useEffect(() => {
     if (!open) return;
@@ -193,13 +204,16 @@ export function MessageDialog({
     const onKey = (e: KeyboardEvent) => {
       const target = e.target instanceof Node ? e.target : null;
       const isInsideDialog = !!target && !!dialogRef.current?.contains(target);
-      if (e.key === "Escape") {
+      const focusOnButton = target instanceof HTMLButtonElement;
+      const action = dialogKeyAction(e.key, isInsideDialog, focusOnButton);
+      // The OK button is the only action; both Escape and Enter dismiss.
+      if (action === "close" || action === "confirm") {
         e.preventDefault();
         e.stopPropagation();
-        onClose();
+        onCloseRef.current();
         return;
       }
-      if (!isInsideDialog) {
+      if (action === "contain") {
         e.preventDefault();
         e.stopPropagation();
       }
@@ -209,7 +223,7 @@ export function MessageDialog({
       cancelFocus();
       window.removeEventListener("keydown", onKey, { capture: true });
     };
-  }, [open, onClose]);
+  }, [open]);
 
   if (!open) return null;
 
