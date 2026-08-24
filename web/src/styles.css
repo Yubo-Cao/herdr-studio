@@ -2277,11 +2277,12 @@ textarea:focus {
 }
 .git-status {
   min-width: 0;
-  max-width: min(45%, 142px);
+  max-width: min(55%, 168px);
   display: inline-flex;
   align-items: center;
   gap: 3px;
   flex: 0 1 auto;
+  overflow: hidden;
 }
 .git-badge {
   max-width: 84px;
@@ -2299,6 +2300,13 @@ textarea:focus {
 .git-branch {
   max-width: 92px;
   color: var(--text);
+}
+/* Count badges are inherently short; never shrink them. Only the branch
+   badge ellipsizes, and its full text stays available via the row tooltip. */
+.git-dirty,
+.git-ahead,
+.git-behind {
+  flex: 0 0 auto;
 }
 .git-dirty {
   color: var(--yellow);
