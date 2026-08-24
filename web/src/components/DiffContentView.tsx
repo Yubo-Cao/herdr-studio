@@ -652,10 +652,10 @@ export function DiffContentView({
         <div
           ref={diffRef}
           className={`diff2html-wrapper syntax-highlighted ${
-            mobile && wrapEnabled ? "is-wrapped" : ""
-          } ${!mobile && !wrapEnabled ? "is-nowrap" : ""} ${
-            !mobile ? `is-${effectiveViewMode}` : ""
-          }`}
+            mobile ? "is-compact" : ""
+          } ${mobile && wrapEnabled ? "is-wrapped" : ""} ${
+            !mobile && !wrapEnabled ? "is-nowrap" : ""
+          } ${!mobile ? `is-${effectiveViewMode}` : ""}`}
         >
           {renderedSections.map((section) => {
             const sectionLoading =

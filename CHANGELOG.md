@@ -8,6 +8,16 @@
 
 ### Fixed
 
+- Keep worktree dirty/ahead/behind count badges fully visible in the
+  workspace tree; only the branch badge shrinks with an ellipsis, and the row
+  tooltip still shows the full status.
+- Restore Enter-to-confirm in confirmation dialogs such as Remove Worktree
+  and Close Workspace, and let Enter dismiss message dialogs; Enter confirms
+  unless a dialog button has focus, so a focused Cancel button still
+  activates natively.
+- Fix the Wrap/No wrap toggle doing nothing in narrow Inspector Changes
+  panes on desktop; compact diff styles now follow the pane layout instead of
+  a mobile-only viewport media query.
 - Upgrade release builds to Bun 1.4.0; the x64 binary built by Bun 1.3.14 can
   crash during `service install` under Windows ARM64 emulation.
 
