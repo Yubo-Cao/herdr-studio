@@ -2301,12 +2301,14 @@ textarea:focus {
   max-width: 92px;
   color: var(--text);
 }
-/* Count badges are inherently short; never shrink them. Only the branch
-   badge ellipsizes, and its full text stays available via the row tooltip. */
+/* Count badges are sized purely by their content: never shrink or cap them,
+   so counts stay fully visible. Only the branch badge ellipsizes, and its
+   full text stays available via the row tooltip. */
 .git-dirty,
 .git-ahead,
 .git-behind {
   flex: 0 0 auto;
+  max-width: none;
 }
 .git-dirty {
   color: var(--yellow);
