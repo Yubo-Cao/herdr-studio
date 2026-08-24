@@ -705,6 +705,8 @@ let initialized = false;
 let catalogRequestSeq = 0;
 let appliedCatalogRequestSeq = 0;
 let catalogReadyForConnection = false;
+let terminalReattachPending = false;
+let connectionRecoveryIntent: "resume" | "reconnect" | null = null;
 let focusActionChain: Promise<unknown> = Promise.resolve();
 type PaneStatusTracker = {
   ready: boolean;
@@ -1100,6 +1102,9 @@ async function refreshBridgeStatus() {
     const r = await bridge.call("bridge.status");
     if (state.connectionPaused || state.status !== "connected") return;
     applyConnectionCatalog(r, requestSeq);
+    if (rearmTerminalAttachmentsAfterCatalog(catalogReadyForConnection)) {
+      scheduleRefresh();
+    }
     const nextBridgeStatus: BridgeStatus = {
       clients: Number(r?.clients ?? 0),
       terminals: Array.isArray(r?.terminals) ? r.terminals : [],
@@ -1459,6 +1464,20 @@ async function refreshConnectionCatalog(): Promise<boolean> {
   }
 }
 
+function rearmTerminalAttachmentsAfterCatalog(catalogReady: boolean): boolean {
+  if (
+    !terminalReattachPending ||
+    !catalogReady ||
+    state.status !== "connected" ||
+    state.connectionPaused
+  ) {
+    return false;
+  }
+  terminalReattachPending = false;
+  set({ terminalAttachEpoch: state.terminalAttachEpoch + 1 });
+  return true;
+}
+
 const RECONNECT_RETRY_WAIT_MS = 10_000;
 const RECONNECT_RETRY_POLL_MS = 100;
 
@@ -1675,24 +1694,29 @@ export const store = {
     bridge.onStatus((s) => {
       if (s === "disconnected") {
         catalogReadyForConnection = false;
+        terminalReattachPending = true;
         bridge.setConnectionRuntimeGenerations([]);
         clearTerminalRelayViewports();
         focusActionChain = Promise.resolve();
         queuedConnectionKeys.clear();
       }
-      const resumed =
-        s === "connected" &&
-        !state.connectionPaused &&
-        state.notice?.loading &&
-        state.notice.message === "Resuming connection";
+      const completedRecovery =
+        s === "connected" && !state.connectionPaused && state.notice?.loading
+          ? connectionRecoveryIntent
+          : null;
+      if (s === "connected") connectionRecoveryIntent = null;
+      const completedRecoveryMessage =
+        completedRecovery === "reconnect"
+          ? "Browser reconnected"
+          : "Browser sync resumed";
       set(
-        resumed
+        completedRecovery
           ? {
               status: s,
               connectionGeneration: state.connectionGeneration,
               notice: {
                 kind: "success",
-                message: "Connection resumed",
+                message: completedRecoveryMessage,
                 autoDismissMs: 5000,
               },
             }
@@ -1717,6 +1741,7 @@ export const store = {
           ) {
             return;
           }
+          rearmTerminalAttachmentsAfterCatalog(true);
           void refreshNow();
           void refreshBridgeStatus();
         });
@@ -1795,6 +1820,7 @@ export const store = {
   pauseConnection(
     detail = "This browser will stop syncing until you resume it.",
   ) {
+    connectionRecoveryIntent = null;
     localStorage.setItem("connectionPaused", "true");
     stopPolling();
     disposeTerminalConnection(
@@ -1828,8 +1854,8 @@ export const store = {
           kind: pausedClients > 0 ? "success" : "info",
           message:
             pausedClients === 1
-              ? "Paused 1 other client"
-              : `Paused ${pausedClients} other clients`,
+              ? "Paused 1 other browser"
+              : `Paused ${pausedClients} other browsers`,
           autoDismissMs: 5000,
         },
       });
@@ -1839,13 +1865,17 @@ export const store = {
   },
 
   resumeConnection() {
+    connectionRecoveryIntent = state.connectionPaused ? "resume" : "reconnect";
     localStorage.setItem("connectionPaused", "false");
     set({
       connectionPaused: false,
       error: null,
       notice: {
         kind: "info",
-        message: "Resuming connection",
+        message:
+          connectionRecoveryIntent === "reconnect"
+            ? "Reconnecting browser"
+            : "Resuming browser sync",
         loading: true,
       },
     });
@@ -2644,6 +2674,13 @@ export const store = {
 export const __storeTesting = {
   startUpdatePolling,
   updatePollingActive: () => updateTimer !== null,
+  refreshBridgeStatus,
+  markTerminalReattachPending() {
+    terminalReattachPending = true;
+    catalogReadyForConnection = false;
+    bridge.setConnectionRuntimeGenerations([]);
+  },
+  rearmTerminalAttachmentsAfterCatalog,
   replaceState(snapshot: State) {
     stopPolling();
     refreshingConnectionKeys.clear();
@@ -2651,6 +2688,8 @@ export const __storeTesting = {
     focusActionChain = Promise.resolve();
     taskCompletionTracker.clear();
     state = snapshot;
+    terminalReattachPending = false;
+    connectionRecoveryIntent = null;
     catalogReadyForConnection = snapshot.connections.length > 0;
     bridge.setConnectionRuntimeGenerations(snapshot.connections);
   },
