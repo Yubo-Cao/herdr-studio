@@ -9,8 +9,9 @@ import { WorkspaceAutoSyncDialog } from "./WorkspaceAutoSyncDialog";
 import { worktreeCreationSource } from "../worktree";
 import { WorktreeLifecycleDialog } from "./WorktreeLifecycleDialog";
 import { isWorkspacePinned } from "../workspacePins";
+import { workspaceDisplayName } from "../workspaceTreeBadges";
 import { copyTextFromUserGesture } from "../terminalClipboard";
-import { clampContextMenuPosition } from "./contextMenuPosition";
+import { observeClampedContextMenu } from "./contextMenuPosition";
 
 export interface ContextMenuState {
   x: number;
@@ -113,14 +114,10 @@ export function ContextMenu({
   useLayoutEffect(() => {
     const menu = ref.current;
     if (!state || !menu) return;
-    const rect = menu.getBoundingClientRect();
-    const position = clampContextMenuPosition(
-      { left: state.x, top: state.y },
-      { width: rect.width, height: rect.height },
-      { width: window.innerWidth, height: window.innerHeight },
-    );
-    menu.style.left = `${position.left}px`;
-    menu.style.top = `${position.top}px`;
+    return observeClampedContextMenu(menu, {
+      left: state.x,
+      top: state.y,
+    });
   }, [state]);
 
   const dialogs = (
@@ -239,6 +236,7 @@ export function ContextMenu({
       (workspace) => workspace.workspace_id === state.workspace.workspace_id,
     ) ?? state.workspace;
   const isLinked = !!w.worktree?.is_linked_worktree;
+  const displayName = workspaceDisplayName(w);
   const pinned = isWorkspacePinned(pinnedWorkspaceKeys, w);
   const creationSource = worktreeCreationSource(workspaces, w);
 
@@ -380,7 +378,7 @@ export function ContextMenu({
       >
         <div className="context-menu-header">
           <span>Workspace</span>
-          <strong title={w.label}>{w.label}</strong>
+          <strong title={displayName}>{displayName}</strong>
           <small>
             {isLinked
               ? "Linked worktree"

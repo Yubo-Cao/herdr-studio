@@ -9,7 +9,7 @@ import type { Pane } from "../types";
 import { agentClass, basename, shortId } from "../utils";
 import { shouldShowAgentStatusLabel } from "./agentSession";
 import { AgentStatusIcon } from "./AgentStatusIcon";
-import { clampContextMenuPosition } from "./contextMenuPosition";
+import { observeClampedContextMenu } from "./contextMenuPosition";
 
 const LONG_PRESS_MS = 550;
 const LONG_PRESS_MOVE_PX = 10;
@@ -243,14 +243,10 @@ export function AgentContextMenu({
   useLayoutEffect(() => {
     const menu = ref.current;
     if (!state || !menu) return;
-    const rect = menu.getBoundingClientRect();
-    const position = clampContextMenuPosition(
-      { left: state.x, top: state.y },
-      { width: rect.width, height: rect.height },
-      { width: window.innerWidth, height: window.innerHeight },
-    );
-    menu.style.left = `${position.left}px`;
-    menu.style.top = `${position.top}px`;
+    return observeClampedContextMenu(menu, {
+      left: state.x,
+      top: state.y,
+    });
   }, [state]);
 
   if (!state) return null;

@@ -17,3 +17,40 @@ export function clampContextMenuPosition(
     top: Math.max(margin, Math.min(anchor.top, maxTop)),
   };
 }
+
+/** Re-clamp after menu-content, window, or mobile visual-viewport changes. */
+export function observeClampedContextMenu(
+  menu: HTMLElement,
+  anchor: FloatingMenuPosition,
+): () => void {
+  const updatePosition = () => {
+    const rect = menu.getBoundingClientRect();
+    const visualViewport = window.visualViewport;
+    const position = clampContextMenuPosition(
+      anchor,
+      { width: rect.width, height: rect.height },
+      {
+        width: visualViewport?.width ?? window.innerWidth,
+        height: visualViewport?.height ?? window.innerHeight,
+      },
+    );
+    menu.style.left = `${position.left}px`;
+    menu.style.top = `${position.top}px`;
+  };
+
+  updatePosition();
+  const resizeObserver =
+    typeof ResizeObserver === "undefined"
+      ? null
+      : new ResizeObserver(updatePosition);
+  resizeObserver?.observe(menu);
+  window.addEventListener("resize", updatePosition);
+  window.visualViewport?.addEventListener("resize", updatePosition);
+  window.visualViewport?.addEventListener("scroll", updatePosition);
+  return () => {
+    resizeObserver?.disconnect();
+    window.removeEventListener("resize", updatePosition);
+    window.visualViewport?.removeEventListener("resize", updatePosition);
+    window.visualViewport?.removeEventListener("scroll", updatePosition);
+  };
+}
