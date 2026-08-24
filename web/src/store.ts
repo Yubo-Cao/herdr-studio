@@ -46,6 +46,7 @@ export interface State extends ServerSessionState {
   notice: Notice | null;
   taskNotificationsEnabled: boolean;
   taskNotificationPermission: NotificationPermission | "unsupported";
+  automaticUpdateChecksEnabled: boolean;
   updateInfo: UpdateInfo | null;
   updateInstalling: boolean;
   pendingRestartVersion: string | null;
@@ -111,6 +112,7 @@ type WorktreeRemovalCleanup = {
 };
 
 const TASK_NOTIFICATIONS_KEY = "taskNotificationsEnabled";
+const AUTOMATIC_UPDATE_CHECKS_KEY = "automaticUpdateChecksEnabled";
 const PENDING_UPDATE_RELOAD_KEY = "pendingUpdateReloadVersion";
 export const DEFAULT_NOTICE_AUTO_DISMISS_MS = 15 * 1000;
 const TASK_COMPLETED_TOAST_DISMISS_MS = DEFAULT_NOTICE_AUTO_DISMISS_MS;
@@ -229,6 +231,22 @@ function storedTaskNotificationsEnabled() {
   );
 }
 
+export function automaticUpdateChecksEnabledFromStorage(
+  storage: Pick<Storage, "getItem"> | undefined,
+): boolean {
+  try {
+    return storage?.getItem(AUTOMATIC_UPDATE_CHECKS_KEY) !== "false";
+  } catch {
+    return true;
+  }
+}
+
+function storedAutomaticUpdateChecksEnabled(): boolean {
+  return automaticUpdateChecksEnabledFromStorage(
+    typeof localStorage === "undefined" ? undefined : localStorage,
+  );
+}
+
 function storedPendingRestartVersion(): string | null {
   if (typeof sessionStorage === "undefined") return null;
   try {
@@ -281,6 +299,7 @@ const initial: State = {
   notice: null,
   taskNotificationsEnabled: storedTaskNotificationsEnabled(),
   taskNotificationPermission: notificationPermission(),
+  automaticUpdateChecksEnabled: storedAutomaticUpdateChecksEnabled(),
   updateInfo: null,
   updateInstalling: false,
   pendingRestartVersion: storedPendingRestartVersion(),
@@ -1117,6 +1136,7 @@ function startMetadataPolling() {
 }
 
 async function checkForUpdate(showErrors = false) {
+  if (!showErrors && !state.automaticUpdateChecksEnabled) return;
   if (state.connectionPaused) {
     if (showErrors) {
       set({
@@ -1148,6 +1168,7 @@ async function checkForUpdate(showErrors = false) {
       return;
     }
     const info = (await r.json()) as UpdateInfo;
+    if (!showErrors && !state.automaticUpdateChecksEnabled) return;
     if (
       info.update_available &&
       info.latest_version &&
@@ -1181,15 +1202,18 @@ async function checkForUpdate(showErrors = false) {
   }
 }
 
-function startUpdatePolling() {
-  if (updateTimer) return;
-  void checkForUpdate(false);
+function startUpdatePolling(): Promise<void> {
+  if (updateTimer || !state.automaticUpdateChecksEnabled) {
+    return Promise.resolve();
+  }
+  const initialCheck = checkForUpdate(false);
   updateTimer = setInterval(
     () => {
       void checkForUpdate(false);
     },
     30 * 60 * 1000,
   );
+  return initialCheck;
 }
 
 function stopPolling() {
@@ -2403,6 +2427,23 @@ export const store = {
     return checkForUpdate(true);
   },
 
+  setAutomaticUpdateChecksEnabled(enabled: boolean) {
+    try {
+      localStorage.setItem(AUTOMATIC_UPDATE_CHECKS_KEY, String(enabled));
+    } catch {
+      // The in-memory preference still applies when storage is unavailable.
+    }
+    if (!enabled && updateTimer) {
+      clearInterval(updateTimer);
+      updateTimer = null;
+    }
+    set({
+      automaticUpdateChecksEnabled: enabled,
+      updateInfo: enabled ? state.updateInfo : null,
+    });
+    if (enabled && !state.connectionPaused) startUpdatePolling();
+  },
+
   updateOrCheck() {
     if (
       state.updateInfo?.update_available &&
@@ -2601,6 +2642,8 @@ export const store = {
 
 /** Test-only singleton seam for deterministic deferred production-store tests. */
 export const __storeTesting = {
+  startUpdatePolling,
+  updatePollingActive: () => updateTimer !== null,
   replaceState(snapshot: State) {
     stopPolling();
     refreshingConnectionKeys.clear();

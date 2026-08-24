@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import {
   focusTreeItem,
   keyboardContextMenuPoint,
@@ -9,6 +9,7 @@ import type { Pane } from "../types";
 import { agentClass, basename, shortId } from "../utils";
 import { shouldShowAgentStatusLabel } from "./agentSession";
 import { AgentStatusIcon } from "./AgentStatusIcon";
+import { observeClampedContextMenu } from "./contextMenuPosition";
 
 const LONG_PRESS_MS = 550;
 const LONG_PRESS_MOVE_PX = 10;
@@ -18,6 +19,18 @@ export interface AgentMenuState {
   x: number;
   y: number;
 }
+
+type AgentContextMenuItem = {
+  label: string;
+  danger?: boolean;
+  action: () => void;
+};
+
+type AgentContextMenuGroup = {
+  label: string;
+  items: AgentContextMenuItem[];
+  danger?: boolean;
+};
 
 export function AgentRow({
   pane,
@@ -209,70 +222,116 @@ export function AgentContextMenu({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
+    const onScroll = (e: Event) => {
+      const target = e.target;
+      if (target instanceof Node && ref.current?.contains(target)) return;
+      onClose();
+    };
     const t = setTimeout(() => {
       window.addEventListener("mousedown", onDown);
       window.addEventListener("keydown", onKey);
-      window.addEventListener("scroll", onClose, true);
+      window.addEventListener("scroll", onScroll, true);
     }, 0);
     return () => {
       clearTimeout(t);
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", onClose, true);
+      window.removeEventListener("scroll", onScroll, true);
     };
   }, [state, onClose]);
 
+  useLayoutEffect(() => {
+    const menu = ref.current;
+    if (!state || !menu) return;
+    return observeClampedContextMenu(menu, {
+      left: state.x,
+      top: state.y,
+    });
+  }, [state]);
+
   if (!state) return null;
 
-  const items = [
-    { label: "Open Terminal", action: () => onFocus(state.pane) },
+  const groups: AgentContextMenuGroup[] = [
     {
-      label: "Browse Files at Agent CWD",
-      action: () => onBrowseFiles?.(state.pane),
+      label: "Open",
+      items: [
+        { label: "Open terminal", action: () => onFocus(state.pane) },
+        {
+          label: "Browse files at agent CWD",
+          action: () => onBrowseFiles?.(state.pane),
+        },
+        {
+          label: "Review workspace changes",
+          action: () => onReviewChanges?.(state.pane),
+        },
+      ],
     },
     {
-      label: "Review Workspace Changes",
-      action: () => onReviewChanges?.(state.pane),
+      label: "Session",
+      items: [
+        {
+          label: "View agent history",
+          action: () => onViewHistory?.(state.pane),
+        },
+        {
+          label: "Export session",
+          action: () => onExportSession(state.pane),
+        },
+      ],
     },
     {
-      label: "View Agent History",
-      action: () => onViewHistory?.(state.pane),
-    },
-    { label: "Export session", action: () => onExportSession(state.pane) },
-    {
-      label: "Close pane",
+      label: "Pane",
       danger: true,
-      action: () => onClosePane(state.pane),
+      items: [
+        {
+          label: "Close pane",
+          danger: true,
+          action: () => onClosePane(state.pane),
+        },
+      ],
     },
   ];
-  const menuMargin = 8;
-  const menuWidth = 200;
   const style: React.CSSProperties = {
     position: "fixed",
-    left: Math.max(
-      menuMargin,
-      Math.min(state.x, window.innerWidth - menuWidth - menuMargin),
-    ),
-    top: Math.max(
-      menuMargin,
-      Math.min(state.y, window.innerHeight - items.length * 34 - menuMargin),
-    ),
+    left: state.x,
+    top: state.y,
     zIndex: 1000,
   };
+  const agentName = state.pane.agent ?? "Agent";
+  const agentLocation = state.pane.foreground_cwd ?? state.pane.cwd;
+  const agentLocationName = agentLocation
+    ? basename(agentLocation.replace(/\\/g, "/"))
+    : "";
 
   return (
-    <div ref={ref} className="context-menu" style={style}>
-      {items.map((item) => (
-        <button
-          key={item.label}
-          className={`context-menu-item ${item.danger ? "is-danger" : ""}`}
-          onClick={() => {
-            onClose();
-            item.action();
-          }}
+    <div ref={ref} className="context-menu context-menu--grouped" style={style}>
+      <div className="context-menu-header">
+        <span>Agent</span>
+        <strong title={agentName}>{agentName}</strong>
+        <small>
+          {state.pane.agent_status}
+          {agentLocationName ? ` · ${agentLocationName}` : ""}
+        </small>
+      </div>
+      {groups.map((group) => (
+        <div
+          key={group.label}
+          className={`context-menu-group ${group.danger ? "is-danger" : ""}`}
         >
-          {item.label}
-        </button>
+          <div className="context-menu-group-title">{group.label}</div>
+          {group.items.map((item) => (
+            <button
+              key={item.label}
+              className={`context-menu-item ${item.danger ? "is-danger" : ""}`}
+              onClick={() => {
+                onClose();
+                item.action();
+              }}
+            >
+              {item.label}
+            </button>
+          ))}
+        </div>
       ))}
     </div>
   );

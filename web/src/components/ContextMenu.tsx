@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Workspace } from "../types";
 import { store, useStoreSelector } from "../store";
 import { luckyWorktreeBranchName } from "../luckyName";
@@ -9,7 +9,9 @@ import { WorkspaceAutoSyncDialog } from "./WorkspaceAutoSyncDialog";
 import { worktreeCreationSource } from "../worktree";
 import { WorktreeLifecycleDialog } from "./WorktreeLifecycleDialog";
 import { isWorkspacePinned } from "../workspacePins";
+import { workspaceDisplayName } from "../workspaceTreeBadges";
 import { copyTextFromUserGesture } from "../terminalClipboard";
+import { observeClampedContextMenu } from "./contextMenuPosition";
 
 export interface ContextMenuState {
   x: number;
@@ -21,6 +23,12 @@ interface Item {
   label: string;
   danger?: boolean;
   action: () => void;
+}
+
+interface ItemGroup {
+  label: string;
+  items: Item[];
+  danger?: boolean;
 }
 
 type DialogState =
@@ -84,19 +92,33 @@ export function ContextMenu({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
+    const onScroll = (e: Event) => {
+      const target = e.target;
+      if (target instanceof Node && ref.current?.contains(target)) return;
+      onClose();
+    };
     // Defer so the triggering contextmenu event doesn't immediately close it.
     const t = setTimeout(() => {
       window.addEventListener("mousedown", onDown);
       window.addEventListener("keydown", onKey);
-      window.addEventListener("scroll", onClose, true);
+      window.addEventListener("scroll", onScroll, true);
     }, 0);
     return () => {
       clearTimeout(t);
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", onClose, true);
+      window.removeEventListener("scroll", onScroll, true);
     };
   }, [state, onClose]);
+
+  useLayoutEffect(() => {
+    const menu = ref.current;
+    if (!state || !menu) return;
+    return observeClampedContextMenu(menu, {
+      left: state.x,
+      top: state.y,
+    });
+  }, [state]);
 
   const dialogs = (
     <>
@@ -214,25 +236,39 @@ export function ContextMenu({
       (workspace) => workspace.workspace_id === state.workspace.workspace_id,
     ) ?? state.workspace;
   const isLinked = !!w.worktree?.is_linked_worktree;
+  const displayName = workspaceDisplayName(w);
   const pinned = isWorkspacePinned(pinnedWorkspaceKeys, w);
   const creationSource = worktreeCreationSource(workspaces, w);
 
-  const items: Item[] = [
+  const inspectItems: Item[] = [
     {
-      label: "Open Files in Inspector",
+      label: "Browse files",
       action: () => onBrowseFiles?.(w),
     },
     {
-      label: "Open Changes in Inspector",
+      label: "Review changes",
       action: () => onReviewChanges?.(w),
     },
+  ];
+  const organizeItems: Item[] = [
     {
       label: `${pinned ? "Unpin" : "Pin"} ${isLinked ? "worktree" : "workspace"}`,
       action: () => onPinnedChange(w, !pinned),
     },
+    {
+      label: "Rename workspace…",
+      action: () => {
+        setDialog({
+          type: "rename-workspace",
+          workspaceId: w.workspace_id,
+          label: w.label,
+        });
+      },
+    },
   ];
+  const worktreeItems: Item[] = [];
   if (w.worktree) {
-    items.push({
+    organizeItems.push({
       label: "Copy checkout path",
       action: () => {
         const path = w.worktree?.checkout_path;
@@ -254,27 +290,23 @@ export function ContextMenu({
         );
       },
     });
-    items.push({
-      label: "Worktree lifecycle…",
-      action: () => {
-        setLifecycleWorkspaceId(w.workspace_id);
+    worktreeItems.push(
+      {
+        label: "Open worktree…",
+        action: () => setOpenWorktreeWorkspaceId(w.workspace_id),
       },
-    });
-    items.push({
-      label: "Open worktree…",
-      action: () => {
-        setOpenWorktreeWorkspaceId(w.workspace_id);
+      {
+        label: "Worktree lifecycle…",
+        action: () => setLifecycleWorkspaceId(w.workspace_id),
       },
-    });
-    items.push({
-      label: "Worktree hooks…",
-      action: () => {
-        setWorktreeHooksWorkspaceId(w.workspace_id);
+      {
+        label: "Configure worktree hooks…",
+        action: () => setWorktreeHooksWorkspaceId(w.workspace_id),
       },
-    });
+    );
   }
   if (creationSource) {
-    items.push({
+    worktreeItems.unshift({
       label: "New worktree…",
       action: () => {
         setDialog({
@@ -285,30 +317,21 @@ export function ContextMenu({
       },
     });
   }
-  items.push({
-    label: "Git pull",
-    action: () => {
-      void store.gitPullWorkspace(w.workspace_id);
+  const sourceControlItems: Item[] = [
+    {
+      label: "Pull from Git",
+      action: () => {
+        void store.gitPullWorkspace(w.workspace_id);
+      },
     },
-  });
-  items.push({
-    label: "Auto-update branch…",
-    action: () => {
-      setAutoSyncWorkspaceId(w.workspace_id);
+    {
+      label: "Configure branch auto-update…",
+      action: () => setAutoSyncWorkspaceId(w.workspace_id),
     },
-  });
-  items.push({
-    label: "Rename workspace…",
-    action: () => {
-      setDialog({
-        type: "rename-workspace",
-        workspaceId: w.workspace_id,
-        label: w.label,
-      });
-    },
-  });
+  ];
+  const closeItems: Item[] = [];
   if (isLinked) {
-    items.push({
+    closeItems.push({
       label: "Remove worktree",
       danger: true,
       action: () => {
@@ -320,7 +343,7 @@ export function ContextMenu({
       },
     });
   }
-  items.push({
+  closeItems.push({
     label: "Close workspace",
     danger: true,
     action: () => {
@@ -331,37 +354,58 @@ export function ContextMenu({
       });
     },
   });
+  const groups: ItemGroup[] = [
+    { label: "Inspect", items: inspectItems },
+    { label: "Organize", items: organizeItems },
+    { label: "Worktrees", items: worktreeItems },
+    { label: "Source control", items: sourceControlItems },
+    { label: "Close", items: closeItems, danger: true },
+  ].filter((group) => group.items.length > 0);
 
-  // Keep the menu on-screen, including narrow mobile viewports.
-  const menuMargin = 8;
-  const menuWidth = 200;
   const style: React.CSSProperties = {
     position: "fixed",
-    left: Math.max(
-      menuMargin,
-      Math.min(state.x, window.innerWidth - menuWidth - menuMargin),
-    ),
-    top: Math.max(
-      menuMargin,
-      Math.min(state.y, window.innerHeight - items.length * 34 - menuMargin),
-    ),
+    left: state.x,
+    top: state.y,
     zIndex: 1000,
   };
 
   return (
     <>
-      <div ref={ref} className="context-menu" style={style}>
-        {items.map((it, i) => (
-          <button
-            key={i}
-            className={`context-menu-item ${it.danger ? "is-danger" : ""}`}
-            onClick={() => {
-              onClose();
-              it.action();
-            }}
+      <div
+        ref={ref}
+        className="context-menu context-menu--grouped"
+        style={style}
+      >
+        <div className="context-menu-header">
+          <span>Workspace</span>
+          <strong title={displayName}>{displayName}</strong>
+          <small>
+            {isLinked
+              ? "Linked worktree"
+              : w.worktree
+                ? "Git workspace"
+                : "Workspace"}
+          </small>
+        </div>
+        {groups.map((group) => (
+          <div
+            key={group.label}
+            className={`context-menu-group ${group.danger ? "is-danger" : ""}`}
           >
-            {it.label}
-          </button>
+            <div className="context-menu-group-title">{group.label}</div>
+            {group.items.map((item) => (
+              <button
+                key={item.label}
+                className={`context-menu-item ${item.danger ? "is-danger" : ""}`}
+                onClick={() => {
+                  onClose();
+                  item.action();
+                }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
         ))}
       </div>
       {dialogs}

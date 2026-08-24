@@ -3,6 +3,7 @@ import { bridge, type ConnectionClient } from "./api";
 import {
   __storeTesting,
   activateConnectionState,
+  automaticUpdateChecksEnabledFromStorage,
   bindTaskNotificationActivation,
   connectionEventIsActive,
   DEFAULT_NOTICE_AUTO_DISMISS_MS,
@@ -27,6 +28,127 @@ import {
   worktreeRemovalCompletionNotice,
 } from "./store";
 import type { Pane } from "./types";
+
+describe("automatic update check preference", () => {
+  test("defaults to enabled and honors an explicit disabled value", () => {
+    expect(automaticUpdateChecksEnabledFromStorage(undefined)).toBe(true);
+    expect(
+      automaticUpdateChecksEnabledFromStorage({
+        getItem: () => "false",
+      }),
+    ).toBe(false);
+    expect(
+      automaticUpdateChecksEnabledFromStorage({
+        getItem: () => "true",
+      }),
+    ).toBe(true);
+  });
+
+  test("falls back to enabled when browser storage is unavailable", () => {
+    expect(
+      automaticUpdateChecksEnabledFromStorage({
+        getItem: () => {
+          throw new Error("storage denied");
+        },
+      }),
+    ).toBe(true);
+  });
+
+  test("cancels polling and ignores an in-flight automatic result when disabled", async () => {
+    const previousState = store.get();
+    const previousFetch = globalThis.fetch;
+    const previousLocalStorage = globalThis.localStorage;
+    let resolveFetch!: (response: Response) => void;
+    globalThis.fetch = (() =>
+      new Promise<Response>((resolve) => {
+        resolveFetch = resolve;
+      })) as unknown as typeof fetch;
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: { setItem: () => undefined },
+    });
+    try {
+      __storeTesting.replaceState(partitionState());
+      const automaticCheck = __storeTesting.startUpdatePolling();
+      expect(__storeTesting.updatePollingActive()).toBe(true);
+
+      store.setAutomaticUpdateChecksEnabled(false);
+      expect(__storeTesting.updatePollingActive()).toBe(false);
+      expect(store.get().automaticUpdateChecksEnabled).toBe(false);
+
+      resolveFetch(
+        Response.json({
+          current_version: "0.4.5",
+          latest_version: "0.5.0",
+          update_available: true,
+          can_auto_update: true,
+          platform: "darwin-arm64",
+        }),
+      );
+      await automaticCheck;
+      expect(store.get().updateInfo).toBeNull();
+    } finally {
+      __storeTesting.replaceState(previousState);
+      globalThis.fetch = previousFetch;
+      if (previousLocalStorage === undefined) {
+        delete (globalThis as { localStorage?: Storage }).localStorage;
+      } else {
+        Object.defineProperty(globalThis, "localStorage", {
+          configurable: true,
+          value: previousLocalStorage,
+        });
+      }
+    }
+  });
+
+  test("restarts polling when enabled while manual checks bypass the preference", async () => {
+    const previousState = store.get();
+    const previousFetch = globalThis.fetch;
+    const previousLocalStorage = globalThis.localStorage;
+    let fetchCalls = 0;
+    globalThis.fetch = (async () => {
+      fetchCalls += 1;
+      return Response.json({
+        current_version: "0.4.5",
+        latest_version: "0.4.5",
+        update_available: false,
+        can_auto_update: true,
+        platform: "darwin-arm64",
+      });
+    }) as unknown as typeof fetch;
+    Object.defineProperty(globalThis, "localStorage", {
+      configurable: true,
+      value: { setItem: () => undefined },
+    });
+    try {
+      __storeTesting.replaceState({
+        ...partitionState(),
+        automaticUpdateChecksEnabled: false,
+      });
+
+      store.setAutomaticUpdateChecksEnabled(true);
+      expect(fetchCalls).toBe(1);
+      expect(__storeTesting.updatePollingActive()).toBe(true);
+      store.setAutomaticUpdateChecksEnabled(false);
+      expect(__storeTesting.updatePollingActive()).toBe(false);
+
+      await store.checkForUpdate();
+      expect(fetchCalls).toBe(2);
+      expect(store.get().notice?.message).toBe("herdr-gui is up to date");
+    } finally {
+      __storeTesting.replaceState(previousState);
+      globalThis.fetch = previousFetch;
+      if (previousLocalStorage === undefined) {
+        delete (globalThis as { localStorage?: Storage }).localStorage;
+      } else {
+        Object.defineProperty(globalThis, "localStorage", {
+          configurable: true,
+          value: previousLocalStorage,
+        });
+      }
+    }
+  });
+});
 
 describe("task notification activation", () => {
   test("closes the system notification, focuses the window, and dispatches its pane target", () => {
@@ -197,6 +319,7 @@ function partitionState(): State {
     notice: null,
     taskNotificationsEnabled: false,
     taskNotificationPermission: "unsupported",
+    automaticUpdateChecksEnabled: true,
     updateInfo: null,
     updateInstalling: false,
     pendingRestartVersion: null,

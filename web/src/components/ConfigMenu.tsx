@@ -83,6 +83,7 @@ export function ConfigMenu({
       status: state.status,
       taskNotificationPermission: state.taskNotificationPermission,
       taskNotificationsEnabled: state.taskNotificationsEnabled,
+      automaticUpdateChecksEnabled: state.automaticUpdateChecksEnabled,
       updateInfo: state.updateInfo,
       updateInstalling: state.updateInstalling,
     }),
@@ -209,7 +210,7 @@ export function ConfigMenu({
             </div>
 
             <div className="config-section">
-              <div className="config-title">Preferences</div>
+              <div className="config-title">Appearance</div>
               <div className="config-preference-row">
                 <span className="config-item-icon">
                   {theme === "system" ? (
@@ -314,6 +315,38 @@ export function ConfigMenu({
                     />
                   ))}
                 </div>
+              </div>
+            </div>
+
+            <div className="config-section">
+              <div className="config-title">Behavior & automation</div>
+              <div className="config-preference-row">
+                <span className="config-item-icon">
+                  <Download size={15} />
+                </span>
+                <div className="config-item-copy">
+                  <strong>Automatic update checks</strong>
+                  <span>
+                    {s.automaticUpdateChecksEnabled ? "Enabled" : "Disabled"}
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  role="switch"
+                  aria-label="Automatic update checks"
+                  aria-checked={s.automaticUpdateChecksEnabled}
+                  className={
+                    "settings-switch" +
+                    (s.automaticUpdateChecksEnabled ? " is-on" : "")
+                  }
+                  onClick={() => {
+                    store.setAutomaticUpdateChecksEnabled(
+                      !s.automaticUpdateChecksEnabled,
+                    );
+                  }}
+                >
+                  <span />
+                </button>
               </div>
               <div className="config-preference-row">
                 <span className="config-item-icon">
