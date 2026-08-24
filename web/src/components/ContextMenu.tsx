@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Workspace } from "../types";
 import { store, useStoreSelector } from "../store";
 import { luckyWorktreeBranchName } from "../luckyName";
@@ -10,6 +10,7 @@ import { worktreeCreationSource } from "../worktree";
 import { WorktreeLifecycleDialog } from "./WorktreeLifecycleDialog";
 import { isWorkspacePinned } from "../workspacePins";
 import { copyTextFromUserGesture } from "../terminalClipboard";
+import { clampContextMenuPosition } from "./contextMenuPosition";
 
 export interface ContextMenuState {
   x: number;
@@ -90,19 +91,37 @@ export function ContextMenu({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
+    const onScroll = (e: Event) => {
+      const target = e.target;
+      if (target instanceof Node && ref.current?.contains(target)) return;
+      onClose();
+    };
     // Defer so the triggering contextmenu event doesn't immediately close it.
     const t = setTimeout(() => {
       window.addEventListener("mousedown", onDown);
       window.addEventListener("keydown", onKey);
-      window.addEventListener("scroll", onClose, true);
+      window.addEventListener("scroll", onScroll, true);
     }, 0);
     return () => {
       clearTimeout(t);
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", onClose, true);
+      window.removeEventListener("scroll", onScroll, true);
     };
   }, [state, onClose]);
+
+  useLayoutEffect(() => {
+    const menu = ref.current;
+    if (!state || !menu) return;
+    const rect = menu.getBoundingClientRect();
+    const position = clampContextMenuPosition(
+      { left: state.x, top: state.y },
+      { width: rect.width, height: rect.height },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    menu.style.left = `${position.left}px`;
+    menu.style.top = `${position.top}px`;
+  }, [state]);
 
   const dialogs = (
     <>
@@ -345,27 +364,10 @@ export function ContextMenu({
     { label: "Close", items: closeItems, danger: true },
   ].filter((group) => group.items.length > 0);
 
-  // Keep the grouped menu on-screen, including narrow mobile viewports.
-  const menuMargin = 8;
-  const menuWidth = 244;
-  const itemCount = groups.reduce(
-    (total, group) => total + group.items.length,
-    0,
-  );
-  const estimatedHeight = Math.min(
-    window.innerHeight - menuMargin * 2,
-    58 + groups.length * 25 + itemCount * 34,
-  );
   const style: React.CSSProperties = {
     position: "fixed",
-    left: Math.max(
-      menuMargin,
-      Math.min(state.x, window.innerWidth - menuWidth - menuMargin),
-    ),
-    top: Math.max(
-      menuMargin,
-      Math.min(state.y, window.innerHeight - estimatedHeight - menuMargin),
-    ),
+    left: state.x,
+    top: state.y,
     zIndex: 1000,
   };
 
@@ -375,8 +377,6 @@ export function ContextMenu({
         ref={ref}
         className="context-menu context-menu--grouped"
         style={style}
-        role="menu"
-        aria-label={`Workspace actions for ${w.label}`}
       >
         <div className="context-menu-header">
           <span>Workspace</span>
@@ -393,14 +393,11 @@ export function ContextMenu({
           <div
             key={group.label}
             className={`context-menu-group ${group.danger ? "is-danger" : ""}`}
-            role="group"
-            aria-label={group.label}
           >
             <div className="context-menu-group-title">{group.label}</div>
             {group.items.map((item) => (
               <button
                 key={item.label}
-                role="menuitem"
                 className={`context-menu-item ${item.danger ? "is-danger" : ""}`}
                 onClick={() => {
                   onClose();

@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import {
   focusTreeItem,
   keyboardContextMenuPoint,
@@ -9,6 +9,7 @@ import type { Pane } from "../types";
 import { agentClass, basename, shortId } from "../utils";
 import { shouldShowAgentStatusLabel } from "./agentSession";
 import { AgentStatusIcon } from "./AgentStatusIcon";
+import { clampContextMenuPosition } from "./contextMenuPosition";
 
 const LONG_PRESS_MS = 550;
 const LONG_PRESS_MOVE_PX = 10;
@@ -221,18 +222,36 @@ export function AgentContextMenu({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
+    const onScroll = (e: Event) => {
+      const target = e.target;
+      if (target instanceof Node && ref.current?.contains(target)) return;
+      onClose();
+    };
     const t = setTimeout(() => {
       window.addEventListener("mousedown", onDown);
       window.addEventListener("keydown", onKey);
-      window.addEventListener("scroll", onClose, true);
+      window.addEventListener("scroll", onScroll, true);
     }, 0);
     return () => {
       clearTimeout(t);
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKey);
-      window.removeEventListener("scroll", onClose, true);
+      window.removeEventListener("scroll", onScroll, true);
     };
   }, [state, onClose]);
+
+  useLayoutEffect(() => {
+    const menu = ref.current;
+    if (!state || !menu) return;
+    const rect = menu.getBoundingClientRect();
+    const position = clampContextMenuPosition(
+      { left: state.x, top: state.y },
+      { width: rect.width, height: rect.height },
+      { width: window.innerWidth, height: window.innerHeight },
+    );
+    menu.style.left = `${position.left}px`;
+    menu.style.top = `${position.top}px`;
+  }, [state]);
 
   if (!state) return null;
 
@@ -276,59 +295,37 @@ export function AgentContextMenu({
       ],
     },
   ];
-  const menuMargin = 8;
-  const menuWidth = 244;
-  const itemCount = groups.reduce(
-    (total, group) => total + group.items.length,
-    0,
-  );
-  const estimatedHeight = Math.min(
-    window.innerHeight - menuMargin * 2,
-    58 + groups.length * 25 + itemCount * 34,
-  );
   const style: React.CSSProperties = {
     position: "fixed",
-    left: Math.max(
-      menuMargin,
-      Math.min(state.x, window.innerWidth - menuWidth - menuMargin),
-    ),
-    top: Math.max(
-      menuMargin,
-      Math.min(state.y, window.innerHeight - estimatedHeight - menuMargin),
-    ),
+    left: state.x,
+    top: state.y,
     zIndex: 1000,
   };
   const agentName = state.pane.agent ?? "Agent";
   const agentLocation = state.pane.foreground_cwd ?? state.pane.cwd;
+  const agentLocationName = agentLocation
+    ? basename(agentLocation.replace(/\\/g, "/"))
+    : "";
 
   return (
-    <div
-      ref={ref}
-      className="context-menu context-menu--grouped"
-      style={style}
-      role="menu"
-      aria-label={`Actions for ${agentName}`}
-    >
+    <div ref={ref} className="context-menu context-menu--grouped" style={style}>
       <div className="context-menu-header">
         <span>Agent</span>
         <strong title={agentName}>{agentName}</strong>
         <small>
           {state.pane.agent_status}
-          {agentLocation ? ` · ${basename(agentLocation)}` : ""}
+          {agentLocationName ? ` · ${agentLocationName}` : ""}
         </small>
       </div>
       {groups.map((group) => (
         <div
           key={group.label}
           className={`context-menu-group ${group.danger ? "is-danger" : ""}`}
-          role="group"
-          aria-label={group.label}
         >
           <div className="context-menu-group-title">{group.label}</div>
           {group.items.map((item) => (
             <button
               key={item.label}
-              role="menuitem"
               className={`context-menu-item ${item.danger ? "is-danger" : ""}`}
               onClick={() => {
                 onClose();

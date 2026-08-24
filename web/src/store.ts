@@ -1202,15 +1202,18 @@ async function checkForUpdate(showErrors = false) {
   }
 }
 
-function startUpdatePolling() {
-  if (updateTimer || !state.automaticUpdateChecksEnabled) return;
-  void checkForUpdate(false);
+function startUpdatePolling(): Promise<void> {
+  if (updateTimer || !state.automaticUpdateChecksEnabled) {
+    return Promise.resolve();
+  }
+  const initialCheck = checkForUpdate(false);
   updateTimer = setInterval(
     () => {
       void checkForUpdate(false);
     },
     30 * 60 * 1000,
   );
+  return initialCheck;
 }
 
 function stopPolling() {
@@ -2639,6 +2642,8 @@ export const store = {
 
 /** Test-only singleton seam for deterministic deferred production-store tests. */
 export const __storeTesting = {
+  startUpdatePolling,
+  updatePollingActive: () => updateTimer !== null,
   replaceState(snapshot: State) {
     stopPolling();
     refreshingConnectionKeys.clear();
