@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.6 - 2026-08-25
+
 ### Added
 
 - Add a preference to disable automatic update checks while keeping manual
