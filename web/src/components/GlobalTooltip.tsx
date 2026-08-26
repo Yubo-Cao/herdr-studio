@@ -21,6 +21,18 @@ function tooltipTarget(start: EventTarget | null): HTMLElement | null {
   return title ? target : null;
 }
 
+// matches() throws a SyntaxError for :focus-visible on browsers without the
+// pseudo-class (e.g. Safari < 15.4); this runs inside a document-level focus
+// listener, so translate that failure into "not keyboard focus" and skip the
+// focus tooltip instead of throwing on every focus event.
+function matchesFocusVisible(target: HTMLElement) {
+  try {
+    return target.matches(":focus-visible");
+  } catch {
+    return false;
+  }
+}
+
 function estimatedTooltipWidth(text: string) {
   return Math.min(
     MAX_TOOLTIP_WIDTH,
@@ -111,7 +123,12 @@ export function GlobalTooltip() {
     };
     const onFocusIn = (event: FocusEvent) => {
       const target = tooltipTarget(event.target);
-      if (target) showFor(target);
+      // Only keyboard-driven focus deserves a tooltip. Touch taps also focus
+      // buttons on some mobile browsers, and a tooltip shown then lingers
+      // until the next tap blurs the button. Browsers exclude exactly that
+      // case from :focus-visible while keeping keyboard navigation focused.
+      if (!target || !matchesFocusVisible(target)) return;
+      showFor(target);
     };
     const onFocusOut = () => hide();
     const onPointerDown = () => hide();
