@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.7 - 2026-08-26
+
 ### Changed
 
 - Align Files and Changes with shared Git status, keyboard file-tree navigation,
