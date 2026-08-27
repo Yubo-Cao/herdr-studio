@@ -1,4 +1,4 @@
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { sshCommandArgv } from "../bridge/ssh-command";
 import {
   GIT_DIFF_MAX_BYTES,
@@ -25,13 +25,11 @@ function lastStepStoreDisposedError() {
 }
 
 export type LastStepBaselineStore = {
-  capture: (root: string) => Promise<string>;
   captureWorkspace: (
     workspaceId: string,
     resolveRoot: () => Promise<string>,
   ) => Promise<string>;
   completeWorkspace: (workspaceId: string) => Promise<boolean>;
-  resolve: (workspaceId: string, root: string) => Promise<string | undefined>;
   resolveCompleted: (
     workspaceId: string,
     root: string,
@@ -50,13 +48,7 @@ export type LastStepBaselineStore = {
   deleteSnapshot: (snapshotId: string) => void;
   delete: (root: string) => void;
   dispose: () => Promise<void>;
-  clear: () => void;
 };
-
-type WorkspaceBaselineState =
-  | { status: "pending"; promise: Promise<string>; version: number }
-  | { status: "ready"; root: string; baseline: string; version: number }
-  | { status: "unavailable"; version: number };
 
 type WorkspaceActivityCycle = {
   version: number;
@@ -299,11 +291,36 @@ function runGitShellCommand({
 
 export async function snapshotWorktreeTree({
   root,
+  indexFile,
   host,
   shQuote,
   runProcessWithCodeTimeout,
-}: { root: string } & GitCommandContext): Promise<string> {
-  const command = `
+}: { root: string; indexFile?: string } & GitCommandContext): Promise<string> {
+  // With a throwaway index, `git add -A` has no stat cache and content-hashes
+  // every file in the worktree. Passing a reusable indexFile keeps the cache
+  // warm so repeat snapshots only re-hash files whose stat changed. Callers
+  // passing indexFile must serialize calls sharing it; the script removes a
+  // stale index lock left behind by a killed git process.
+  const command = indexFile
+    ? `
+set -eu
+export GIT_INDEX_FILE=${shQuote(indexFile)}
+rm -f "$GIT_INDEX_FILE.lock"
+if [ ! -f "$GIT_INDEX_FILE" ]; then
+  if git -C ${shQuote(root)} rev-parse --verify --quiet 'HEAD^{commit}' >/dev/null; then
+    git -C ${shQuote(root)} read-tree HEAD
+  else
+    git -C ${shQuote(root)} read-tree --empty
+  fi
+fi
+git -C ${shQuote(root)} add -A
+git -C ${shQuote(root)} write-tree
+# Every git index write, including the cache-tree update from write-tree,
+# re-creates the file with umask permissions; keep the long-lived reusable
+# index owner-only on multi-user hosts.
+chmod 600 "$GIT_INDEX_FILE"
+`
+    : `
 set -eu
 index_file=$(mktemp "\${TMPDIR:-/tmp}/herdr-git-index.XXXXXX")
 cleanup() { rm -f "$index_file" "$index_file.lock"; }
@@ -336,9 +353,7 @@ git -C ${shQuote(root)} write-tree
 export function createLastStepBaselineStore(
   context: GitCommandContext,
 ): LastStepBaselineStore {
-  const baselines = new Map<string, string>();
-  const captureVersions = new Map<string, number>();
-  const workspaceStates = new Map<string, WorkspaceBaselineState>();
+  const workspaceVersions = new Map<string, number>();
   const completedRanges = new Map<
     string,
     { root: string; baseline: string; current: string }
@@ -350,6 +365,9 @@ export function createLastStepBaselineStore(
     { workspaceId: string; root: string; baseline: string; current: string }
   >();
   const inFlight = new Set<Promise<unknown>>();
+  const snapshotQueues = new Map<string, Promise<unknown>>();
+  // Isolates the reusable snapshot indexes of other stores on the same host.
+  const storeId = randomUUID();
   let disposed = false;
   let disposeTask: Promise<void> | null = null;
 
@@ -365,9 +383,7 @@ export function createLastStepBaselineStore(
   }
 
   function clearState() {
-    baselines.clear();
-    captureVersions.clear();
-    workspaceStates.clear();
+    workspaceVersions.clear();
     completedRanges.clear();
     completedVersions.clear();
     activityCycles.clear();
@@ -384,75 +400,81 @@ export function createLastStepBaselineStore(
     }
   }
 
-  async function captureRoot(root: string, invalidateSnapshots = true) {
-    assertActive();
-    const version = (captureVersions.get(root) ?? 0) + 1;
-    captureVersions.set(root, version);
-    baselines.delete(root);
-    if (invalidateSnapshots) {
-      deleteSnapshots((_workspaceId, snapshotRoot) => snapshotRoot === root);
+  // A fixed literal path is required so cleanups can run without an extra
+  // round trip; /tmp is the same fallback the one-shot snapshot script uses.
+  function snapshotIndexFile(root: string) {
+    const key = createHash("sha256").update(root).digest("hex").slice(0, 16);
+    return `/tmp/herdr-git-index-${storeId}-${key}`;
+  }
+
+  // Serializes snapshots per root so concurrent captures never contend on
+  // the shared reusable index lock.
+  function enqueueForRoot<T>(root: string, task: () => Promise<T>): Promise<T> {
+    const prior = snapshotQueues.get(root) ?? Promise.resolve();
+    const turn = prior.then(task);
+    // The chain carries only the settlement so a failed turn cannot reject
+    // later turns; callers still receive the original rejection.
+    snapshotQueues.set(
+      root,
+      turn.then(
+        () => undefined,
+        () => undefined,
+      ),
+    );
+    return turn;
+  }
+
+  function removeSnapshotIndex(root: string) {
+    const indexFile = snapshotIndexFile(root);
+    const command = `rm -f ${context.shQuote(indexFile)} ${context.shQuote(`${indexFile}.lock`)}`;
+    return context.runProcessWithCodeTimeout(
+      context.host
+        ? sshCommandArgv(context.host, command)
+        : ["sh", "-lc", command],
+      GIT_DIFF_TIMEOUT_MS,
+    );
+  }
+
+  async function snapshotRoot(root: string): Promise<string> {
+    try {
+      return await enqueueForRoot(root, () =>
+        snapshotWorktreeTree({
+          root,
+          indexFile: snapshotIndexFile(root),
+          ...context,
+        }),
+      );
+    } catch (error) {
+      // A failed snapshot can leave the reusable index stale (e.g. referring
+      // to pruned objects), so queue its removal behind any serialized
+      // snapshot for this root and let the next capture rebuild it cold.
+      // Removal is best-effort: a failure only leaves a small file in /tmp.
+      void enqueueForRoot(root, () => removeSnapshotIndex(root)).catch(
+        () => undefined,
+      );
+      throw error;
     }
-    const tree = await snapshotWorktreeTree({ root, ...context });
-    assertActive();
-    if (captureVersions.get(root) === version) baselines.set(root, tree);
-    return { tree, version };
   }
 
   return {
-    async capture(root) {
-      const captured = await track(captureRoot(root));
-      return captured.tree;
-    },
     captureWorkspace(workspaceId, resolveRoot) {
       if (disposed) return Promise.reject(lastStepStoreDisposedError());
       const priorCycle = activityCycles.get(workspaceId);
-      const version = (workspaceStates.get(workspaceId)?.version ?? 0) + 1;
-      let resolvedRoot: string | undefined;
-      let rootCaptureVersion: number | undefined;
+      const version = (workspaceVersions.get(workspaceId) ?? 0) + 1;
+      workspaceVersions.set(workspaceId, version);
       const capture = track(
         (async () => {
-          try {
-            resolvedRoot = await resolveRoot();
-            const captured = await captureRoot(resolvedRoot, false);
-            rootCaptureVersion = captured.version;
-            if (activityCycles.get(workspaceId)?.version === version) {
-              workspaceStates.set(workspaceId, {
-                status: "ready",
-                root: resolvedRoot,
-                baseline: captured.tree,
-                version,
-              });
-            }
-            return { root: resolvedRoot, baseline: captured.tree };
-          } catch (error) {
-            if (activityCycles.get(workspaceId)?.version === version) {
-              if (
-                resolvedRoot &&
-                rootCaptureVersion !== undefined &&
-                captureVersions.get(resolvedRoot) === rootCaptureVersion
-              ) {
-                baselines.delete(resolvedRoot);
-                captureVersions.delete(resolvedRoot);
-              }
-              workspaceStates.set(workspaceId, {
-                status: "unavailable",
-                version,
-              });
-            }
-            throw error;
-          }
+          const root = await resolveRoot();
+          assertActive();
+          const baseline = await snapshotRoot(root);
+          assertActive();
+          return { root, baseline };
         })(),
       );
       const cycle = { version, capture };
       activityCycles.set(workspaceId, cycle);
       if (priorCycle?.completion) priorCycle.nextCapture = capture;
-      const promise = capture.then((result) => result.baseline);
-      workspaceStates.set(workspaceId, {
-        status: "pending",
-        promise,
-        version,
-      });
-      return promise;
+      return capture.then((result) => result.baseline);
     },
     completeWorkspace(workspaceId) {
       if (disposed) return Promise.reject(lastStepStoreDisposedError());
@@ -466,10 +488,7 @@ export function createLastStepBaselineStore(
         } catch {
           return false;
         }
-        let current = await snapshotWorktreeTree({
-          root: captured.root,
-          ...context,
-        });
+        let current = await snapshotRoot(captured.root);
         if (cycle.nextCapture) {
           try {
             const next = await cycle.nextCapture;
@@ -497,23 +516,6 @@ export function createLastStepBaselineStore(
       })();
       cycle.completion = track(task);
       return cycle.completion;
-    },
-    async resolve(workspaceId, root) {
-      if (disposed) return undefined;
-      let state = workspaceStates.get(workspaceId);
-      if (state?.status === "pending") {
-        try {
-          await state.promise;
-        } catch {
-          return undefined;
-        }
-        state = workspaceStates.get(workspaceId);
-      }
-      if (state?.status === "unavailable") return undefined;
-      if (state?.status === "ready") {
-        return state.root === root ? state.baseline : undefined;
-      }
-      return baselines.get(root);
     },
     async resolveCompleted(workspaceId, root) {
       if (disposed) return undefined;
@@ -553,17 +555,7 @@ export function createLastStepBaselineStore(
     },
     deleteSnapshot: (snapshotId) => snapshots.delete(snapshotId),
     delete(root) {
-      baselines.delete(root);
       deleteSnapshots((_workspaceId, snapshotRoot) => snapshotRoot === root);
-      captureVersions.delete(root);
-      for (const [workspaceId, state] of workspaceStates) {
-        if (state.status === "ready" && state.root === root) {
-          workspaceStates.set(workspaceId, {
-            status: "unavailable",
-            version: state.version,
-          });
-        }
-      }
       for (const [workspaceId, range] of completedRanges) {
         if (range.root === root) {
           completedRanges.delete(workspaceId);
@@ -579,11 +571,16 @@ export function createLastStepBaselineStore(
         // shutdown boundary only drains every task before final state clearing.
         await Promise.allSettled(Array.from(inFlight));
         clearState();
+        // Drop every reusable snapshot index this store created; removals
+        // are best-effort for the same reason as in snapshotRoot.
+        await Promise.allSettled(
+          Array.from(snapshotQueues.keys(), (root) =>
+            removeSnapshotIndex(root),
+          ),
+        );
+        snapshotQueues.clear();
       })();
       return disposeTask;
-    },
-    clear() {
-      clearState();
     },
   };
 }

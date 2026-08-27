@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdtemp, rename, rm, writeFile } from "node:fs/promises";
+import { access, mkdtemp, rename, rm, stat, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunProcessWithCodeTimeout } from "./file-types";
@@ -227,6 +227,128 @@ describe("last-step worktree snapshots", () => {
     expect(command).toContain("trap cleanup EXIT HUP INT TERM");
   });
 
+  test("tracks worktree changes across snapshots with a reusable index", async () => {
+    const root = await initRepository();
+    const indexDir = await mkdtemp(join(tmpdir(), "herdr-git-index-test-"));
+    const indexFile = join(indexDir, "index");
+    try {
+      await writeFile(join(root, "tracked.txt"), "one\n");
+      const first = await snapshotWorktreeTree({
+        root,
+        indexFile,
+        shQuote,
+        runProcessWithCodeTimeout,
+      });
+      await access(indexFile);
+      expect((await stat(indexFile)).mode & 0o777).toBe(0o600);
+
+      await writeFile(join(root, "tracked.txt"), "two\n");
+      const second = await snapshotWorktreeTree({
+        root,
+        indexFile,
+        shQuote,
+        runProcessWithCodeTimeout,
+      });
+      expect(second).not.toBe(first);
+      expect((await stat(indexFile)).mode & 0o777).toBe(0o600);
+
+      await writeFile(join(root, "untracked.txt"), "new\n");
+      const third = await snapshotWorktreeTree({
+        root,
+        indexFile,
+        shQuote,
+        runProcessWithCodeTimeout,
+      });
+      const thirdFiles = await git(root, "ls-tree", "-r", "--name-only", third);
+      expect(thirdFiles.trim().split("\n").sort()).toEqual([
+        "tracked.txt",
+        "untracked.txt",
+      ]);
+
+      await rm(join(root, "tracked.txt"));
+      const fourth = await snapshotWorktreeTree({
+        root,
+        indexFile,
+        shQuote,
+        runProcessWithCodeTimeout,
+      });
+      const fourthFiles = await git(
+        root,
+        "ls-tree",
+        "-r",
+        "--name-only",
+        fourth,
+      );
+      expect(fourthFiles.trim()).toBe("untracked.txt");
+    } finally {
+      await rm(root, { recursive: true, force: true });
+      await rm(indexDir, { recursive: true, force: true });
+    }
+  });
+
+  test("removes reusable snapshot indexes during disposal", async () => {
+    const root = await initRepository();
+    const commands: string[] = [];
+    const runner: RunProcessWithCodeTimeout = async (argv, timeoutMs) => {
+      commands.push(argv.join(" "));
+      return runProcessWithCodeTimeout(argv, timeoutMs);
+    };
+    try {
+      await writeFile(join(root, "tracked.txt"), "baseline\n");
+      const baselines = createLastStepBaselineStore({
+        shQuote,
+        runProcessWithCodeTimeout: runner,
+      });
+      await baselines.captureWorkspace("workspace", async () => root);
+      await baselines.completeWorkspace("workspace");
+      await baselines.dispose();
+      const removals = commands.filter((command) =>
+        command.includes("rm -f '/tmp/herdr-git-index-"),
+      );
+      expect(removals.length).toBeGreaterThan(0);
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
+  test("rebuilds the reusable snapshot index after a failed snapshot", async () => {
+    const root = await initRepository();
+    const commands: string[] = [];
+    let failSnapshots = true;
+    const runner: RunProcessWithCodeTimeout = async (argv, timeoutMs) => {
+      const joined = argv.join(" ");
+      commands.push(joined);
+      if (failSnapshots && joined.includes("herdr-git-index-")) {
+        return { code: 1, stdout: "", stderr: "snapshot failed" };
+      }
+      return runProcessWithCodeTimeout(argv, timeoutMs);
+    };
+    try {
+      await writeFile(join(root, "tracked.txt"), "baseline\n");
+      const baselines = createLastStepBaselineStore({
+        shQuote,
+        runProcessWithCodeTimeout: runner,
+      });
+      await expect(
+        baselines.captureWorkspace("workspace", async () => root),
+      ).rejects.toThrow("snapshot failed");
+      failSnapshots = false;
+      const baseline = await baselines.captureWorkspace(
+        "workspace",
+        async () => root,
+      );
+      expect(baseline).toMatch(/^[0-9a-f]{40,64}$/);
+      expect(
+        commands.some((command) =>
+          command.includes("rm -f '/tmp/herdr-git-index-"),
+        ),
+      ).toBe(true);
+      await baselines.dispose();
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
+
   test("includes commits and untracked files made after the baseline", async () => {
     const root = await initRepository();
     try {
@@ -438,9 +560,15 @@ describe("last-step worktree snapshots", () => {
       const firstCompletion = baselines.completeWorkspace("workspace");
       await firstCompletionStarted;
 
-      await baselines.captureWorkspace("workspace", async () => root);
-      await writeFile(join(root, "tracked.txt"), "second step\n");
+      // Snapshots for one root are serialized, so this capture is queued
+      // behind the in-flight completion snapshot until its gate opens.
+      const secondCapture = baselines.captureWorkspace(
+        "workspace",
+        async () => root,
+      );
       releaseFirstCompletion();
+      await secondCapture;
+      await writeFile(join(root, "tracked.txt"), "second step\n");
       expect(await firstCompletion).toBe(true);
 
       const whileSecondIsActive = await readDiffSummary({
@@ -697,7 +825,11 @@ describe("last-step worktree snapshots", () => {
     try {
       await writeFile(join(root, "tracked.txt"), "baseline\n");
       const baselines = baselineStore();
-      const baseline = await baselines.capture(root);
+      const baseline = await snapshotWorktreeTree({
+        root,
+        shQuote,
+        runProcessWithCodeTimeout,
+      });
       const validSnapshot = baselines.rememberSnapshot(
         "workspace",
         root,
@@ -729,7 +861,6 @@ describe("last-step worktree snapshots", () => {
         expiredError = error;
       }
       expect((expiredError as Error).message).toContain("snapshot expired");
-      expect(await baselines.resolve("workspace", root)).toBe(baseline);
       expect(
         baselines.resolveSnapshot("workspace", root, validSnapshot),
       ).toEqual({ baseline, current: baseline });
@@ -761,7 +892,6 @@ describe("last-step worktree snapshots", () => {
         baselineError = error;
       }
       expect((baselineError as Error).message).toContain("snapshot expired");
-      expect(await baselines.resolve("workspace", root)).toBe(baseline);
       expect(
         baselines.resolveSnapshot("workspace", root, validSnapshot),
       ).toEqual({ baseline, current: baseline });
@@ -807,8 +937,9 @@ describe("last-step worktree snapshots", () => {
       });
       const older = baselines.captureWorkspace("older", async () => root);
       await firstStarted;
+      // Snapshots for one root are serialized, so this capture is queued
+      // behind the older one and must survive its failure.
       const newer = baselines.captureWorkspace("newer", async () => root);
-      await newer;
       releaseFirst();
       let olderError: unknown;
       try {
@@ -817,7 +948,13 @@ describe("last-step worktree snapshots", () => {
         olderError = error;
       }
       expect((olderError as Error).message).toContain("older capture failed");
-      expect(typeof (await baselines.resolve("newer", root))).toBe("string");
+      const newerBaseline = await newer;
+      expect(newerBaseline).toMatch(/^[0-9a-f]{40,64}$/);
+      expect(await baselines.completeWorkspace("newer")).toBe(true);
+      expect(await baselines.resolveCompleted("newer", root)).toEqual({
+        baseline: newerBaseline,
+        current: newerBaseline,
+      });
     } finally {
       releaseFirst();
       await rm(root, { recursive: true, force: true });
@@ -1100,7 +1237,9 @@ describe("last-step worktree snapshots", () => {
       expect((captureError as Error & { code?: string }).code).toBe(
         "LAST_STEP_STORE_DISPOSED",
       );
-      expect(await baselines.resolve("workspace", root)).toBeUndefined();
+      expect(
+        await baselines.resolveCompleted("workspace", root),
+      ).toBeUndefined();
       await expect(
         baselines.captureWorkspace("workspace", async () => root),
       ).rejects.toMatchObject({ code: "LAST_STEP_STORE_DISPOSED" });
@@ -1115,10 +1254,8 @@ describe("last-step worktree snapshots", () => {
     let deleted = false;
     const missingTree = "0".repeat(40);
     const baselines: LastStepBaselineStore = {
-      capture: async () => missingTree,
       captureWorkspace: async () => missingTree,
       completeWorkspace: async () => false,
-      resolve: async () => missingTree,
       resolveCompleted: async () => ({
         baseline: missingTree,
         current: missingTree,
@@ -1130,7 +1267,6 @@ describe("last-step worktree snapshots", () => {
         deleted = true;
       },
       dispose: async () => undefined,
-      clear: () => undefined,
     };
     try {
       const summary = await readDiffSummary({
