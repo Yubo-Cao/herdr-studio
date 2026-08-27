@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.8 - 2026-08-27
+
 ### Added
 
 - Add a Last step scope to Changes that shows the latest completed agent
