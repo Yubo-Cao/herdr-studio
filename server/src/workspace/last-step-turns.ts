@@ -1,3 +1,5 @@
+import { herdrEventName } from "../utils/herdr-events";
+
 type PaneActivity = {
   workspaceId: string;
   status: string;
@@ -12,21 +14,6 @@ type PendingTransition = {
   timer: ReturnType<typeof setTimeout>;
 };
 
-function eventName(event: unknown): string | null {
-  if (!event || typeof event !== "object" || Array.isArray(event)) return null;
-  const envelope = event as EventEnvelope;
-  if (typeof envelope.event === "string") return envelope.event;
-  if (
-    envelope.data &&
-    typeof envelope.data === "object" &&
-    !Array.isArray(envelope.data)
-  ) {
-    const type = (envelope.data as { type?: unknown }).type;
-    if (typeof type === "string") return type;
-  }
-  return null;
-}
-
 function eventData(event: unknown): Record<string, unknown> | null {
   if (!event || typeof event !== "object" || Array.isArray(event)) return null;
   const data = (event as EventEnvelope).data;
@@ -40,7 +27,6 @@ export type LastStepTurnTracker = {
   reconcilePaneList: (result: unknown, startedAtRevision?: number) => void;
   handleHerdrEvent: (event: unknown) => void;
   stop: () => Promise<void>;
-  clear: () => void;
 };
 
 /** Tracks debounced workspace quiet/active boundaries from per-pane status. */
@@ -267,7 +253,7 @@ export function createLastStepTurnTracker(args: {
     },
     handleHerdrEvent(event) {
       if (stopping) return;
-      const name = eventName(event);
+      const name = herdrEventName(event);
       const data = eventData(event);
       if (!name || !data) return;
 
@@ -297,9 +283,25 @@ export function createLastStepTurnTracker(args: {
       }
 
       if (name === "pane.moved" || name === "pane_moved") {
-        const paneId = data.pane_id;
-        const workspaceId = data.workspace_id ?? data.new_workspace_id;
+        // Wire shape: { previous_pane_id, previous_workspace_id,
+        // previous_tab_id, pane: PaneInfo, created_workspace?, created_tab?,
+        // closed_workspace_id?, closed_tab_id? }. A move can allocate a new
+        // pane id, so activity tracking must follow both ids.
+        const previousPaneId = data.previous_pane_id;
+        const previousWorkspaceId = data.previous_workspace_id;
+        const pane =
+          data.pane &&
+          typeof data.pane === "object" &&
+          !Array.isArray(data.pane)
+            ? (data.pane as Record<string, unknown>)
+            : null;
+        const paneId = pane?.pane_id;
+        const workspaceId = pane?.workspace_id;
         if (
+          typeof previousPaneId !== "string" ||
+          !previousPaneId ||
+          typeof previousWorkspaceId !== "string" ||
+          !previousWorkspaceId ||
           typeof paneId !== "string" ||
           !paneId ||
           typeof workspaceId !== "string" ||
@@ -307,18 +309,22 @@ export function createLastStepTurnTracker(args: {
         ) {
           return;
         }
-        const previous = panes.get(paneId);
-        if (!previous || previous.workspaceId === workspaceId) return;
+        const previous = panes.get(previousPaneId);
         const status =
-          typeof data.agent_status === "string"
-            ? data.agent_status
-            : previous.status;
+          typeof pane.agent_status === "string"
+            ? pane.agent_status
+            : (previous?.status ?? "unknown");
         activityRevision += 1;
+        paneEventRevisions.set(previousPaneId, activityRevision);
+        panes.delete(previousPaneId);
         paneEventRevisions.set(paneId, activityRevision);
         closedWorkspaceRevisions.delete(workspaceId);
         panes.set(paneId, { workspaceId, status });
-        observeWorkspace(previous.workspaceId);
-        observeWorkspace(workspaceId);
+        observeWorkspace(previousWorkspaceId);
+        if (previous && previous.workspaceId !== previousWorkspaceId) {
+          observeWorkspace(previous.workspaceId);
+        }
+        if (workspaceId !== previousWorkspaceId) observeWorkspace(workspaceId);
         return;
       }
 
@@ -361,10 +367,6 @@ export function createLastStepTurnTracker(args: {
       // Snapshot errors are already reported inside each worker; allSettled is
       // used only at this shutdown boundary to drain every in-flight process.
       await Promise.allSettled(workers.values());
-      resetState();
-    },
-    clear() {
-      stopping = true;
       resetState();
     },
   };

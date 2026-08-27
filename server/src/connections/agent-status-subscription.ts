@@ -1,4 +1,5 @@
 import type { HerdrClient } from "../bridge/herdr-client";
+import { herdrEventName } from "../utils/herdr-events";
 
 /**
  * Herdr emits `pane.agent_status_changed` only through parameterized per-pane
@@ -37,23 +38,6 @@ const MEMBERSHIP_EVENT_TYPES = new Set([
   "tab_closed",
   "workspace_closed",
 ]);
-
-function herdrEventName(event: unknown): string | null {
-  if (!event || typeof event !== "object" || Array.isArray(event)) return null;
-  const envelope = event as {
-    event?: unknown;
-    data?: unknown;
-  };
-  if (typeof envelope.event === "string" && envelope.event) {
-    return envelope.event;
-  }
-  const data = envelope.data;
-  if (data && typeof data === "object" && !Array.isArray(data)) {
-    const type = (data as { type?: unknown }).type;
-    if (typeof type === "string" && type) return type;
-  }
-  return null;
-}
 
 export function agentPaneIdsFromPaneList(result: unknown): string[] {
   const panes = (result as { panes?: unknown } | null)?.panes;

@@ -244,13 +244,60 @@ describe("last-step turn tracking", () => {
     });
 
     tracker.handleHerdrEvent({
-      event: "pane.moved",
-      data: { pane_id: "p1", workspace_id: "new" },
+      event: "pane_moved",
+      data: {
+        type: "pane_moved",
+        previous_pane_id: "p1",
+        previous_workspace_id: "old",
+        previous_tab_id: "old:tab1",
+        pane: {
+          pane_id: "p2",
+          workspace_id: "new",
+          agent_status: "working",
+        },
+      },
     });
     await flushTransitions();
 
     expect(completions).toEqual(["old"]);
     expect(captures).toEqual(["new"]);
+
+    tracker.handleHerdrEvent(status("p2", "new", "done"));
+    await flushTransitions();
+
+    expect(completions).toEqual(["old", "new"]);
+    await tracker.stop();
+  });
+
+  test("follows pane id changes for moves within one workspace", async () => {
+    const completions: string[] = [];
+    const tracker = createLastStepTurnTracker({
+      captureWorkspaceBaseline: async () => {},
+      completeWorkspaceStep: async (workspaceId) => {
+        completions.push(workspaceId);
+      },
+    });
+
+    tracker.handleHerdrEvent(status("p1", "w1", "working"));
+    await flushTransitions();
+    tracker.handleHerdrEvent({
+      event: "pane_moved",
+      data: {
+        type: "pane_moved",
+        previous_pane_id: "p1",
+        previous_workspace_id: "w1",
+        previous_tab_id: "w1:tab1",
+        pane: {
+          pane_id: "p2",
+          workspace_id: "w1",
+          agent_status: "working",
+        },
+      },
+    });
+    tracker.handleHerdrEvent(status("p2", "w1", "done"));
+    await flushTransitions();
+
+    expect(completions).toEqual(["w1"]);
     await tracker.stop();
   });
 
