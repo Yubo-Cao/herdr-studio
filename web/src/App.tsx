@@ -10,6 +10,7 @@ import {
   LoaderCircle,
   MoreHorizontal,
   PanelTop,
+  SquareStack,
   SquareTerminal,
   X,
 } from "lucide-react";
@@ -52,6 +53,7 @@ import {
 } from "./components/FileExplorerDialog";
 import { type ActiveFilePreviewSelection } from "./components/FilePreviewContent";
 import { GlobalTooltip } from "./components/GlobalTooltip";
+import { MobileTabSheet } from "./components/MobileTabSheet";
 import { requestCloseTab, TabBar } from "./components/TabBar";
 import { WorkspaceInspectorHost } from "./components/WorkspaceInspectorHost";
 import { WorkspaceTree } from "./components/WorkspaceTree";
@@ -1006,6 +1008,7 @@ export default function App() {
     useState<MobileTerminalSideShortcuts>(loadMobileTerminalSideShortcuts);
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [mobileControlsCollapsed, setMobileControlsCollapsed] = useState(false);
+  const [mobileTabSheetOpen, setMobileTabSheetOpen] = useState(false);
   const [paneJumpOpen, setPaneJumpOpen] = useState(false);
   const [paneJumpIndex, setPaneJumpIndex] = useState(0);
   const paneJumpCtrlDownRef = useRef(false);
@@ -1031,6 +1034,15 @@ export default function App() {
   );
   const resourceRuntimeKeyRef = useRef(resourceUiKey);
   const focusedWorkspace = s.workspaces.find((w) => w.focused);
+  const focusedWorkspaceTabCount = focusedWorkspace
+    ? s.tabs.filter((tab) => tab.workspace_id === focusedWorkspace.workspace_id)
+        .length
+    : 0;
+  useEffect(() => {
+    // Drop the sheet when its context disappears so it cannot resurface
+    // unprompted on the next mobile layout or focused workspace.
+    if (!mobile || !focusedWorkspace) setMobileTabSheetOpen(false);
+  }, [mobile, focusedWorkspace]);
   const activePaneId = activePaneIdForSnapshot(s);
   const activePane = activePaneId
     ? s.panes.find((pane) => pane.pane_id === activePaneId)
@@ -2377,6 +2389,24 @@ export default function App() {
         </button>
         <button
           type="button"
+          className={mobileTabSheetOpen ? "active" : ""}
+          title="Tabs"
+          aria-label="Show tabs"
+          aria-pressed={mobileTabSheetOpen}
+          tabIndex={mobileControlsCollapsed ? -1 : 0}
+          disabled={!focusedWorkspace}
+          onClick={() => setMobileTabSheetOpen((value) => !value)}
+        >
+          <SquareStack size={16} />
+          {focusedWorkspaceTabCount > 0 ? (
+            <span className="mobile-nav-badge" aria-hidden="true">
+              {focusedWorkspaceTabCount}
+            </span>
+          ) : null}
+          <span className="mobile-nav-label">Tabs</span>
+        </button>
+        <button
+          type="button"
           className={mobileView === "files" ? "active" : ""}
           title="Files"
           aria-label="Show workspace files"
@@ -2415,6 +2445,11 @@ export default function App() {
           <span className="mobile-nav-label">History</span>
         </button>
       </nav>
+      <MobileTabSheet
+        open={mobile && mobileTabSheetOpen}
+        onClose={() => setMobileTabSheetOpen(false)}
+        onShowSession={activateTerminalSurface}
+      />
       <button
         type="button"
         className={`mobile-workspace-shortcut ${
