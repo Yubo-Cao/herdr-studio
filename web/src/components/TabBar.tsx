@@ -17,7 +17,7 @@ interface TabMenuState {
   y: number;
 }
 
-function tabName(tab?: Tab) {
+export function tabName(tab?: Tab) {
   if (!tab) return "";
   return tab.label && tab.label !== String(tab.number)
     ? tab.label

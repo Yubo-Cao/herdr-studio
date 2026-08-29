@@ -4,6 +4,9 @@
 
 ### Added
 
+- Add a mobile tab switcher: a Tabs button with a count badge in the mobile
+  nav opens a bottom sheet for creating, switching, and closing tabs when the
+  tab strip is hidden.
 - Preview PDFs and workspace-local Markdown images in File Explorer.
 - Show the agent's current directory next to agents in the workspace tree.
 
