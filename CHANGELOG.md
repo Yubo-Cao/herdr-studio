@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### Added
+
+- Preview PDF files in File Explorer and load workspace-local images in rendered
+  Markdown previews, including paths relative to the Markdown document.
+
+### Changed
+
+- Present the selected file name as the preview heading and move Changes into a
+  separate header toggle.
+
 ## 0.4.9 - 2026-08-28
 
 ### Changed
