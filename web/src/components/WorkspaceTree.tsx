@@ -1,6 +1,11 @@
 import { shallowEqual, store, useStoreSelector } from "../store";
 import type { GitStatusSummary, Pane, Workspace } from "../types";
 import { shortId } from "../utils";
+import {
+  clearTerminalComposerDrafts,
+  terminalComposerCloseWarning,
+  terminalComposerDraftPaneIds,
+} from "../terminalComposer";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ContextMenu, type ContextMenuState } from "./ContextMenu";
 import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
@@ -178,6 +183,7 @@ export function WorkspaceTree({
   const s = useStoreSelector(
     (state) => ({
       activeConnectionId: state.activeConnectionId,
+      connectionGeneration: state.connectionGeneration,
       lastRefresh: state.lastRefresh,
       layout: state.layout,
       panes: state.panes,
@@ -476,14 +482,27 @@ export function WorkspaceTree({
         title="Close Agent Pane"
         message={
           pendingClosePane
-            ? `Close pane "${shortId(pendingClosePane.pane_id)}"?`
+            ? `Close pane "${shortId(pendingClosePane.pane_id)}"?${terminalComposerCloseWarning(
+                terminalComposerDraftPaneIds(
+                  s.activeConnectionId,
+                  s.connectionGeneration,
+                  [pendingClosePane.pane_id],
+                ).length,
+              )}`
             : "Close this pane?"
         }
         confirmLabel="Close"
         danger
         onClose={() => setPendingClosePane(null)}
         onConfirm={() => {
-          if (pendingClosePane) store.closePane(pendingClosePane.pane_id);
+          if (pendingClosePane) {
+            clearTerminalComposerDrafts(
+              s.activeConnectionId,
+              s.connectionGeneration,
+              [pendingClosePane.pane_id],
+            );
+            store.closePane(pendingClosePane.pane_id);
+          }
         }}
       />
       <CreateWorkspaceDialog

@@ -10,6 +10,7 @@ import {
   LoaderCircle,
   MoreHorizontal,
   PanelTop,
+  SquarePen,
   SquareStack,
   SquareTerminal,
   X,
@@ -37,7 +38,6 @@ import {
 import { AgentIcon } from "./components/AgentIcon";
 import { paneHasAgentHistory } from "./components/agentSession";
 import { CloseButton } from "./components/CloseButton";
-import { clearDiffContentResourceState } from "./components/diffContentState";
 import { CommandCombobox } from "./components/CommandCombobox";
 import { CONFIG_MENU_ID, ConfigMenu } from "./components/ConfigMenu";
 import { ConnectionSwitcher } from "./components/ConnectionSwitcher";
@@ -46,6 +46,7 @@ import {
   clearDiffViewerResourceCache,
   prefetchDiffViewerWorkspace,
 } from "./components/DiffViewerPanel";
+import { clearDiffContentResourceState } from "./components/diffContentState";
 import {
   clearFileExplorerResourceCache,
   prefetchFileExplorerWorkspace,
@@ -55,9 +56,9 @@ import { type ActiveFilePreviewSelection } from "./components/FilePreviewContent
 import { GlobalTooltip } from "./components/GlobalTooltip";
 import { MobileTabSheet } from "./components/MobileTabSheet";
 import { requestCloseTab, TabBar } from "./components/TabBar";
+import type { TerminalWorkspaceFileRequest } from "./components/TerminalView";
 import { WorkspaceInspectorHost } from "./components/WorkspaceInspectorHost";
 import { WorkspaceTree } from "./components/WorkspaceTree";
-import type { TerminalWorkspaceFileRequest } from "./components/TerminalView";
 import { isIosDevice } from "./downloadFile";
 import {
   LEGACY_MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY,
@@ -91,34 +92,40 @@ import {
 } from "./store";
 import { adjacentTabId, tabShortcutAction } from "./tabShortcuts";
 import { copyTextFromUserGesture } from "./terminalClipboard";
+import {
+  activateTerminalComposerDraftScope,
+  readTerminalComposerDraft,
+  subscribeTerminalComposerDraft,
+  terminalComposerDraftKey,
+} from "./terminalComposer";
 import { terminalMountKey } from "./terminalConnection";
 import type { FileExplorerEntry, Pane } from "./types";
 import {
   connectionClientScopeKey,
   useConnectionClient,
 } from "./useConnectionClient";
+import { agentClass } from "./utils";
 import {
-  inspectorMaximumSize,
-  isWorkspaceInspectorShortcut,
   INSPECTOR_MIN_BOTTOM,
   INSPECTOR_MIN_RIGHT,
+  type InspectorDock,
+  type InspectorView,
+  inspectorMaximumSize,
+  isWorkspaceInspectorShortcut,
   readInspectorPreferences,
   readResourceFileSelection,
   relativePathWithinCheckout,
+  resolveWorkspaceForScope,
   resourceOwnerKey,
   resourceScopeForWorkspace,
   resourceStateKey,
-  resolveWorkspaceForScope,
   sameResourceOwner,
-  writeInspectorPreferences,
-  writeResourceFileSelection,
-  type InspectorDock,
-  type InspectorView,
   WORKSPACE_INSPECTOR_REQUEST_EVENT,
   type WorkspaceInspectorRequest,
   type WorkspaceInspectorState,
+  writeInspectorPreferences,
+  writeResourceFileSelection,
 } from "./workspaceResource";
-import { agentClass } from "./utils";
 
 const MIN_SIDEBAR = 180;
 const MAX_SIDEBAR = 560;
@@ -136,6 +143,8 @@ type TerminalViewProps = {
   showMobileKeys?: boolean;
   mobileShortcuts?: MobileTerminalShortcutRows;
   mobileSideShortcuts?: MobileTerminalSideShortcuts;
+  composerOpen?: boolean;
+  onComposerOpenChange?: (open: boolean) => void;
   agentHistoryOpen?: boolean;
   onAgentHistoryOpenChange?: (open: boolean) => void;
   onOpenWorkspaceFile?: (request: TerminalWorkspaceFileRequest) => void;
@@ -469,6 +478,14 @@ function isEditableElement(target: EventTarget | null) {
   return target.isContentEditable;
 }
 
+function blurActiveInput(event: React.PointerEvent<HTMLButtonElement>) {
+  if (document.activeElement instanceof HTMLElement) {
+    document.activeElement.blur();
+  }
+  const button = event.currentTarget;
+  window.setTimeout(() => button.blur(), 0);
+}
+
 function tabShortcutIndex(e: KeyboardEvent) {
   if (!e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return null;
   if (/^[1-9]$/.test(e.key)) return Number(e.key) - 1;
@@ -723,12 +740,16 @@ function resizeTargetForSplit(
 function TerminalPaneLayout({
   mobileShortcuts,
   mobileSideShortcuts,
+  composerOpen,
+  onComposerOpenChange,
   agentHistoryOpen,
   onAgentHistoryOpenChange,
   onOpenWorkspaceFile,
 }: {
   mobileShortcuts: MobileTerminalShortcutRows;
   mobileSideShortcuts: MobileTerminalSideShortcuts;
+  composerOpen: boolean;
+  onComposerOpenChange: (open: boolean) => void;
   agentHistoryOpen: boolean;
   onAgentHistoryOpenChange: (open: boolean) => void;
   onOpenWorkspaceFile: (request: TerminalWorkspaceFileRequest) => void;
@@ -775,6 +796,8 @@ function TerminalPaneLayout({
         key={mountKeyForPane(activePaneId)}
         mobileShortcuts={mobileShortcuts}
         mobileSideShortcuts={mobileSideShortcuts}
+        composerOpen={composerOpen}
+        onComposerOpenChange={onComposerOpenChange}
         agentHistoryOpen={agentHistoryOpen}
         onAgentHistoryOpenChange={onAgentHistoryOpenChange}
         onOpenWorkspaceFile={onOpenWorkspaceFile}
@@ -792,12 +815,6 @@ function TerminalPaneLayout({
         (activeIndex - 1 + visiblePanes.length) % visiblePanes.length
       ];
     const nextPane = visiblePanes[(activeIndex + 1) % visiblePanes.length];
-    const blurActiveInput = () => {
-      if (document.activeElement instanceof HTMLElement) {
-        document.activeElement.blur();
-      }
-    };
-
     return (
       <div className="pane-switcher-layout" aria-label="Terminal pane switcher">
         <div className="pane-switcher">
@@ -833,6 +850,8 @@ function TerminalPaneLayout({
           paneId={activePaneId}
           mobileShortcuts={mobileShortcuts}
           mobileSideShortcuts={mobileSideShortcuts}
+          composerOpen={composerOpen}
+          onComposerOpenChange={onComposerOpenChange}
           agentHistoryOpen={agentHistoryOpen}
           onAgentHistoryOpenChange={onAgentHistoryOpenChange}
           onOpenWorkspaceFile={onOpenWorkspaceFile}
@@ -935,6 +954,8 @@ function TerminalPaneLayout({
               showMobileKeys={isActive}
               mobileShortcuts={mobileShortcuts}
               mobileSideShortcuts={mobileSideShortcuts}
+              composerOpen={isActive ? composerOpen : false}
+              onComposerOpenChange={isActive ? onComposerOpenChange : undefined}
               agentHistoryOpen={isActive ? agentHistoryOpen : false}
               onAgentHistoryOpenChange={onAgentHistoryOpenChange}
               onOpenWorkspaceFile={onOpenWorkspaceFile}
@@ -975,6 +996,8 @@ function TerminalPaneLayout({
 export default function App() {
   const s = useStoreSelector(
     (state) => ({
+      activeConnectionId: state.activeConnectionId,
+      connectionGeneration: state.connectionGeneration,
       lastRefresh: state.lastRefresh,
       layout: state.layout,
       notice: state.notice,
@@ -993,6 +1016,12 @@ export default function App() {
   const connectionClient = useConnectionClient();
   useVisualViewportCssVars();
   const mobile = useMobileLayout();
+  useEffect(() => {
+    activateTerminalComposerDraftScope(
+      s.activeConnectionId,
+      s.connectionGeneration,
+    );
+  }, [s.activeConnectionId, s.connectionGeneration]);
   const [sidebarWidth, setSidebarWidth] = useState(loadSidebarWidth);
   const [mobileView, setMobileView] = useState<MobileView>("session");
   const [theme, setTheme] = useState<Theme>(() => loadTheme());
@@ -1009,6 +1038,10 @@ export default function App() {
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [mobileControlsCollapsed, setMobileControlsCollapsed] = useState(false);
   const [mobileTabSheetOpen, setMobileTabSheetOpen] = useState(false);
+  const [openTerminalComposerDraftKey, setOpenTerminalComposerDraftKey] =
+    useState<string | null>(null);
+  const [terminalComposerHasDraft, setTerminalComposerHasDraft] =
+    useState(false);
   const [paneJumpOpen, setPaneJumpOpen] = useState(false);
   const [paneJumpIndex, setPaneJumpIndex] = useState(0);
   const paneJumpCtrlDownRef = useRef(false);
@@ -1039,14 +1072,47 @@ export default function App() {
         .length
     : 0;
   useEffect(() => {
-    // Drop the sheet when its context disappears so it cannot resurface
-    // unprompted on the next mobile layout or focused workspace.
+    // Drop mobile-only controls when their context disappears so they cannot
+    // stay active invisibly or resurface when the mobile layout returns.
     if (!mobile || !focusedWorkspace) setMobileTabSheetOpen(false);
+    if (!mobile) setOpenTerminalComposerDraftKey(null);
   }, [mobile, focusedWorkspace]);
   const activePaneId = activePaneIdForSnapshot(s);
   const activePane = activePaneId
     ? s.panes.find((pane) => pane.pane_id === activePaneId)
     : undefined;
+  const activeTerminalComposerDraftKey =
+    activePaneId && activePane?.terminal_id
+      ? terminalComposerDraftKey(
+          s.activeConnectionId,
+          s.connectionGeneration,
+          activePaneId,
+        )
+      : null;
+  const terminalComposerOpen =
+    mobile &&
+    activeTerminalComposerDraftKey !== null &&
+    openTerminalComposerDraftKey === activeTerminalComposerDraftKey;
+  const setTerminalComposerOpen = useCallback(
+    (open: boolean) => {
+      setOpenTerminalComposerDraftKey(
+        open ? activeTerminalComposerDraftKey : null,
+      );
+    },
+    [activeTerminalComposerDraftKey],
+  );
+  useEffect(() => {
+    if (!activeTerminalComposerDraftKey) {
+      setTerminalComposerHasDraft(false);
+      return;
+    }
+    const update = (draft: string) => setTerminalComposerHasDraft(draft !== "");
+    update(readTerminalComposerDraft(activeTerminalComposerDraftKey));
+    return subscribeTerminalComposerDraft(
+      activeTerminalComposerDraftKey,
+      update,
+    );
+  }, [activeTerminalComposerDraftKey]);
   const paneJumpOptions = useMemo(
     () =>
       paneJumpEntries(
@@ -2389,24 +2455,6 @@ export default function App() {
         </button>
         <button
           type="button"
-          className={mobileTabSheetOpen ? "active" : ""}
-          title="Tabs"
-          aria-label="Show tabs"
-          aria-pressed={mobileTabSheetOpen}
-          tabIndex={mobileControlsCollapsed ? -1 : 0}
-          disabled={!focusedWorkspace}
-          onClick={() => setMobileTabSheetOpen((value) => !value)}
-        >
-          <SquareStack size={16} />
-          {focusedWorkspaceTabCount > 0 ? (
-            <span className="mobile-nav-badge" aria-hidden="true">
-              {focusedWorkspaceTabCount}
-            </span>
-          ) : null}
-          <span className="mobile-nav-label">Tabs</span>
-        </button>
-        <button
-          type="button"
           className={mobileView === "files" ? "active" : ""}
           title="Files"
           aria-label="Show workspace files"
@@ -2460,32 +2508,105 @@ export default function App() {
         aria-pressed={mobileView === "workspaces"}
         aria-hidden={mobileControlsCollapsed}
         tabIndex={mobileControlsCollapsed ? -1 : 0}
+        onPointerDown={blurActiveInput}
         onClick={openWorkspaces}
       >
         <PanelTop size={17} />
       </button>
-      <button
-        type="button"
-        className="mobile-controls-toggle"
-        aria-label={
-          mobileControlsCollapsed
-            ? "Show mobile controls"
-            : "Hide mobile controls"
-        }
-        title={
-          mobileControlsCollapsed
-            ? "Show mobile controls"
-            : "Hide mobile controls"
-        }
-        aria-pressed={mobileControlsCollapsed}
-        onClick={() => setMobileControlsCollapsed((value) => !value)}
-      >
-        {mobileControlsCollapsed ? (
-          <MoreHorizontal size={17} />
-        ) : (
-          <X size={17} />
-        )}
-      </button>
+      <div className="mobile-terminal-controls">
+        <nav
+          className="mobile-nav mobile-terminal-tools"
+          aria-label={
+            activeTerminalComposerDraftKey
+              ? "Tabs and terminal composer"
+              : "Tabs"
+          }
+          aria-hidden={mobileControlsCollapsed}
+        >
+          <button
+            type="button"
+            className={mobileTabSheetOpen ? "active" : ""}
+            title="Tabs"
+            aria-label="Show tabs"
+            aria-pressed={mobileTabSheetOpen}
+            tabIndex={mobileControlsCollapsed ? -1 : 0}
+            disabled={!focusedWorkspace}
+            onPointerDown={blurActiveInput}
+            onClick={() => {
+              const open = !mobileTabSheetOpen;
+              setMobileTabSheetOpen(open);
+              if (open) setTerminalComposerOpen(false);
+            }}
+          >
+            <SquareStack size={16} />
+            {focusedWorkspaceTabCount > 0 ? (
+              <span className="mobile-nav-badge" aria-hidden="true">
+                {focusedWorkspaceTabCount}
+              </span>
+            ) : null}
+            <span className="mobile-nav-label">Tabs</span>
+          </button>
+          {activeTerminalComposerDraftKey ? (
+            <button
+              type="button"
+              className={terminalComposerOpen ? "active" : ""}
+              title={
+                terminalComposerOpen
+                  ? "Close terminal composer"
+                  : "Open terminal composer"
+              }
+              aria-label={`${
+                terminalComposerOpen
+                  ? "Close terminal composer"
+                  : "Open terminal composer"
+              }${terminalComposerHasDraft ? ", unsent draft" : ""}`}
+              aria-pressed={terminalComposerOpen}
+              tabIndex={mobileControlsCollapsed ? -1 : 0}
+              onPointerDown={blurActiveInput}
+              onClick={() => {
+                const open = !terminalComposerOpen;
+                if (open) {
+                  setMobileTabSheetOpen(false);
+                  activateTerminalSurface();
+                }
+                setTerminalComposerOpen(open);
+              }}
+            >
+              <SquarePen size={16} />
+              {terminalComposerHasDraft && !terminalComposerOpen ? (
+                <span
+                  className="mobile-composer-draft-dot"
+                  aria-hidden="true"
+                />
+              ) : null}
+              <span className="mobile-nav-label">Composer</span>
+            </button>
+          ) : null}
+        </nav>
+        <button
+          type="button"
+          className="mobile-controls-toggle"
+          aria-label={
+            mobileControlsCollapsed
+              ? "Show mobile controls"
+              : "Hide mobile controls"
+          }
+          title={
+            mobileControlsCollapsed
+              ? "Show mobile controls"
+              : "Hide mobile controls"
+          }
+          aria-pressed={mobileControlsCollapsed}
+          onPointerDown={blurActiveInput}
+          onClick={() => setMobileControlsCollapsed((value) => !value)}
+        >
+          {mobileControlsCollapsed ? (
+            <MoreHorizontal size={17} />
+          ) : (
+            <X size={17} />
+          )}
+        </button>
+      </div>
 
       {s.updateInfo?.update_available || s.notice ? (
         <div className="toast-viewport" aria-live="polite">
@@ -2626,6 +2747,8 @@ export default function App() {
               <TerminalPaneLayout
                 mobileShortcuts={mobileTerminalShortcuts}
                 mobileSideShortcuts={mobileTerminalSideShortcuts}
+                composerOpen={terminalComposerOpen}
+                onComposerOpenChange={setTerminalComposerOpen}
                 agentHistoryOpen={agentHistoryOpen}
                 onAgentHistoryOpenChange={setAgentHistoryInspectorOpen}
                 onOpenWorkspaceFile={handleTerminalWorkspaceFile}

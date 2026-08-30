@@ -1,90 +1,98 @@
 import {
+  ClipboardAddon,
+  type ClipboardSelectionType,
+} from "@xterm/addon-clipboard";
+import { FitAddon } from "@xterm/addon-fit";
+import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
+import type { IBufferLine, ILink } from "@xterm/xterm";
+import { Terminal } from "@xterm/xterm";
+import { Columns2, Keyboard, Maximize2, Rows2, X } from "lucide-react";
+import {
+  type CSSProperties,
   useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
 } from "react";
-import { Terminal } from "@xterm/xterm";
-import type { IBufferLine, ILink } from "@xterm/xterm";
-import {
-  ClipboardAddon,
-  type ClipboardSelectionType,
-} from "@xterm/addon-clipboard";
-import { FitAddon } from "@xterm/addon-fit";
-import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
-import { Columns2, Keyboard, Maximize2, Rows2, X } from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
-import { shallowEqual, store, useStoreSelector } from "../store";
-import { paneCanClose } from "../paneJump";
 import { bridge, type ConnectionClient } from "../api";
-import { connectionHttpPath } from "../connectionHttp";
+import { mobileTerminalShortcutExecution } from "../mobileTerminalShortcutAction";
+import {
+  defaultMobileTerminalShortcutRows,
+  defaultMobileTerminalSideShortcuts,
+  type MobileTerminalShortcut,
+  type MobileTerminalShortcutRows,
+  type MobileTerminalSideShortcuts,
+  mobileTerminalShortcutOption,
+} from "../mobileTerminalShortcuts";
+import { paneCanClose } from "../paneJump";
+import { shallowEqual, store, useStoreSelector } from "../store";
+import {
+  createTerminalClipboardProvider,
+  decodeTerminalClipboard,
+} from "../terminalClipboard";
+import {
+  clearTerminalComposerDrafts,
+  terminalComposerCloseWarning,
+  terminalComposerDraftKey,
+  terminalComposerDraftPaneIds,
+  terminalComposerRequest,
+} from "../terminalComposer";
 import {
   registerTerminalConnectionDisposer,
+  type TerminalConnectionIdentity,
   terminalConnectionKey,
   terminalPushMatches,
-  type TerminalConnectionIdentity,
 } from "../terminalConnection";
-import { ConfirmDialog, MessageDialog } from "./ModalDialogs";
-import { paneHasAgentHistory } from "./agentSession";
-import {
-  findTerminalHttpLinks,
-  sanitizeTerminalHttpUrl,
-} from "../terminalLinks";
 import {
   findTerminalFileLinkCandidates,
   type ResolvedTerminalFile,
   type TerminalFileLinkCandidate,
   TerminalFileResolutionCache,
 } from "../terminalFileLinks";
+import { terminalFocusBlockedByOverlay } from "../terminalFocus";
+import { uploadTerminalImage } from "../terminalImageUpload";
 import {
-  terminalPasteInputText,
-  terminalPasteRequest,
-  type TerminalPasteTextareaSnapshot,
-} from "../terminalPaste";
-import {
-  createTerminalClipboardProvider,
-  decodeTerminalClipboard,
-} from "../terminalClipboard";
+  isTerminalImeCommittedInputType,
+  TerminalImeFallbackTracker,
+  TerminalImeKeyEventTracker,
+  TerminalImeTextareaFallbackTracker,
+  terminalImeEventTime,
+  terminalImeFallbackText,
+} from "../terminalIme";
 import {
   macCommandEditingSequence,
   modifiedEnterSequence,
 } from "../terminalKeys";
 import {
-  isTerminalImeCommittedInputType,
-  terminalImeEventTime,
-  terminalImeFallbackText,
-  TerminalImeFallbackTracker,
-  TerminalImeKeyEventTracker,
-  TerminalImeTextareaFallbackTracker,
-} from "../terminalIme";
-import { terminalPageScroll, terminalWheelScroll } from "../terminalScroll";
-import { TerminalSelectionDragGuard } from "../terminalSelectionGuard";
-import { terminalFocusBlockedByOverlay } from "../terminalFocus";
+  findTerminalHttpLinks,
+  sanitizeTerminalHttpUrl,
+} from "../terminalLinks";
 import {
-  TerminalAttachFrameWatchdog,
-  TerminalResizeSync,
-  rememberTerminalRelayViewport,
-  terminalAttachWatchdogMs,
-  terminalRelayViewportSize,
-} from "../terminalResize";
-import {
-  defaultMobileTerminalShortcutRows,
-  defaultMobileTerminalSideShortcuts,
-  mobileTerminalShortcutOption,
-  type MobileTerminalShortcut,
-  type MobileTerminalShortcutRows,
-  type MobileTerminalSideShortcuts,
-} from "../mobileTerminalShortcuts";
-import { mobileTerminalShortcutExecution } from "../mobileTerminalShortcutAction";
+  type TerminalPasteTextareaSnapshot,
+  terminalPasteInputText,
+  terminalPasteRequest,
+} from "../terminalPaste";
 import {
   readTerminalRecoveryReloadAt,
   shouldArmTerminalRecoveryResume,
   shouldReloadTerminalAfterResume,
   writeTerminalRecoveryReloadAt,
 } from "../terminalRecovery";
+import {
+  rememberTerminalRelayViewport,
+  TerminalAttachFrameWatchdog,
+  TerminalResizeSync,
+  terminalAttachWatchdogMs,
+  terminalRelayViewportSize,
+} from "../terminalResize";
+import { terminalPageScroll, terminalWheelScroll } from "../terminalScroll";
+import { TerminalSelectionDragGuard } from "../terminalSelectionGuard";
+import { paneHasAgentHistory } from "./agentSession";
+import { ConfirmDialog, MessageDialog } from "./ModalDialogs";
+import { TerminalComposer } from "./TerminalComposer";
 
 const SYSTEM_CLIPBOARD = "c" as ClipboardSelectionType;
 
@@ -116,37 +124,6 @@ function sendBytes(
     terminal_id: terminalId,
     data: bytesToB64(bytes),
   });
-}
-
-async function uploadImage(
-  client: ConnectionClient,
-  file: File,
-): Promise<string> {
-  if (!client.isCurrent()) throw new Error("connection changed during upload");
-  const ext = (file.type.split("/")[1] || "png").toLowerCase();
-  const uploadUrl = new URL(
-    connectionHttpPath(
-      client.connectionId,
-      "/upload-image",
-      client.serverRuntimeGeneration,
-    ),
-    window.location.origin,
-  );
-  if (uploadUrl.origin !== window.location.origin) {
-    throw new Error("invalid upload origin");
-  }
-  const res = await fetch(uploadUrl, {
-    method: "POST",
-    headers: {
-      "x-image-ext": ext,
-      "content-type": file.type || "image/png",
-    },
-    body: file,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!client.isCurrent()) throw new Error("connection changed during upload");
-  if (!res.ok) throw new Error(data.error || res.statusText);
-  return data.path as string;
 }
 
 const FONT_FAMILY =
@@ -425,6 +402,8 @@ export function TerminalView({
   showMobileKeys = true,
   mobileShortcuts = defaultMobileTerminalShortcutRows(),
   mobileSideShortcuts = defaultMobileTerminalSideShortcuts(),
+  composerOpen: controlledComposerOpen,
+  onComposerOpenChange,
   agentHistoryOpen: controlledAgentHistoryOpen,
   onAgentHistoryOpenChange,
   onOpenWorkspaceFile,
@@ -433,6 +412,8 @@ export function TerminalView({
   showMobileKeys?: boolean;
   mobileShortcuts?: MobileTerminalShortcutRows;
   mobileSideShortcuts?: MobileTerminalSideShortcuts;
+  composerOpen?: boolean;
+  onComposerOpenChange?: (open: boolean) => void;
   agentHistoryOpen?: boolean;
   onAgentHistoryOpenChange?: (open: boolean) => void;
   onOpenWorkspaceFile?: (request: TerminalWorkspaceFileRequest) => void;
@@ -499,6 +480,7 @@ export function TerminalView({
   const [pasteLoading, setPasteLoading] = useState(false);
   const [attachRetry, setAttachRetry] = useState(0);
   const [mobileKeysOpen, setMobileKeysOpen] = useState(false);
+  const [localComposerOpen, setLocalComposerOpen] = useState(false);
   const [closePaneRequested, setClosePaneRequested] = useState(false);
   const [localAgentHistoryOpen, setLocalAgentHistoryOpen] = useState(false);
   const containerRef = useCallback(
@@ -545,6 +527,21 @@ export function TerminalView({
   const isActivePane = !!pane && (!paneId || pane.pane_id === activePaneId);
   const canShowAgentHistory = isActivePane && paneHasAgentHistory(pane);
   const canClosePane = !!pane && paneCanClose(s.panes, pane.pane_id);
+  const composerOpen = controlledComposerOpen ?? localComposerOpen;
+  const composerOpenRef = useRef(composerOpen);
+  composerOpenRef.current = composerOpen;
+  useLayoutEffect(() => {
+    if (!termInstance) return;
+    termInstance.options.disableStdin = composerOpen;
+    if (composerOpen) termInstance.blur();
+  }, [composerOpen, termInstance]);
+  const setComposerOpen = useCallback(
+    (open: boolean) => {
+      if (controlledComposerOpen === undefined) setLocalComposerOpen(open);
+      onComposerOpenChange?.(open);
+    },
+    [controlledComposerOpen, onComposerOpenChange],
+  );
   const agentHistoryOpen = controlledAgentHistoryOpen ?? localAgentHistoryOpen;
   const setAgentHistoryOpen = useCallback(
     (open: boolean) => {
@@ -580,11 +577,11 @@ export function TerminalView({
     paneLayoutRef.current = s.layout;
   }, [s.layout]);
   const focusTerminalSoon = useCallback(() => {
-    if (!isActivePaneRef.current) return;
+    if (!isActivePaneRef.current || composerOpenRef.current) return;
     if (shouldAvoidVirtualKeyboard()) return;
     requestAnimationFrame(() => {
       window.setTimeout(() => {
-        if (!connectionClient.isCurrent()) return;
+        if (!connectionClient.isCurrent() || composerOpenRef.current) return;
         const term = termRef.current;
         const active = document.activeElement;
         const activeElement = active instanceof HTMLElement ? active : null;
@@ -760,6 +757,7 @@ export function TerminalView({
     let terminalEffectDisposed = false;
     const term = new Terminal({
       cursorBlink: true,
+      disableStdin: composerOpenRef.current,
       fontFamily: FONT_FAMILY,
       ...terminalDensity(),
       theme: {
@@ -848,6 +846,7 @@ export function TerminalView({
     let pastePaneIdBeforeInput: string | null = null;
     let lastTerminalTextareaSnapshot = readTerminalTextareaSnapshot();
     term.onData((data) => {
+      if (composerOpenRef.current) return;
       const unsuppressedData = imeTextareaFallback.recordXtermData(data);
       if (!unsuppressedData) return;
       const dataAt = performance.now();
@@ -988,6 +987,7 @@ export function TerminalView({
     ro.observe(container);
 
     const sendText = (text: string) => {
+      if (composerOpenRef.current) return;
       const terminalId = desiredTerminalRef.current;
       if (!terminalId) return;
       const bytes = new TextEncoder().encode(text);
@@ -997,7 +997,7 @@ export function TerminalView({
       text: string,
       destinationPaneId: string | null = paneIdRef.current ?? null,
     ) => {
-      if (!text) return;
+      if (!text || composerOpenRef.current) return;
       if (destinationPaneId) {
         const request = terminalPasteRequest(destinationPaneId, text);
         await connectionClient.call(request.method, request.params);
@@ -1067,12 +1067,12 @@ export function TerminalView({
           : new File([blob], "clipboard-image.png", {
               type: blob.type || "image/png",
             });
-      const path = await uploadImage(connectionClient, file);
+      const path = await uploadTerminalImage(connectionClient, file);
       await pasteText(path, destinationPaneId);
     };
     let clipboardPasteInFlight = false;
     const pasteFromBrowserClipboard = async () => {
-      if (clipboardPasteInFlight) return;
+      if (composerOpenRef.current || clipboardPasteInFlight) return;
       clipboardPasteInFlight = true;
       const destinationPaneId = paneIdRef.current ?? null;
       try {
@@ -1143,6 +1143,11 @@ export function TerminalView({
       isTerminalImeCommittedInputType(input.inputType);
 
     term.attachCustomKeyEventHandler((e) => {
+      if (composerOpenRef.current) {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+      }
       if (applePlatform && e.type === "keydown") {
         imeKeyEvent.begin();
       }
@@ -1950,6 +1955,21 @@ export function TerminalView({
     };
   }, []);
 
+  const submitTerminalComposer = async (text: string, submit: boolean) => {
+    const targetPaneId = paneIdRef.current;
+    if (!targetPaneId) throw new Error("No active pane");
+    const request = terminalComposerRequest(targetPaneId, text, submit);
+    await connectionClient.call(request.method, request.params);
+  };
+  const uploadComposerImage = (file: File) =>
+    uploadTerminalImage(connectionClient, file);
+  const notifyComposerError = (message: string) => {
+    store.notify({
+      kind: "error",
+      message: "Terminal composer failed",
+      detail: message,
+    });
+  };
   const runMobileShortcut = (shortcut: MobileTerminalShortcut) => {
     const execution = mobileTerminalShortcutExecution(shortcut.action);
     if (!execution) return;
@@ -1989,10 +2009,45 @@ export function TerminalView({
     );
   }
 
+  const composerDraftKey = terminalComposerDraftKey(
+    s.activeConnectionId,
+    s.connectionGeneration,
+    pane.pane_id,
+  );
+  const composerDraftWarning = terminalComposerCloseWarning(
+    terminalComposerDraftPaneIds(s.activeConnectionId, s.connectionGeneration, [
+      pane.pane_id,
+    ]).length,
+  );
+
   return (
     <>
       <div className="terminal-shell">
-        <div ref={containerRef} className="terminal-view" />
+        <div className="terminal-main">
+          <div ref={containerRef} className="terminal-view" />
+          {showMobileKeys && visibleMobileSideShortcuts.length > 0 ? (
+            <div
+              className="terminal-mobile-side-shortcuts"
+              aria-label="Terminal side shortcuts"
+            >
+              {visibleMobileSideShortcuts.map((shortcut) => {
+                const option = mobileTerminalShortcutOption(shortcut.action);
+                return (
+                  <button
+                    type="button"
+                    title={option?.label ?? shortcut.label}
+                    aria-label={`Run ${option?.label ?? shortcut.label}`}
+                    onPointerDown={preventShortcutFocus}
+                    onClick={() => runMobileShortcut(shortcut)}
+                    key={shortcut.id}
+                  >
+                    {shortcut.label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
         {showMobileKeys &&
         visibleMobileShortcutRows.some((row) => row.length > 0) ? (
           <div
@@ -2052,27 +2107,16 @@ export function TerminalView({
             </div>
           </div>
         ) : null}
-        {showMobileKeys && visibleMobileSideShortcuts.length > 0 ? (
-          <div
-            className="terminal-mobile-side-shortcuts"
-            aria-label="Terminal side shortcuts"
-          >
-            {visibleMobileSideShortcuts.map((shortcut) => {
-              const option = mobileTerminalShortcutOption(shortcut.action);
-              return (
-                <button
-                  type="button"
-                  title={option?.label ?? shortcut.label}
-                  aria-label={`Run ${option?.label ?? shortcut.label}`}
-                  onPointerDown={preventShortcutFocus}
-                  onClick={() => runMobileShortcut(shortcut)}
-                  key={shortcut.id}
-                >
-                  {shortcut.label}
-                </button>
-              );
-            })}
-          </div>
+        {composerOpen ? (
+          <TerminalComposer
+            draftKey={composerDraftKey}
+            shortcutRows={visibleMobileShortcutRows}
+            onRunShortcut={runMobileShortcut}
+            onClose={() => setComposerOpen(false)}
+            onSubmit={submitTerminalComposer}
+            onUploadImage={uploadComposerImage}
+            onError={notifyComposerError}
+          />
         ) : null}
         <div className="terminal-pane-toolbar" aria-label="Pane actions">
           <button
@@ -2141,11 +2185,18 @@ export function TerminalView({
       <ConfirmDialog
         open={closePaneRequested}
         title="Close Pane"
-        message="Close this terminal pane?"
+        message={`Close this terminal pane?${composerDraftWarning}`}
         confirmLabel="Close"
         danger
         onClose={() => setClosePaneRequested(false)}
-        onConfirm={() => store.closePane(pane.pane_id)}
+        onConfirm={() => {
+          clearTerminalComposerDrafts(
+            s.activeConnectionId,
+            s.connectionGeneration,
+            [pane.pane_id],
+          );
+          store.closePane(pane.pane_id);
+        }}
       />
       <MessageDialog
         open={!!uploadError}

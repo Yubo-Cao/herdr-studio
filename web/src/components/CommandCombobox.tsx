@@ -19,6 +19,11 @@ import {
   X,
 } from "lucide-react";
 import { shallowEqual, store, useStoreSelector } from "../store";
+import {
+  clearTerminalComposerDrafts,
+  terminalComposerCloseWarning,
+  terminalComposerDraftPaneIds,
+} from "../terminalComposer";
 import type { FileExplorerEntry, Pane, Tab, Workspace } from "../types";
 import { basename, shortId } from "../utils";
 import { luckyWorktreeBranchName } from "../luckyName";
@@ -236,6 +241,8 @@ export function CommandCombobox({
 }) {
   const s = useStoreSelector(
     (state) => ({
+      activeConnectionId: state.activeConnectionId,
+      connectionGeneration: state.connectionGeneration,
       layout: state.layout,
       panes: state.panes,
       selectedPaneId: state.selectedPaneId,
@@ -265,6 +272,21 @@ export function CommandCombobox({
   const [pendingClosePane, setPendingClosePane] = useState<Pane | null>(null);
   const [pendingRemoveWorktree, setPendingRemoveWorktree] =
     useState<Workspace | null>(null);
+
+  const composerDraftWarningFor = (paneIds: string[]) =>
+    terminalComposerCloseWarning(
+      terminalComposerDraftPaneIds(
+        s.activeConnectionId,
+        s.connectionGeneration,
+        paneIds,
+      ).length,
+    );
+  const clearComposerDraftsFor = (paneIds: string[]) =>
+    clearTerminalComposerDrafts(
+      s.activeConnectionId,
+      s.connectionGeneration,
+      paneIds,
+    );
 
   const focusedWorkspace = s.workspaces.find((w) => w.focused);
   const activeTab =
@@ -1027,7 +1049,14 @@ export function CommandCombobox({
         title="Close Workspace"
         message={
           pendingCloseWorkspace
-            ? `Close workspace "${workspaceName(pendingCloseWorkspace)}"?`
+            ? `Close workspace "${workspaceName(pendingCloseWorkspace)}"?${composerDraftWarningFor(
+                s.panes
+                  .filter(
+                    (pane) =>
+                      pane.workspace_id === pendingCloseWorkspace.workspace_id,
+                  )
+                  .map((pane) => pane.pane_id),
+              )}`
             : "Close this workspace?"
         }
         confirmLabel="Close"
@@ -1035,6 +1064,14 @@ export function CommandCombobox({
         onClose={() => setPendingCloseWorkspace(null)}
         onConfirm={() => {
           if (pendingCloseWorkspace) {
+            clearComposerDraftsFor(
+              s.panes
+                .filter(
+                  (pane) =>
+                    pane.workspace_id === pendingCloseWorkspace.workspace_id,
+                )
+                .map((pane) => pane.pane_id),
+            );
             store.closeWorkspace(pendingCloseWorkspace.workspace_id);
           }
         }}
@@ -1044,14 +1081,25 @@ export function CommandCombobox({
         title="Close Tab"
         message={
           pendingCloseTab
-            ? `Close "${tabName(pendingCloseTab)}"?`
+            ? `Close "${tabName(pendingCloseTab)}"?${composerDraftWarningFor(
+                s.panes
+                  .filter((pane) => pane.tab_id === pendingCloseTab.tab_id)
+                  .map((pane) => pane.pane_id),
+              )}`
             : "Close this tab?"
         }
         confirmLabel="Close"
         danger
         onClose={() => setPendingCloseTab(null)}
         onConfirm={() => {
-          if (pendingCloseTab) store.closeTab(pendingCloseTab.tab_id);
+          if (pendingCloseTab) {
+            clearComposerDraftsFor(
+              s.panes
+                .filter((pane) => pane.tab_id === pendingCloseTab.tab_id)
+                .map((pane) => pane.pane_id),
+            );
+            store.closeTab(pendingCloseTab.tab_id);
+          }
         }}
       />
       <ConfirmDialog
@@ -1059,14 +1107,19 @@ export function CommandCombobox({
         title="Close Pane"
         message={
           pendingClosePane
-            ? `Close pane "${shortId(pendingClosePane.pane_id)}"?`
+            ? `Close pane "${shortId(pendingClosePane.pane_id)}"?${composerDraftWarningFor(
+                [pendingClosePane.pane_id],
+              )}`
             : "Close this pane?"
         }
         confirmLabel="Close"
         danger
         onClose={() => setPendingClosePane(null)}
         onConfirm={() => {
-          if (pendingClosePane) store.closePane(pendingClosePane.pane_id);
+          if (pendingClosePane) {
+            clearComposerDraftsFor([pendingClosePane.pane_id]);
+            store.closePane(pendingClosePane.pane_id);
+          }
         }}
       />
       <ConfirmDialog

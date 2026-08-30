@@ -5,6 +5,11 @@ import { PanelRight } from "lucide-react";
 import type { Tab } from "../types";
 import { AgentStatusIcon } from "./AgentStatusIcon";
 import { ConfirmDialog, TextInputDialog } from "./ModalDialogs";
+import {
+  clearTerminalComposerDrafts,
+  terminalComposerCloseWarning,
+  terminalComposerDraftPaneIds,
+} from "../terminalComposer";
 import { summarizeTabAgents } from "./agentSession";
 
 const LONG_PRESS_MS = 550;
@@ -50,6 +55,8 @@ export function TabBar({
 }) {
   const s = useStoreSelector(
     (state) => ({
+      activeConnectionId: state.activeConnectionId,
+      connectionGeneration: state.connectionGeneration,
       panes: state.panes,
       tabs: state.tabs,
       workspaces: state.workspaces,
@@ -67,6 +74,16 @@ export function TabBar({
     .sort((a, b) => a.number - b.number);
   const pendingCloseTab = s.tabs.find((t) => t.tab_id === pendingCloseTabId);
   const pendingCloseTabName = tabName(pendingCloseTab);
+  const pendingCloseTabPaneIds = s.panes
+    .filter((pane) => pane.tab_id === pendingCloseTabId)
+    .map((pane) => pane.pane_id);
+  const pendingCloseDraftWarning = terminalComposerCloseWarning(
+    terminalComposerDraftPaneIds(
+      s.activeConnectionId,
+      s.connectionGeneration,
+      pendingCloseTabPaneIds,
+    ).length,
+  );
   const showTabStrip = !!focusedWs && (!mobile || tabs.length > 1);
   const gitStatus = focusedWs?.worktree?.git_status;
   const changedCount = gitStatus
@@ -105,16 +122,23 @@ export function TabBar({
       <ConfirmDialog
         open={!!pendingCloseTabId}
         title="Close Tab"
-        message={
+        message={`${
           pendingCloseTabName
             ? `Close "${pendingCloseTabName}"?`
             : "Close this tab?"
-        }
+        }${pendingCloseDraftWarning}`}
         confirmLabel="Close"
         danger
         onClose={() => setPendingCloseTabId(null)}
         onConfirm={() => {
-          if (pendingCloseTabId) store.closeTab(pendingCloseTabId);
+          if (pendingCloseTabId) {
+            clearTerminalComposerDrafts(
+              s.activeConnectionId,
+              s.connectionGeneration,
+              pendingCloseTabPaneIds,
+            );
+            store.closeTab(pendingCloseTabId);
+          }
         }}
       />
       <TextInputDialog

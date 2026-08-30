@@ -6750,6 +6750,16 @@ textarea:focus {
   min-height: 0;
   display: flex;
 }
+/* Flex child that owns the terminal region. The mobile composer docks below
+   it as a sibling, so overlays that must center over the terminal (side
+   shortcuts) anchor here instead of the whole shell. */
+.terminal-main {
+  position: relative;
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  display: flex;
+}
 .terminal-view {
   flex: 1 1 auto;
   width: 100%;
@@ -7539,7 +7549,11 @@ textarea:focus {
 .terminal-mobile-side-shortcuts {
   display: none;
 }
+.terminal-composer {
+  display: none;
+}
 .mobile-controls-toggle,
+.mobile-terminal-controls,
 .mobile-workspace-shortcut {
   display: none;
 }
@@ -7845,7 +7859,55 @@ textarea:focus {
     -webkit-backdrop-filter: blur(14px);
     backdrop-filter: blur(14px);
   }
-  .mobile-nav button {
+  .mobile-terminal-controls {
+    position: fixed;
+    right: calc(10px + env(safe-area-inset-right, 0px));
+    bottom: calc(
+      106px +
+      env(safe-area-inset-bottom, 0px) +
+      var(--keyboard-inset-bottom, 0px)
+    );
+    z-index: 74;
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 4px;
+    border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+    border-radius: 999px;
+    background: color-mix(in srgb, var(--panel) 76%, transparent);
+    box-shadow: var(--shadow-lg);
+    transform: translate3d(0, 0, 0) scale(1);
+    transform-origin: right bottom;
+    opacity: 1;
+    transition:
+      opacity 160ms ease,
+      transform 180ms ease;
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+  }
+  .mobile-nav.mobile-terminal-tools {
+    position: static;
+    right: auto;
+    bottom: auto;
+    z-index: auto;
+    max-width: 75px;
+    padding: 0;
+    overflow: visible;
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    box-shadow: none;
+    transform: translate3d(0, 0, 0) scale(1);
+    transform-origin: right center;
+    transition:
+      max-width 180ms ease,
+      opacity 160ms ease,
+      transform 180ms ease;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+  .mobile-nav button,
+  .mobile-controls-toggle {
     position: relative;
     width: 32px;
     min-width: 32px;
@@ -7868,7 +7930,8 @@ textarea:focus {
     clip: rect(0, 0, 0, 0);
     white-space: nowrap;
   }
-  .mobile-nav button.active {
+  .mobile-nav button.active,
+  .mobile-controls-toggle:active {
     background: var(--accent-soft);
     color: var(--text-strong);
     box-shadow: inset 0 0 0 1px var(--accent);
@@ -7892,6 +7955,17 @@ textarea:focus {
     font-weight: 800;
     line-height: 15px;
     text-align: center;
+    pointer-events: none;
+  }
+  .mobile-composer-draft-dot {
+    position: absolute;
+    top: 1px;
+    right: 1px;
+    width: 7px;
+    height: 7px;
+    border: 1px solid var(--panel);
+    border-radius: 999px;
+    background: var(--accent);
     pointer-events: none;
   }
   .mobile-tab-sheet-backdrop {
@@ -8034,60 +8108,37 @@ textarea:focus {
     transform: translate3d(0, 50px, 0) scale(0.72);
   }
   .mobile-controls-toggle {
-    position: fixed;
-    right: calc(10px + env(safe-area-inset-right, 0px));
-    bottom: calc(
-      106px +
-      env(safe-area-inset-bottom, 0px) +
-      var(--keyboard-inset-bottom, 0px)
-    );
-    z-index: 74;
-    width: 42px;
-    height: 42px;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 4px;
-    border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-    border-radius: 999px;
-    background: color-mix(in srgb, var(--panel) 76%, transparent);
     color: var(--text-strong);
-    box-shadow: var(--shadow-lg);
-    transform: translate3d(0, 0, 0) scale(1);
-    transition:
-      bottom 180ms ease,
-      opacity 160ms ease,
-      background 120ms ease,
-      border-color 120ms ease,
-      transform 180ms ease;
-    -webkit-backdrop-filter: blur(14px);
-    backdrop-filter: blur(14px);
-  }
-  .mobile-controls-toggle svg {
-    width: 32px;
-    height: 32px;
-    padding: 7px;
-    border-radius: 999px;
-    background: transparent;
-  }
-  .mobile-controls-toggle:active {
-    border-color: var(--accent);
-    background: var(--accent-soft);
-    transform: scale(0.94);
   }
   /* While the on-screen keyboard is open the floating controls cover too
      much of the terminal, so fade them out until the keyboard closes. */
-  .keyboard-open .mobile-nav,
+  .keyboard-open .mobile-nav:not(.mobile-terminal-tools),
   .keyboard-open .mobile-workspace-shortcut,
-  .keyboard-open .mobile-controls-toggle {
+  .keyboard-open .mobile-terminal-controls {
     opacity: 0;
     pointer-events: none;
     transform: translate3d(0, 12px, 0) scale(0.85);
   }
-  .mobile-controls-collapsed .mobile-nav {
+  .keyboard-open .terminal-mobile-keys,
+  .keyboard-open .terminal-mobile-side-shortcuts {
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .mobile-controls-collapsed .mobile-nav:not(.mobile-terminal-tools) {
     opacity: 0;
     pointer-events: none;
     transform: translate3d(0, -46px, 0) scale(0.72);
+  }
+  .mobile-controls-collapsed .mobile-terminal-controls {
+    gap: 0;
+  }
+  .mobile-controls-collapsed .mobile-terminal-tools {
+    max-width: 0;
+    overflow: hidden;
+    opacity: 0;
+    pointer-events: none;
+    transform: translate3d(10px, 0, 0) scale(0.72);
   }
 
   .body {
@@ -8386,6 +8437,122 @@ textarea:focus {
     -webkit-backdrop-filter: blur(14px);
     backdrop-filter: blur(14px);
   }
+  /* With the composer open the shell stacks its children vertically, so the
+     terminal shrinks to make room instead of being covered by an overlay. */
+  .terminal-shell:has(.terminal-composer) {
+    flex-direction: column;
+  }
+  .terminal-composer {
+    /* In-flow at the bottom of the column shell. The margin lifts the action
+       row past the iOS form accessory bar: the app-level
+       --keyboard-inset-content lift under-reports the keyboard occlusion by
+       that trim by design, and the difference is 0 on Android and whenever
+       the keyboard is closed. */
+    margin-bottom: calc(
+      var(--keyboard-inset-bottom, 0px) -
+      var(--keyboard-inset-content, 0px)
+    );
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+    padding: 8px calc(8px + env(safe-area-inset-right, 0px))
+      calc(8px + env(safe-area-inset-bottom, 0px))
+      calc(8px + env(safe-area-inset-left, 0px));
+    border-top: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+    background: color-mix(in srgb, var(--panel) 86%, transparent);
+    -webkit-backdrop-filter: blur(14px);
+    backdrop-filter: blur(14px);
+  }
+  .terminal-composer-input {
+    width: 100%;
+    min-height: 38px;
+    max-height: 32dvh;
+    resize: none;
+    padding: 8px 10px;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    background: var(--panel-2);
+    color: var(--text-strong);
+    font-size: 16px;
+    line-height: 1.4;
+    overscroll-behavior: contain;
+  }
+  .terminal-composer-input:focus {
+    outline: none;
+    border-color: color-mix(in srgb, var(--accent) 70%, var(--border));
+  }
+  .terminal-shell:has(.terminal-composer-input:focus) .terminal-mobile-keys,
+  .terminal-shell:has(.terminal-composer-input:focus)
+    .terminal-mobile-side-shortcuts,
+  .app:has(.terminal-composer-input:focus) > .mobile-nav,
+  .app:has(.terminal-composer-input:focus) .mobile-workspace-shortcut,
+  .app:has(.terminal-composer-input:focus) .mobile-terminal-controls {
+    visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
+  }
+  .app:has(.terminal-composer-input:focus) > .mobile-nav,
+  .app:has(.terminal-composer-input:focus) .mobile-workspace-shortcut,
+  .app:has(.terminal-composer-input:focus) .mobile-terminal-controls {
+    transform: translate3d(0, 12px, 0) scale(0.85);
+  }
+  .terminal-composer-actions {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+  }
+  .terminal-composer-hint {
+    flex: 1 1 auto;
+    min-width: 0;
+    color: var(--muted);
+    font-size: 11px;
+    text-align: center;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .terminal-composer-actions button {
+    height: 30px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 4px;
+    border: 1px solid color-mix(in srgb, var(--border) 72%, var(--text) 28%);
+    border-radius: 7px;
+    background: color-mix(in srgb, var(--panel-2) 76%, transparent);
+    color: var(--text-strong);
+    font-size: 12px;
+    font-weight: 600;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .terminal-composer-actions button:disabled {
+    opacity: 0.45;
+  }
+  .terminal-composer-close,
+  .terminal-composer-shortcuts-toggle,
+  .terminal-composer-attach,
+  .terminal-composer-help {
+    width: 30px;
+    padding: 0;
+    flex: 0 0 auto;
+  }
+  .terminal-composer-submit {
+    padding: 0 10px;
+    flex: 0 0 auto;
+  }
+  .terminal-composer-submit.is-primary,
+  .terminal-composer-shortcuts-toggle.is-open {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
+  .terminal-composer-actions button:active:not(:disabled) {
+    border-color: var(--accent);
+    background: var(--accent-soft);
+  }
   .terminal-mobile-keys-toggle {
     width: 36px;
     height: 36px;
@@ -8401,6 +8568,56 @@ textarea:focus {
     -webkit-user-select: none;
     -webkit-touch-callout: none;
     -webkit-tap-highlight-color: transparent;
+  }
+  .terminal-composer-shortcuts {
+    width: max-content;
+    max-width: 100%;
+    display: grid;
+    grid-template-columns: repeat(var(--mobile-shortcut-columns), 48px);
+    gap: 2px;
+    overflow-x: auto;
+    scrollbar-width: none;
+  }
+  .terminal-composer-shortcuts::-webkit-scrollbar {
+    display: none;
+  }
+  .terminal-composer-shortcut-row {
+    grid-column: 1 / -1;
+    display: flex;
+    gap: 2px;
+  }
+  .terminal-composer-shortcuts button {
+    width: 48px;
+    min-width: 0;
+    height: 28px;
+    flex: 0 0 48px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0 4px;
+    border: 1px solid color-mix(in srgb, var(--border) 72%, var(--text) 28%);
+    border-radius: 6px;
+    background: color-mix(in srgb, var(--panel-2) 76%, transparent);
+    color: var(--text-strong);
+    overflow: hidden;
+    font:
+      700 11px / 1 ui-monospace,
+      SFMono-Regular,
+      Menlo,
+      Consolas,
+      monospace;
+    letter-spacing: 0;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    touch-action: manipulation;
+    user-select: none;
+    -webkit-user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+  }
+  .terminal-composer-shortcuts button:active {
+    border-color: var(--accent);
+    background: var(--accent-soft);
   }
   .terminal-mobile-keys-toggle:active,
   .terminal-mobile-keys.is-open .terminal-mobile-keys-toggle {
@@ -8522,6 +8739,39 @@ textarea:focus {
     border-color: var(--accent);
     background: var(--accent-soft);
   }
+  @media (hover: none) and (pointer: coarse) and (forced-colors: none) {
+    .mobile-terminal-controls
+      button:hover:not(:disabled):not(.active):not(:active) {
+      border-color: transparent;
+      background: transparent;
+      box-shadow: none;
+    }
+    .mobile-workspace-shortcut:hover:not(:disabled):not(.is-active):not(
+        :active
+      ) {
+      border-color: color-mix(in srgb, var(--border) 72%, transparent);
+      background: color-mix(in srgb, var(--panel) 76%, transparent);
+      box-shadow: var(--shadow-lg);
+      color: var(--muted);
+    }
+    .terminal-mobile-keys:not(.is-open)
+      .terminal-mobile-keys-toggle:hover:not(:disabled):not(:active) {
+      border-color: color-mix(in srgb, var(--border) 72%, transparent);
+      background: color-mix(in srgb, var(--panel) 68%, transparent);
+      box-shadow: var(--shadow-lg);
+    }
+    .terminal-composer-shortcuts button:hover:not(:disabled):not(:active),
+    .terminal-mobile-keys-panel button:hover:not(:disabled):not(:active) {
+      border-color: color-mix(in srgb, var(--border) 72%, var(--text) 28%);
+      background: color-mix(in srgb, var(--panel-2) 76%, transparent);
+      box-shadow: none;
+    }
+    .terminal-mobile-side-shortcuts button:hover:not(:disabled):not(:active) {
+      border-color: color-mix(in srgb, var(--border) 72%, var(--text) 28%);
+      background: color-mix(in srgb, var(--panel) 70%, transparent);
+      box-shadow: var(--shadow-lg);
+    }
+  }
   .terminal-view {
     border-right: none;
     border-bottom: none;
@@ -8559,6 +8809,11 @@ textarea:focus {
   }
   .terminal-view .xterm {
     padding: 5px 0 calc(6px + env(safe-area-inset-bottom, 0px)) 6px;
+  }
+  /* The composer already carries the bottom safe-area padding, so the
+     terminal above it drops the extra inset that otherwise reads as a gap. */
+  .terminal-shell:has(.terminal-composer) .terminal-view .xterm {
+    padding-bottom: 6px;
   }
   .terminal-empty {
     border-radius: 0;
