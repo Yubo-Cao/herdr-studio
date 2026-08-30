@@ -142,12 +142,29 @@ install -m 0644 "$handoff_dropin" "$dropin_dir/live-handoff.conf"
 systemctl --user daemon-reload
 [[ $(systemctl --user show "$herdr_service" --property=ExitType --value) == cgroup ]] ||
   fail "systemd did not apply ExitType=cgroup to $herdr_service"
+[[ $(systemctl --user show "$herdr_service" --property=Delegate --value) == yes ]] ||
+  fail "systemd did not apply Delegate=yes to $herdr_service"
+[[ $(systemctl --user show "$herdr_service" --property=OOMPolicy --value) == continue ]] ||
+  fail "systemd did not apply OOMPolicy=continue to $herdr_service"
 
 control_group=$(systemctl --user show "$herdr_service" --property=ControlGroup --value)
 [[ $control_group == /* && $control_group != / ]] || fail "invalid service control group"
-cgroup_procs=/sys/fs/cgroup$control_group/cgroup.procs
-[[ -r $cgroup_procs ]] || fail "cannot read service cgroup processes"
-mapfile -t before_pids < "$cgroup_procs"
+cgroup_root=/sys/fs/cgroup$control_group
+[[ -r $cgroup_root/cgroup.procs ]] || fail "cannot read service cgroup processes"
+
+collect_unit_pids() {
+  local root=$1 procs pid
+  while IFS= read -r -d '' procs; do
+    while IFS= read -r pid; do
+      [[ $pid =~ ^[0-9]+$ ]] && printf '%s\n' "$pid"
+    done < "$procs"
+  done < <(find "$root" -type f -name cgroup.procs -print0)
+}
+
+# Delegated agent limits place the manager and agent trees in child cgroups, so
+# continuity checks must include the complete unit subtree rather than only the
+# service root's direct processes.
+mapfile -t before_pids < <(collect_unit_pids "$cgroup_root" | sort -n -u)
 
 # ExitType=cgroup intentionally leaves MainPID=0 after the first live handoff.
 # Locate the long-running server inside the unit cgroup so later deployments are
@@ -185,7 +202,7 @@ jq -e \
   <<<"$running_status" >/dev/null ||
   fail "replacement server identity did not match the candidate"
 
-mapfile -t after_pids < "$cgroup_procs"
+mapfile -t after_pids < <(collect_unit_pids "$cgroup_root" | sort -n -u)
 declare -A after_pid_set=()
 replacement_pid=
 for pid in "${after_pids[@]}"; do
