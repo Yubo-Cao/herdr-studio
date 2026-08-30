@@ -2,6 +2,21 @@
 
 ## Unreleased
 
+### Added
+
+- Add a mobile terminal composer: a pen toggle opens a bottom-docked panel
+  that also hosts the configurable terminal shortcut keys alongside an editor
+  where IME, dictation, selection editing, and multiline paste work natively.
+  Insert places the draft in the terminal without executing; Send adds
+  exactly one Enter. Drafts stay in memory per connection and pane and are
+  never persisted.
+- Add image support to the mobile composer: pasted clipboard images and the
+  image picker upload once through the existing endpoint and insert the
+  returned path at the caret; the path reaches the terminal only on Insert or
+  Send.
+- Warn before closing a pane, tab, or workspace that still holds an unsent
+  composer draft; confirming discards the draft.
+
 ## 0.4.10 - 2026-08-29
 
 ### Added

@@ -14,6 +14,7 @@ describe("overlay scrollbar exclusions", () => {
       ".pane-jump-popover",
       ".agent-session-export-menu",
       ".terminal-mobile-keys-panel",
+      ".terminal-composer-shortcuts",
       "[role=dialog]",
       "[role=menu]",
       "[role=listbox]",

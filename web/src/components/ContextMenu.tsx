@@ -1,6 +1,11 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { Workspace } from "../types";
 import { store, useStoreSelector } from "../store";
+import {
+  clearTerminalComposerDrafts,
+  terminalComposerCloseWarning,
+  terminalComposerDraftPaneIds,
+} from "../terminalComposer";
 import { luckyWorktreeBranchName } from "../luckyName";
 import { ConfirmDialog, TextInputDialog } from "./ModalDialogs";
 import { WorktreeHooksDialog } from "./WorktreeHooksDialog";
@@ -69,6 +74,13 @@ export function ContextMenu({
   onClose: () => void;
 }) {
   const workspaces = useStoreSelector((state) => state.workspaces);
+  const activeConnectionId = useStoreSelector(
+    (state) => state.activeConnectionId,
+  );
+  const connectionGeneration = useStoreSelector(
+    (state) => state.connectionGeneration,
+  );
+  const panes = useStoreSelector((state) => state.panes);
   const ref = useRef<HTMLDivElement>(null);
   const [dialog, setDialog] = useState<DialogState | null>(null);
   const [openWorktreeWorkspaceId, setOpenWorktreeWorkspaceId] = useState<
@@ -177,7 +189,15 @@ export function ContextMenu({
         title="Close Workspace"
         message={
           dialog?.type === "close-workspace"
-            ? `Close workspace "${dialog.label}"?`
+            ? `Close workspace "${dialog.label}"?${terminalComposerCloseWarning(
+                terminalComposerDraftPaneIds(
+                  activeConnectionId,
+                  connectionGeneration,
+                  panes
+                    .filter((pane) => pane.workspace_id === dialog.workspaceId)
+                    .map((pane) => pane.pane_id),
+                ).length,
+              )}`
             : ""
         }
         confirmLabel="Close"
@@ -185,6 +205,13 @@ export function ContextMenu({
         onClose={() => setDialog(null)}
         onConfirm={() => {
           if (dialog?.type === "close-workspace") {
+            clearTerminalComposerDrafts(
+              activeConnectionId,
+              connectionGeneration,
+              panes
+                .filter((pane) => pane.workspace_id === dialog.workspaceId)
+                .map((pane) => pane.pane_id),
+            );
             store.closeWorkspace(dialog.workspaceId);
           }
         }}

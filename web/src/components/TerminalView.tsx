@@ -15,12 +15,18 @@ import {
 } from "@xterm/addon-clipboard";
 import { FitAddon } from "@xterm/addon-fit";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
-import { Columns2, Keyboard, Maximize2, Rows2, X } from "lucide-react";
+import {
+  Columns2,
+  Keyboard,
+  Maximize2,
+  Rows2,
+  SquarePen,
+  X,
+} from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
 import { shallowEqual, store, useStoreSelector } from "../store";
 import { paneCanClose } from "../paneJump";
 import { bridge, type ConnectionClient } from "../api";
-import { connectionHttpPath } from "../connectionHttp";
 import {
   registerTerminalConnectionDisposer,
   terminalConnectionKey,
@@ -80,6 +86,15 @@ import {
 } from "../mobileTerminalShortcuts";
 import { mobileTerminalShortcutExecution } from "../mobileTerminalShortcutAction";
 import {
+  clearTerminalComposerDrafts,
+  terminalComposerCloseWarning,
+  terminalComposerDraftKey,
+  terminalComposerDraftPaneIds,
+  terminalComposerRequest,
+} from "../terminalComposer";
+import { uploadTerminalImage } from "../terminalImageUpload";
+import { TerminalComposer } from "./TerminalComposer";
+import {
   readTerminalRecoveryReloadAt,
   shouldArmTerminalRecoveryResume,
   shouldReloadTerminalAfterResume,
@@ -116,37 +131,6 @@ function sendBytes(
     terminal_id: terminalId,
     data: bytesToB64(bytes),
   });
-}
-
-async function uploadImage(
-  client: ConnectionClient,
-  file: File,
-): Promise<string> {
-  if (!client.isCurrent()) throw new Error("connection changed during upload");
-  const ext = (file.type.split("/")[1] || "png").toLowerCase();
-  const uploadUrl = new URL(
-    connectionHttpPath(
-      client.connectionId,
-      "/upload-image",
-      client.serverRuntimeGeneration,
-    ),
-    window.location.origin,
-  );
-  if (uploadUrl.origin !== window.location.origin) {
-    throw new Error("invalid upload origin");
-  }
-  const res = await fetch(uploadUrl, {
-    method: "POST",
-    headers: {
-      "x-image-ext": ext,
-      "content-type": file.type || "image/png",
-    },
-    body: file,
-  });
-  const data = await res.json().catch(() => ({}));
-  if (!client.isCurrent()) throw new Error("connection changed during upload");
-  if (!res.ok) throw new Error(data.error || res.statusText);
-  return data.path as string;
 }
 
 const FONT_FAMILY =
@@ -499,6 +483,7 @@ export function TerminalView({
   const [pasteLoading, setPasteLoading] = useState(false);
   const [attachRetry, setAttachRetry] = useState(0);
   const [mobileKeysOpen, setMobileKeysOpen] = useState(false);
+  const [composerOpen, setComposerOpen] = useState(false);
   const [closePaneRequested, setClosePaneRequested] = useState(false);
   const [localAgentHistoryOpen, setLocalAgentHistoryOpen] = useState(false);
   const containerRef = useCallback(
@@ -1067,7 +1052,7 @@ export function TerminalView({
           : new File([blob], "clipboard-image.png", {
               type: blob.type || "image/png",
             });
-      const path = await uploadImage(connectionClient, file);
+      const path = await uploadTerminalImage(connectionClient, file);
       await pasteText(path, destinationPaneId);
     };
     let clipboardPasteInFlight = false;
@@ -1950,6 +1935,21 @@ export function TerminalView({
     };
   }, []);
 
+  const submitTerminalComposer = async (text: string, submit: boolean) => {
+    const targetPaneId = paneIdRef.current;
+    if (!targetPaneId) throw new Error("No active pane");
+    const request = terminalComposerRequest(targetPaneId, text, submit);
+    await connectionClient.call(request.method, request.params);
+  };
+  const uploadComposerImage = (file: File) =>
+    uploadTerminalImage(connectionClient, file);
+  const notifyComposerError = (message: string) => {
+    store.notify({
+      kind: "error",
+      message: "Terminal composer failed",
+      detail: message,
+    });
+  };
   const runMobileShortcut = (shortcut: MobileTerminalShortcut) => {
     const execution = mobileTerminalShortcutExecution(shortcut.action);
     if (!execution) return;
@@ -1989,10 +1989,45 @@ export function TerminalView({
     );
   }
 
+  const composerDraftKey = terminalComposerDraftKey(
+    s.activeConnectionId,
+    s.connectionGeneration,
+    pane.pane_id,
+  );
+  const composerDraftWarning = terminalComposerCloseWarning(
+    terminalComposerDraftPaneIds(s.activeConnectionId, s.connectionGeneration, [
+      pane.pane_id,
+    ]).length,
+  );
+
   return (
     <>
       <div className="terminal-shell">
-        <div ref={containerRef} className="terminal-view" />
+        <div className="terminal-main">
+          <div ref={containerRef} className="terminal-view" />
+          {showMobileKeys && visibleMobileSideShortcuts.length > 0 ? (
+            <div
+              className="terminal-mobile-side-shortcuts"
+              aria-label="Terminal side shortcuts"
+            >
+              {visibleMobileSideShortcuts.map((shortcut) => {
+                const option = mobileTerminalShortcutOption(shortcut.action);
+                return (
+                  <button
+                    type="button"
+                    title={option?.label ?? shortcut.label}
+                    aria-label={`Run ${option?.label ?? shortcut.label}`}
+                    onPointerDown={preventShortcutFocus}
+                    onClick={() => runMobileShortcut(shortcut)}
+                    key={shortcut.id}
+                  >
+                    {shortcut.label}
+                  </button>
+                );
+              })}
+            </div>
+          ) : null}
+        </div>
         {showMobileKeys &&
         visibleMobileShortcutRows.some((row) => row.length > 0) ? (
           <div
@@ -2052,27 +2087,39 @@ export function TerminalView({
             </div>
           </div>
         ) : null}
-        {showMobileKeys && visibleMobileSideShortcuts.length > 0 ? (
-          <div
-            className="terminal-mobile-side-shortcuts"
-            aria-label="Terminal side shortcuts"
+        {showMobileKeys ? (
+          <button
+            type="button"
+            className={`terminal-composer-toggle ${
+              composerOpen ? "is-open" : ""
+            }`}
+            title={
+              composerOpen
+                ? "Close terminal composer"
+                : "Open terminal composer"
+            }
+            aria-label={
+              composerOpen
+                ? "Close terminal composer"
+                : "Open terminal composer"
+            }
+            aria-expanded={composerOpen}
+            onPointerDown={preventPaneActionFocus}
+            onClick={() => setComposerOpen((value) => !value)}
           >
-            {visibleMobileSideShortcuts.map((shortcut) => {
-              const option = mobileTerminalShortcutOption(shortcut.action);
-              return (
-                <button
-                  type="button"
-                  title={option?.label ?? shortcut.label}
-                  aria-label={`Run ${option?.label ?? shortcut.label}`}
-                  onPointerDown={preventShortcutFocus}
-                  onClick={() => runMobileShortcut(shortcut)}
-                  key={shortcut.id}
-                >
-                  {shortcut.label}
-                </button>
-              );
-            })}
-          </div>
+            <SquarePen size={16} />
+          </button>
+        ) : null}
+        {composerOpen ? (
+          <TerminalComposer
+            draftKey={composerDraftKey}
+            shortcutRows={visibleMobileShortcutRows}
+            onRunShortcut={runMobileShortcut}
+            onClose={() => setComposerOpen(false)}
+            onSubmit={submitTerminalComposer}
+            onUploadImage={uploadComposerImage}
+            onError={notifyComposerError}
+          />
         ) : null}
         <div className="terminal-pane-toolbar" aria-label="Pane actions">
           <button
@@ -2141,11 +2188,18 @@ export function TerminalView({
       <ConfirmDialog
         open={closePaneRequested}
         title="Close Pane"
-        message="Close this terminal pane?"
+        message={`Close this terminal pane?${composerDraftWarning}`}
         confirmLabel="Close"
         danger
         onClose={() => setClosePaneRequested(false)}
-        onConfirm={() => store.closePane(pane.pane_id)}
+        onConfirm={() => {
+          clearTerminalComposerDrafts(
+            s.activeConnectionId,
+            s.connectionGeneration,
+            [pane.pane_id],
+          );
+          store.closePane(pane.pane_id);
+        }}
       />
       <MessageDialog
         open={!!uploadError}
