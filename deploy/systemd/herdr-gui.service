@@ -1,6 +1,6 @@
 [Unit]
 Description=Herdr Studio
-Documentation=https://github.com/powerfooI/herdr-studio
+Documentation=https://github.com/Yubo-Cao/herdr-studio
 Wants=network-online.target
 After=network-online.target
 
