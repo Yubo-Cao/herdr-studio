@@ -2,6 +2,12 @@
 
 ## Unreleased
 
+### Fixed
+
+- Point the installer, in-app updater, package metadata, service documentation,
+  and download instructions at the `Yubo-Cao/herdr-studio` fork so a fork
+  installation never falls back to an older upstream release.
+
 ## 0.4.11 - 2026-08-30
 
 ### Added

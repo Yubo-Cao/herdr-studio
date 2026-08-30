@@ -5,13 +5,13 @@
   "description": "Herdr Studio: a web client for Herdr (local socket bridge + React dashboard).",
   "license": "MIT",
   "author": "Arthur",
-  "homepage": "https://github.com/powerfooI/herdr-studio",
+  "homepage": "https://github.com/Yubo-Cao/herdr-studio",
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/powerfooI/herdr-studio.git"
+    "url": "git+https://github.com/Yubo-Cao/herdr-studio.git"
   },
   "bugs": {
-    "url": "https://github.com/powerfooI/herdr-studio/issues"
+    "url": "https://github.com/Yubo-Cao/herdr-studio/issues"
   },
   "engines": {
     "bun": ">=1.4.0"

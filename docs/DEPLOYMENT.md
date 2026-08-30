@@ -20,7 +20,7 @@ release checksum and installs the standalone binary to
 
 ```bash
 curl -fsSL \
-  https://github.com/powerfooI/herdr-studio/releases/latest/download/install-herdr-gui.sh \
+  https://github.com/Yubo-Cao/herdr-studio/releases/latest/download/install-herdr-gui.sh \
   | sh
 ```
 
@@ -35,7 +35,7 @@ Open the URL printed by the process. Run the installer again to update.
 
 Windows releases provide x64 and ARM64 archives containing `herdr-gui.exe`.
 Download the matching `herdr-gui-windows-<arch>.tar.xz` and `.sha256` files from
-the [latest release](https://github.com/powerfooI/herdr-studio/releases/latest),
+the [latest release](https://github.com/Yubo-Cao/herdr-studio/releases/latest),
 verify the checksum with `Get-FileHash`, and extract the archive with Windows
 11's built-in `tar.exe`. Releases predating native ARM64 support contain only
 the x64 archive; prefer the native ARM64 package when it is available.
@@ -44,7 +44,7 @@ To install into a system directory, set `HERDR_GUI_INSTALL_DIR`:
 
 ```bash
 curl -fsSL \
-  https://github.com/powerfooI/herdr-studio/releases/latest/download/install-herdr-gui.sh \
+  https://github.com/Yubo-Cao/herdr-studio/releases/latest/download/install-herdr-gui.sh \
   | sudo env HERDR_GUI_INSTALL_DIR=/usr/local/bin sh
 ```
 
@@ -52,7 +52,7 @@ Set `HERDR_GUI_VERSION` to install a fixed release instead of `latest`:
 
 ```bash
 curl -fsSL \
-  https://github.com/powerfooI/herdr-studio/releases/latest/download/install-herdr-gui.sh \
+  https://github.com/Yubo-Cao/herdr-studio/releases/latest/download/install-herdr-gui.sh \
   | HERDR_GUI_VERSION=0.4.8 sh
 ```
 
@@ -240,13 +240,13 @@ workspace service. The drop-in overrides `ExecStart` so reboots and intentional
 cold starts use `~/.local/bin/herdr`, even when a distro-owned stock binary is
 installed under `/usr/bin`. This requires systemd 250 or newer.
 
-The first deployment onto an already-running, non-delegated unit can still use
-live handoff, but its inherited service cgroup is already populated and cannot
-enable the memory controller. Herdr uses the RSS watchdog fallback until the
-next intentional cold restart. After that one restart, future live handoffs
-preserve each agent's cgroup leaf and its limit without restarting pane
-processes. Configure limits in `~/.config/herdr/config.toml`; reload applies
-changes to running agents:
+During the first live deployment, Herdr moves the existing service-root PIDs
+into an unbounded control leaf before enabling the memory controller. This is a
+cgroup membership change only: pane PTYs and processes keep running, after
+which detected Claude/Codex trees move into their own limited leaves. Future
+live handoffs preserve those leaf names and limits. If delegation or cgroup v2
+is unavailable, Herdr falls back to its RSS watchdog instead. Configure limits
+in `~/.config/herdr/config.toml`; reload applies changes to running agents:
 
 ```toml
 [resources]
@@ -255,7 +255,8 @@ codex_memory_limit_bytes = 4294967296
 ```
 
 Use `0` to disable one agent's limit. Linux cgroup enforcement is a hard
-physical-memory boundary; macOS uses a 300 ms process-tree RSS watchdog.
+physical-memory boundary and allows at most the same amount of swap per agent;
+macOS uses a 300 ms process-tree RSS watchdog.
 
 Build versioned candidates on the build machine:
 

@@ -91,7 +91,7 @@ latest standalone Herdr Studio binary with:
 
 ```bash
 curl -fsSL \
-  https://github.com/powerfooI/herdr-studio/releases/latest/download/install-herdr-gui.sh \
+  https://github.com/Yubo-Cao/herdr-studio/releases/latest/download/install-herdr-gui.sh \
   | sh
 ```
 
@@ -102,7 +102,7 @@ herdr-gui
 ```
 
 Open the URL printed by the process. Windows x64 and ARM64 archives are
-available from the [latest release](https://github.com/powerfooI/herdr-studio/releases/latest).
+available from the [latest release](https://github.com/Yubo-Cao/herdr-studio/releases/latest).
 See the [deployment guide](./docs/DEPLOYMENT.md) for checksum verification,
 fixed-version installation, authentication, remote connections, updates, and
 user-service setup.
