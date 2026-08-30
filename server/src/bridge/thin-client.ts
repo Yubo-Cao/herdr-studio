@@ -7,6 +7,7 @@ import {
 } from "./protocol-compat";
 
 const HANDSHAKE_TIMEOUT_MS = 8_000;
+const DIRECT_TERMINAL_ROLES_PROTOCOL = 15;
 
 // ClientMessage variant indices (must match wire.rs enum order).
 const CM = {
@@ -15,6 +16,8 @@ const CM = {
   Resize: 3,
   AttachTerminal: 5,
   AttachScroll: 6,
+  ObserveTerminal: 8,
+  ControlTerminal: 9,
 } as const;
 
 // ServerMessage variant indices.
@@ -61,8 +64,9 @@ export interface FrameData {
 /**
  * One thin-client connection to herdr-client.sock. After `connect` (which sends
  * the Hello handshake), call `attach(terminalId)` to render a single pane
- * terminal at the requested cols×rows; rendered frames arrive as `frame`
- * events. Call `resize` whenever the display size changes.
+ * terminal at the requested cols×rows; rendered frames arrive as `terminal`
+ * events. Current servers expose explicit observe/control roles; protocol 14
+ * falls back to its compatible legacy attach message.
  */
 export class ThinClient extends EventEmitter {
   private sock: net.Socket | null = null;
@@ -271,6 +275,43 @@ export class ThinClient extends EventEmitter {
     w.bool(takeover);
     this.write(w.toBuffer());
     this.attachedTerminalId = terminalId;
+  }
+
+  observe(target: string) {
+    if ((this.protocolVersion ?? 0) < DIRECT_TERMINAL_ROLES_PROTOCOL) {
+      this.attach(target, false);
+      return;
+    }
+    if (this.attachedTerminalId === target) return;
+    if (this.attachedTerminalId) {
+      throw new Error(
+        `thin client is already attached to ${this.attachedTerminalId}`,
+      );
+    }
+    const w = new BinWriter();
+    w.variant(CM.ObserveTerminal);
+    w.string(target);
+    this.write(w.toBuffer());
+    this.attachedTerminalId = target;
+  }
+
+  control(target: string, takeover = false) {
+    if ((this.protocolVersion ?? 0) < DIRECT_TERMINAL_ROLES_PROTOCOL) {
+      this.attach(target, takeover);
+      return;
+    }
+    if (this.attachedTerminalId === target) return;
+    if (this.attachedTerminalId) {
+      throw new Error(
+        `thin client is already attached to ${this.attachedTerminalId}`,
+      );
+    }
+    const w = new BinWriter();
+    w.variant(CM.ControlTerminal);
+    w.string(target);
+    w.bool(takeover);
+    this.write(w.toBuffer());
+    this.attachedTerminalId = target;
   }
 
   resize(cols: number, rows: number) {

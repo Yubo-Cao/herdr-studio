@@ -220,6 +220,68 @@ installs the verified binary, and exits. It never starts a replacement process.
 A subsequent `service install` preserves a custom `ExecStart` from a managed
 unit when it still invokes the same Herdr Studio binary.
 
+## Replace a systemd Herdr server without restarting panes
+
+Do not use `systemctl --user restart herdr.service` to deploy the Herdr core.
+Herdr agents and their pane processes live in the server service's cgroup, so a
+normal systemd restart stops that entire cgroup. Session restore can relaunch
+supported agents afterward, but that is a cold restart rather than process
+continuity.
+
+The forked Herdr core supports a live handoff: the old server transfers its
+session snapshot, collaboration leases, terminal PTY file descriptors, and
+runtime ownership to a replacement process. The systemd drop-in at
+`deploy/systemd/herdr-live-handoff.conf` sets `ExitType=cgroup`, allowing the
+original main PID to exit while the replacement and pane processes remain in
+the service cgroup. It also overrides `ExecStart` so reboots and intentional
+cold starts use `~/.local/bin/herdr`, even when a distro-owned stock binary is
+installed under `/usr/bin`. This requires systemd 250 or newer.
+
+Build versioned candidates on the build machine:
+
+```bash
+build_id=$(date -u +%Y%m%dT%H%M%SZ)
+cd /path/to/herdr
+# Keep the stock release identity so stock 0.8.2 clients reuse the forked
+# remote binary instead of offering a destructive remote update.
+HERDR_BUILD_CHANNEL=stable HERDR_BUILD_ID="$build_id" cargo build --release
+
+cd /path/to/herdr-studio
+bun run build:linux-x64
+```
+
+Copy `target/release/herdr`, `server/herdr-gui-linux-x64`, this repository's
+`scripts/deploy-herdr-stack-live.sh`, and the `deploy/systemd/` directory to the
+target. Run the deployment script on that target host:
+
+```bash
+./scripts/deploy-herdr-stack-live.sh \
+  --herdr ./artifacts/herdr \
+  --studio ./artifacts/herdr-gui-linux-x64 \
+  --stock-version 0.8.2 \
+  --build-id "$build_id"
+```
+
+The script refuses a stopped or non-`Type=simple` Herdr unit, verifies that the
+candidate advertises the requested stock-client version and contains the
+collaboration API, installs a versioned release, applies the systemd drop-in,
+performs the live handoff, and verifies all pre-existing non-server PIDs remain
+in the cgroup. Only after that does it atomically update
+`~/.local/bin/herdr` and `~/.local/bin/herdr-gui`. If Studio was active, the
+script restarts it; if it was inactive, the new binary is installed without
+starting the service. Herdr itself is never restarted. Previous binaries are
+retained as `.previous` files.
+
+After the first installation, this is the process-preserving server operation:
+
+```bash
+systemctl --user reload herdr.service
+```
+
+Reserve `stop` and `restart` for an intentional cold shutdown. Test candidate
+handoffs against a disposable named Herdr session before promoting them to a
+machine that hosts active agents.
+
 ## Build a standalone executable
 
 The build embeds the frontend and Bun runtime in a self-contained executable:

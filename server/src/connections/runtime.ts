@@ -2,6 +2,7 @@ import type { ServerWebSocket } from "bun";
 import { createAgentSessionHandlers } from "../agent/agent-sessions";
 import { createAgentSessionFileAccess } from "../agent/session-file-access";
 import { HerdrClient } from "../bridge/herdr-client";
+import { createCollaborationService } from "../bridge/collaboration";
 import { createSettingsRpcHandler } from "../bridge/settings-rpc";
 import {
   createSshTunnelManager,
@@ -91,6 +92,9 @@ export function createLegacyConnectionRuntime(args: {
   const clientSocketPath = config.clientSocketPath;
   const sshHost = () => config.sshHost;
   const herdr = new HerdrClient(socketPath);
+  const collaboration = createCollaborationService({
+    herdrCall: (method, params) => herdr.call(method, params),
+  });
   const agentSessionFiles = createAgentSessionFileAccess({
     sshHost: config.sshHost,
     runBinaryProcessWithTimeout,
@@ -183,6 +187,7 @@ export function createLegacyConnectionRuntime(args: {
     safeSend: args.safeSend,
     clientLabel: args.clientLabel,
     markRpcError: args.markRpcError,
+    herdrCall: (method, params) => collaboration.call(method, params),
     confirmRelayResize: async ({ cols, rows, paneId }) => {
       if (!paneId) return false;
       for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -353,6 +358,7 @@ export function createLegacyConnectionRuntime(args: {
     clientSocketPath,
     sshHost,
     herdr,
+    collaboration,
     worktreeParents,
     handleHerdrInfo,
     handleImageUpload,

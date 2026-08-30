@@ -16,6 +16,18 @@
   Send.
 - Warn before closing a pane, tab, or workspace that still holds an unsent
   composer draft; confirming discards the draft.
+- Show live Herdr Studio collaborators and coordinate exclusive input per pane
+  while allowing every connected browser to watch the same terminal stream.
+- Copy a drag-selected terminal region from the pane toolbar, with
+  `Cmd+C`, or with `Ctrl+C`/`Ctrl+Shift+C`.
+
+### Fixed
+
+- Give every browser page its own collaboration identity, keep all viewers
+  subscribed when an observed pane becomes controlled, and preserve an existing
+  stock/direct Herdr controller until a Studio user explicitly takes control.
+- Negotiate Herdr 0.8.2 protocol 20 without breaking the stock app client or
+  protocol 14-19 terminal attach behavior.
 
 ## 0.4.10 - 2026-08-29
 

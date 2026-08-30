@@ -6,7 +6,7 @@ import { FitAddon } from "@xterm/addon-fit";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import type { IBufferLine, ILink } from "@xterm/xterm";
 import { Terminal } from "@xterm/xterm";
-import { Columns2, Keyboard, Maximize2, Rows2, X } from "lucide-react";
+import { Columns2, Copy, Keyboard, Maximize2, Rows2, X } from "lucide-react";
 import {
   type CSSProperties,
   useCallback,
@@ -30,8 +30,10 @@ import {
 import { paneCanClose } from "../paneJump";
 import { shallowEqual, store, useStoreSelector } from "../store";
 import {
+  copyTextFromUserGesture,
   createTerminalClipboardProvider,
   decodeTerminalClipboard,
+  normalizeTerminalSelection,
 } from "../terminalClipboard";
 import {
   clearTerminalComposerDrafts,
@@ -75,6 +77,10 @@ import {
   terminalPasteInputText,
   terminalPasteRequest,
 } from "../terminalPaste";
+import {
+  collaborationProfile,
+  updateCollaborationPresence,
+} from "../collaboration";
 import {
   readTerminalRecoveryReloadAt,
   shouldArmTerminalRecoveryResume,
@@ -126,6 +132,18 @@ function sendBytes(
   });
 }
 
+function xtermThemeFromCss() {
+  const styles = getComputedStyle(document.documentElement);
+  const value = (name: string, fallback: string) =>
+    styles.getPropertyValue(name).trim() || fallback;
+  return {
+    background: value("--terminal-bg", "#0d1117"),
+    foreground: value("--terminal-fg", "#c9d1d9"),
+    cursor: value("--terminal-cursor", "#58a6ff"),
+    overviewRulerBorder: "rgba(0,0,0,0)",
+    selectionBackground: value("--terminal-selection", "rgba(56,139,253,0.34)"),
+  };
+}
 const FONT_FAMILY =
   'SFMono-Regular, Menlo, Monaco, "0xProto Nerd Font Mono", "JetBrainsMonoNL Nerd Font", "MesloLGS NF", "Hack Nerd Font", "FiraCode Nerd Font", Consolas, "Liberation Mono", "Courier New", "Noto Sans Mono CJK SC", "Source Han Mono SC", "Sarasa Mono SC", "Herdr Nerd Symbols", monospace';
 const LINK_BLUE = "\x1b[94m";
@@ -362,8 +380,21 @@ function isSafariBrowser() {
   return /^((?!chrome|android).)*safari/i.test(navigator.userAgent);
 }
 
-function trimCopiedLinePadding(text: string) {
-  return text.replace(/[ \t]+(?=\r?\n|$)/g, "");
+function copyTerminalSelectionFromUserGesture(term: Terminal): boolean {
+  const selectedText = normalizeTerminalSelection(term.getSelection());
+  if (!selectedText) return false;
+  void copyTextFromUserGesture(selectedText).catch((error) => {
+    const message = error instanceof Error ? error.message : String(error);
+    store.notify({
+      kind: "error",
+      message: "Browser blocked selection copy",
+      detail: `${message}. Use Copy to approve this clipboard write.`,
+      actionLabel: "Copy",
+      actionClipboardText: selectedText,
+      autoDismissMs: 60_000,
+    });
+  });
+  return true;
 }
 
 function withTimeout<T>(
@@ -494,6 +525,11 @@ export function TerminalView({
   // and without an instance change in the deps the attach effect would not
   // fire again, leaving the recreated terminal detached and blank.
   const [termInstance, setTermInstance] = useState<Terminal | null>(null);
+  const [terminalAccess, setTerminalAccess] = useState<"control" | "observe">(
+    "control",
+  );
+  const terminalAccessRef = useRef<"control" | "observe">("control");
+  const takeoverRef = useRef(false);
   const fitRef = useRef<FitAddon | null>(null);
   const attachedRef = useRef<string | null>(null);
   const attachingRef = useRef<string | null>(null);
@@ -532,7 +568,8 @@ export function TerminalView({
   composerOpenRef.current = composerOpen;
   useLayoutEffect(() => {
     if (!termInstance) return;
-    termInstance.options.disableStdin = composerOpen;
+    termInstance.options.disableStdin =
+      composerOpen || terminalAccessRef.current === "observe";
     if (composerOpen) termInstance.blur();
   }, [composerOpen, termInstance]);
   const setComposerOpen = useCallback(
@@ -676,6 +713,7 @@ export function TerminalView({
   };
 
   const sendControl = (bytes: number[]) => {
+    if (terminalAccessRef.current !== "control") return;
     if (shouldAvoidVirtualKeyboard()) blurTerminalInput();
     const terminalId = desiredTerminalRef.current ?? pane?.terminal_id;
     if (!terminalId) return;
@@ -760,13 +798,7 @@ export function TerminalView({
       disableStdin: composerOpenRef.current,
       fontFamily: FONT_FAMILY,
       ...terminalDensity(),
-      theme: {
-        background: "#0b0d12",
-        foreground: "#c9cdd6",
-        cursor: "#c9cdd6",
-        overviewRulerBorder: "rgba(0,0,0,0)",
-        selectionBackground: "rgba(110,168,255,0.3)",
-      },
+      theme: xtermThemeFromCss(),
       allowProposedApi: true,
       linkHandler: {
         activate(event, text) {
@@ -817,6 +849,11 @@ export function TerminalView({
     }
     termRef.current = term;
     setTermInstance(term);
+    const applyAppearance = () => {
+      term.options.theme = xtermThemeFromCss();
+      term.refresh(0, Math.max(0, term.rows - 1));
+    };
+    window.addEventListener("herdr:appearance-change", applyAppearance);
     fitRef.current = fit;
     const linkProvider = registerTerminalLinkProvider(
       term,
@@ -846,7 +883,9 @@ export function TerminalView({
     let pastePaneIdBeforeInput: string | null = null;
     let lastTerminalTextareaSnapshot = readTerminalTextareaSnapshot();
     term.onData((data) => {
-      if (composerOpenRef.current) return;
+      if (composerOpenRef.current || terminalAccessRef.current !== "control") {
+        return;
+      }
       const unsuppressedData = imeTextareaFallback.recordXtermData(data);
       if (!unsuppressedData) return;
       const dataAt = performance.now();
@@ -987,7 +1026,9 @@ export function TerminalView({
     ro.observe(container);
 
     const sendText = (text: string) => {
-      if (composerOpenRef.current) return;
+      if (composerOpenRef.current || terminalAccessRef.current !== "control") {
+        return;
+      }
       const terminalId = desiredTerminalRef.current;
       if (!terminalId) return;
       const bytes = new TextEncoder().encode(text);
@@ -998,6 +1039,11 @@ export function TerminalView({
       destinationPaneId: string | null = paneIdRef.current ?? null,
     ) => {
       if (!text || composerOpenRef.current) return;
+      if (terminalAccessRef.current !== "control") {
+        throw new Error(
+          "This pane is read-only while another collaborator controls it",
+        );
+      }
       if (destinationPaneId) {
         const request = terminalPasteRequest(destinationPaneId, text);
         await connectionClient.call(request.method, request.params);
@@ -1061,6 +1107,11 @@ export function TerminalView({
       }
     };
     const pasteImage = async (blob: Blob, destinationPaneId: string | null) => {
+      if (terminalAccessRef.current !== "control") {
+        throw new Error(
+          "This pane is read-only while another collaborator controls it",
+        );
+      }
       const file =
         blob instanceof File
           ? blob
@@ -1073,6 +1124,11 @@ export function TerminalView({
     let clipboardPasteInFlight = false;
     const pasteFromBrowserClipboard = async () => {
       if (composerOpenRef.current || clipboardPasteInFlight) return;
+      if (terminalAccessRef.current !== "control") {
+        throw new Error(
+          "This pane is read-only while another collaborator controls it",
+        );
+      }
       clipboardPasteInFlight = true;
       const destinationPaneId = paneIdRef.current ?? null;
       try {
@@ -1159,6 +1215,25 @@ export function TerminalView({
         e.preventDefault();
         e.stopPropagation();
         sendText(modifiedEnter);
+        return false;
+      }
+
+      const isSelectionCopy =
+        e.type === "keydown" &&
+        e.key.toLowerCase() === "c" &&
+        !e.altKey &&
+        (applePlatform
+          ? e.metaKey && !e.ctrlKey
+          : e.ctrlKey && !e.metaKey && (e.shiftKey || term.hasSelection()));
+      if (isSelectionCopy) {
+        e.preventDefault();
+        e.stopPropagation();
+        if (!copyTerminalSelectionFromUserGesture(term)) {
+          store.notify({
+            kind: "info",
+            message: "Select terminal text before copying",
+          });
+        }
         return false;
       }
 
@@ -1511,14 +1586,11 @@ export function TerminalView({
 
     const onCopy = (e: ClipboardEvent) => {
       if (!term.hasSelection() || !e.clipboardData) return;
-      const selectedText = term.getSelection();
+      const selectedText = normalizeTerminalSelection(term.getSelection());
       if (!selectedText) return;
       e.preventDefault();
       e.stopPropagation();
-      e.clipboardData.setData(
-        "text/plain",
-        trimCopiedLinePadding(selectedText),
-      );
+      e.clipboardData.setData("text/plain", selectedText);
     };
     container.addEventListener("copy", onCopy, { capture: true });
 
@@ -1648,6 +1720,7 @@ export function TerminalView({
 
     return () => {
       terminalEffectDisposed = true;
+      window.removeEventListener("herdr:appearance-change", applyAppearance);
       off();
       offClipboard();
       offClosed();
@@ -1724,6 +1797,7 @@ export function TerminalView({
       term.dispose();
       termRef.current = null;
       setTermInstance(null);
+      terminalAccessRef.current = "control";
       fitRef.current = null;
       attachedRef.current = null;
       attachingRef.current = null;
@@ -1810,19 +1884,31 @@ export function TerminalView({
     }
     resizeSyncRef.current?.markAttached({ cols, rows });
     const attachStartedAt = performance.now();
-    connectionClient
-      .call("terminal.attach", {
-        terminal_id: terminalId,
-        cols,
-        rows,
-        relay_active: relaySize !== null,
-        ...(relaySize
-          ? { relay_cols: relaySize.cols, relay_rows: relaySize.rows }
-          : {}),
-      })
+    void updateCollaborationPresence(connectionClient, store.get())
+      .catch(() => null)
+      .then(() =>
+        connectionClient.call("terminal.attach", {
+          terminal_id: terminalId,
+          pane_id: pane?.pane_id ?? terminalId,
+          participant_id: collaborationProfile().participantId,
+          takeover: takeoverRef.current,
+          cols,
+          rows,
+          relay_active: relaySize !== null,
+          ...(relaySize
+            ? { relay_cols: relaySize.cols, relay_rows: relaySize.rows }
+            : {}),
+        }),
+      )
       .then(
-        () => {
+        (result) => {
           if (!connectionClient.isCurrent()) return;
+          const access = result?.access === "observe" ? "observe" : "control";
+          terminalAccessRef.current = access;
+          setTerminalAccess(access);
+          term.options.disableStdin = access === "observe";
+          if (access === "observe") term.textarea?.blur();
+          takeoverRef.current = false;
           if (attachingRef.current === terminalId) attachingRef.current = null;
           if (desiredTerminalRef.current === terminalId) {
             attachedRef.current = terminalId;
@@ -1885,12 +1971,14 @@ export function TerminalView({
             setTerminalAttachError(e instanceof Error ? e.message : String(e));
           }
           console.error("[term] attach failed", e);
+          takeoverRef.current = false;
         },
       );
   }, [
     container,
     fitVisibleTerminal,
     focusTerminalSoon,
+    pane?.pane_id,
     pane?.terminal_id,
     relayViewportFor,
     s.status,
@@ -1956,6 +2044,11 @@ export function TerminalView({
   }, []);
 
   const submitTerminalComposer = async (text: string, submit: boolean) => {
+    if (terminalAccessRef.current !== "control") {
+      throw new Error(
+        "This pane is read-only while another collaborator controls it",
+      );
+    }
     const targetPaneId = paneIdRef.current;
     if (!targetPaneId) throw new Error("No active pane");
     const request = terminalComposerRequest(targetPaneId, text, submit);
@@ -1992,7 +2085,6 @@ export function TerminalView({
     1,
     ...visibleMobileShortcutRows.map((row) => row.length),
   );
-
   if (!pane) {
     return (
       <>
@@ -2019,10 +2111,101 @@ export function TerminalView({
       pane.pane_id,
     ]).length,
   );
+  const paneIndex = Math.max(
+    0,
+    s.layout?.panes.findIndex(
+      (candidate) => candidate.pane_id === pane.pane_id,
+    ) ?? 0,
+  );
+  const paneLocation = pane.cwd
+    ?.replace(/[\\/]+$/, "")
+    .split(/[\\/]/)
+    .filter(Boolean)
+    .pop();
+  const paneLabel = pane.agent
+    ? `${pane.agent}${paneLocation ? ` · ${paneLocation}` : ""}`
+    : paneLocation || `Pane ${paneIndex + 1}`;
 
   return (
     <>
       <div className="terminal-shell">
+        <div className="terminal-pane-head">
+          <div className="terminal-pane-identity" title={paneLabel}>
+            <span className="terminal-pane-number">{paneIndex + 1}</span>
+            <span className="terminal-pane-name">{paneLabel}</span>
+            <span
+              className={`terminal-pane-access is-${terminalAccess}`}
+              aria-label={
+                terminalAccess === "observe"
+                  ? "Watching this pane"
+                  : "Controlling this pane"
+              }
+            >
+              {terminalAccess === "observe" ? "Watching" : "Control"}
+            </span>
+          </div>
+          <div className="terminal-pane-toolbar" aria-label="Pane actions">
+            <button
+              type="button"
+              className="terminal-pane-action"
+              title="Copy selected terminal text"
+              aria-label="Copy selected terminal text"
+              onPointerDown={preventPaneActionFocus}
+              onClick={() => {
+                const term = termRef.current;
+                if (term && copyTerminalSelectionFromUserGesture(term)) return;
+                store.notify({
+                  kind: "info",
+                  message: "Select terminal text before copying",
+                });
+              }}
+            >
+              <Copy size={14} />
+            </button>
+            <button
+              type="button"
+              className="terminal-pane-action"
+              title="Split pane right"
+              aria-label="Split pane right"
+              onPointerDown={preventPaneActionFocus}
+              onClick={() => store.splitPane(pane.pane_id, "right")}
+            >
+              <Columns2 size={14} />
+            </button>
+            <button
+              type="button"
+              className="terminal-pane-action"
+              title="Split pane down"
+              aria-label="Split pane down"
+              onPointerDown={preventPaneActionFocus}
+              onClick={() => store.splitPane(pane.pane_id, "down")}
+            >
+              <Rows2 size={14} />
+            </button>
+            <button
+              type="button"
+              className="terminal-pane-action"
+              title="Toggle pane zoom"
+              aria-label="Toggle pane zoom"
+              onPointerDown={preventPaneActionFocus}
+              onClick={() => store.zoomPane(pane.pane_id)}
+            >
+              <Maximize2 size={14} />
+            </button>
+            {canClosePane ? (
+              <button
+                type="button"
+                className="terminal-pane-action is-danger"
+                title="Close pane"
+                aria-label="Close pane"
+                onPointerDown={preventPaneActionFocus}
+                onClick={() => setClosePaneRequested(true)}
+              >
+                <X size={14} />
+              </button>
+            ) : null}
+          </div>
+        </div>
         <div className="terminal-main">
           <div ref={containerRef} className="terminal-view" />
           {showMobileKeys && visibleMobileSideShortcuts.length > 0 ? (
@@ -2048,6 +2231,31 @@ export function TerminalView({
             </div>
           ) : null}
         </div>
+        {terminalAccess === "observe" ? (
+          <div className="terminal-collaboration-lock" role="status">
+            <div>
+              <strong>Watching live</strong>
+              <span>Another collaborator currently controls this pane.</span>
+            </div>
+            <button
+              type="button"
+              onClick={() => {
+                takeoverRef.current = true;
+                const terminalId = desiredTerminalRef.current;
+                attachedRef.current = null;
+                attachingRef.current = null;
+                if (terminalId) {
+                  void connectionClient
+                    .call("terminal.detach", { terminal_id: terminalId })
+                    .catch(() => null)
+                    .finally(() => setAttachRetry((value) => value + 1));
+                }
+              }}
+            >
+              Take control
+            </button>
+          </div>
+        ) : null}
         {showMobileKeys &&
         visibleMobileShortcutRows.some((row) => row.length > 0) ? (
           <div
@@ -2118,50 +2326,6 @@ export function TerminalView({
             onError={notifyComposerError}
           />
         ) : null}
-        <div className="terminal-pane-toolbar" aria-label="Pane actions">
-          <button
-            type="button"
-            className="terminal-pane-action"
-            title="Split pane right"
-            aria-label="Split pane right"
-            onPointerDown={preventPaneActionFocus}
-            onClick={() => store.splitPane(pane.pane_id, "right")}
-          >
-            <Columns2 size={14} />
-          </button>
-          <button
-            type="button"
-            className="terminal-pane-action"
-            title="Split pane down"
-            aria-label="Split pane down"
-            onPointerDown={preventPaneActionFocus}
-            onClick={() => store.splitPane(pane.pane_id, "down")}
-          >
-            <Rows2 size={14} />
-          </button>
-          <button
-            type="button"
-            className="terminal-pane-action"
-            title="Toggle pane zoom"
-            aria-label="Toggle pane zoom"
-            onPointerDown={preventPaneActionFocus}
-            onClick={() => store.zoomPane(pane.pane_id)}
-          >
-            <Maximize2 size={14} />
-          </button>
-          {canClosePane ? (
-            <button
-              type="button"
-              className="terminal-pane-action is-danger"
-              title="Close pane"
-              aria-label="Close pane"
-              onPointerDown={preventPaneActionFocus}
-              onClick={() => setClosePaneRequested(true)}
-            >
-              <X size={14} />
-            </button>
-          ) : null}
-        </div>
         {s.connectionPaused ? (
           <div className="terminal-loading" role="status" aria-live="polite">
             <span className="terminal-loading-dot" />

@@ -9,6 +9,11 @@ export const MAX_TERMINAL_CLIPBOARD_BASE64_CHARS = 256 * 1024;
 const STANDARD_BASE64_RE =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
+/** Remove visual cell padding while preserving the selected line structure. */
+export function normalizeTerminalSelection(text: string): string {
+  return text.replace(/[ \t]+(?=\r?\n|$)/g, "");
+}
+
 interface TerminalClipboardProviderOptions {
   clipboard?: ClipboardWriter | null;
   fallback?: (text: string) => boolean;

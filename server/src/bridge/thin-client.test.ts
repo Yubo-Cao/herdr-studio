@@ -266,6 +266,38 @@ describe("Herdr thin-client protocol compatibility", () => {
     client.close();
   });
 
+  test("uses explicit terminal roles while preserving protocol 14 attach", async () => {
+    const variants: number[] = [];
+    const socketPath = await startMessageServer((variant) => {
+      variants.push(variant);
+    });
+    const legacy = new ThinClient(socketPath, async () => 14);
+    const observer = new ThinClient(socketPath, async () => 15);
+    const controller = new ThinClient(socketPath, async () => 15);
+
+    await legacy.connect(100, 30, {
+      launchMode: "terminal-attach",
+      encoding: 1,
+    });
+    legacy.control("legacy", true);
+    await observer.connect(100, 30, {
+      launchMode: "terminal-attach",
+      encoding: 1,
+    });
+    observer.observe("observed");
+    await controller.connect(100, 30, {
+      launchMode: "terminal-attach",
+      encoding: 1,
+    });
+    controller.control("controlled", true);
+    await Bun.sleep(10);
+
+    expect(variants).toEqual([0, 5, 0, 8, 0, 9]);
+    legacy.close();
+    observer.close();
+    controller.close();
+  });
+
   test("encodes both physical page keys with the PageKey source", async () => {
     const scrolls: Array<{
       source: number;

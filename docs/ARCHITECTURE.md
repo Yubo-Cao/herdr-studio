@@ -83,6 +83,29 @@ The complete lifecycle, routing, persistence, security, and validation contract
 is documented in
 [Multi-Herdr Connections](./multi-herdr-connections-implementation.md).
 
+## Browser collaboration and terminal ownership
+
+Each browser page receives an ephemeral participant ID; only its display name
+and color are shared through browser storage. This keeps tabs, windows, and
+separate browser sessions distinct while allowing one participant session to
+hold claims on several panes. Presence reports already include the active
+workspace, tab, and pane, leaving room for cursor or viewport metadata in a
+future server protocol without coupling it to terminal input ownership.
+
+Pane claims are exclusive per pane, not per Herdr session. The bridge shares one
+render stream for a terminal among all watching browsers and permits input,
+resize, and scroll only from the current claimant. A browser can explicitly
+take over a claim; other viewers remain attached read-only.
+
+Herdr Studio first forwards `collaboration.*` calls to the Herdr control socket.
+Herdr versions without that API (including 0.8.2) return an unknown-method
+response, which selects a bridge-local lease map with the same response shape.
+The thin-client stream separately uses Herdr's native observe/control roles.
+If a stock direct client or another Studio bridge already controls the terminal,
+Studio falls back to observe mode and does not evict it until the user chooses
+**Take control**. Normal stock full-app clients remain compatible and can connect
+simultaneously.
+
 ## SSH transport
 
 An SSH runtime launches a supervised OpenSSH process and forwards the remote

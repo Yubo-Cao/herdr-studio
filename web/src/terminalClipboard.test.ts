@@ -10,6 +10,7 @@ import {
   decodeTerminalClipboard,
   MAX_TERMINAL_CLIPBOARD_BASE64_CHARS,
   MAX_TERMINAL_CLIPBOARD_CHARS,
+  normalizeTerminalSelection,
 } from "./terminalClipboard";
 
 const systemClipboard = "c" as ClipboardSelectionType;
@@ -20,6 +21,15 @@ function flushClipboardWrite() {
 }
 
 describe("terminal OSC 52 clipboard access", () => {
+  test("copies only selected text without terminal cell padding", () => {
+    expect(normalizeTerminalSelection("first   \nsecond\t\r\nthird  ")).toBe(
+      "first\nsecond\r\nthird",
+    );
+    expect(normalizeTerminalSelection("spaces inside stay")).toBe(
+      "spaces inside stay",
+    );
+  });
+
   test("decodes only safe Herdr clipboard messages", () => {
     expect(decodeTerminalClipboard("dGVzdA==")).toBe("test");
     expect(

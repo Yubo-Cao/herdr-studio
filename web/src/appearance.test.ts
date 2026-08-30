@@ -22,15 +22,16 @@ describe("appearance preferences", () => {
   });
 
   test("accepts supported theme preferences, including system", () => {
+    expect(normalizeThemePreference("session")).toBe("session");
     expect(normalizeThemePreference("dark")).toBe("dark");
     expect(normalizeThemePreference("light")).toBe("light");
     expect(normalizeThemePreference("system")).toBe("system");
   });
 
-  test("falls back to the dark theme for missing or unknown values", () => {
-    expect(normalizeThemePreference(null)).toBe("dark");
-    expect(normalizeThemePreference("")).toBe("dark");
-    expect(normalizeThemePreference("auto")).toBe("dark");
+  test("falls back to the synchronized session theme for missing or unknown values", () => {
+    expect(normalizeThemePreference(null)).toBe("session");
+    expect(normalizeThemePreference("")).toBe("session");
+    expect(normalizeThemePreference("auto")).toBe("session");
   });
 
   test("resolves the system theme from the color-scheme media query", () => {
