@@ -233,9 +233,29 @@ session snapshot, collaboration leases, terminal PTY file descriptors, and
 runtime ownership to a replacement process. The systemd drop-in at
 `deploy/systemd/herdr-live-handoff.conf` sets `ExitType=cgroup`, allowing the
 original main PID to exit while the replacement and pane processes remain in
-the service cgroup. It also overrides `ExecStart` so reboots and intentional
+the service cgroup. It also sets `Delegate=yes` so Herdr can create one cgroup
+v2 memory leaf per detected Claude/Codex process tree, and
+`OOMPolicy=continue` so an agent reaching `memory.max` does not stop the whole
+workspace service. The drop-in overrides `ExecStart` so reboots and intentional
 cold starts use `~/.local/bin/herdr`, even when a distro-owned stock binary is
 installed under `/usr/bin`. This requires systemd 250 or newer.
+
+The first deployment onto an already-running, non-delegated unit can still use
+live handoff, but its inherited service cgroup is already populated and cannot
+enable the memory controller. Herdr uses the RSS watchdog fallback until the
+next intentional cold restart. After that one restart, future live handoffs
+preserve each agent's cgroup leaf and its limit without restarting pane
+processes. Configure limits in `~/.config/herdr/config.toml`; reload applies
+changes to running agents:
+
+```toml
+[resources]
+claude_memory_limit_bytes = 4294967296
+codex_memory_limit_bytes = 4294967296
+```
+
+Use `0` to disable one agent's limit. Linux cgroup enforcement is a hard
+physical-memory boundary; macOS uses a 300 ms process-tree RSS watchdog.
 
 Build versioned candidates on the build machine:
 
