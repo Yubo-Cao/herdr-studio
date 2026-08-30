@@ -140,6 +140,26 @@ describe("event subscription loop", () => {
     expect(loop.isRunning()).toBe(false);
   });
 
+  test("can retire an unsupported optional subscription without retrying", async () => {
+    const first = controllableSubscription();
+    let attempts = 0;
+    const loop = createEventSubscriptionLoop({
+      subscribe: () => {
+        attempts += 1;
+        return first.subscription;
+      },
+      retryDelayMs: 0,
+      retrySubscribeError: (error) => error.message !== "unsupported",
+    });
+
+    loop.start();
+    first.rejectReady(new Error("unsupported"));
+    await waitUntil(() => !loop.isRunning());
+
+    expect(attempts).toBe(1);
+    expect(first.closeCount()).toBe(1);
+  });
+
   test("repeated stop shares the same drain and remains idempotent", async () => {
     const next = controllableSubscription();
     const loop = createEventSubscriptionLoop({

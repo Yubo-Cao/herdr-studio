@@ -16,7 +16,6 @@ import { publishLastStepCompletion } from "./lastStepCompletionStore";
 import {
   clearTerminalRelayViewports,
   forgetTerminalRelayViewportsExcept,
-  terminalRelayViewportForTab,
 } from "./terminalResize";
 import type { Pane, PaneLayout, Tab, Workspace } from "./types";
 
@@ -2155,26 +2154,8 @@ export const store = {
       );
     }
     return action(
-      (lease) =>
+      () =>
         enqueueFocusAction(async () => {
-          const relaySize = terminalRelayViewportForTab(
-            lease.connectionId,
-            lease.generation,
-            tabId,
-          );
-          if (relaySize) {
-            // Pre-size background runtimes for the target tab while the current
-            // tab's direct attachments are still locked. The bridge confirms the
-            // projected viewport through pane.layout before focus proceeds, so
-            // the target is stable before it becomes visible.
-            await lease.client
-              .call("terminal.relay_resize", {
-                cols: relaySize.cols,
-                rows: relaySize.rows,
-                ...(targetPane ? { pane_id: targetPane.pane_id } : {}),
-              })
-              .catch(() => null);
-          }
           return { tab_id: tabId };
         }),
       {

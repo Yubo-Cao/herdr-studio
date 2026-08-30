@@ -58,6 +58,7 @@ const DEFAULT_EVENTS = [
   "worktree.opened",
   "worktree.removed",
 ];
+const COLLABORATION_EVENTS = ["collaboration.updated"];
 
 type SafeSend = (
   ws: ServerWebSocket<unknown>,
@@ -94,6 +95,14 @@ export function createLegacyConnectionRuntime(args: {
   const herdr = new HerdrClient(socketPath);
   const collaboration = createCollaborationService({
     herdrCall: (method, params) => herdr.call(method, params),
+    onSnapshot: (snapshot) =>
+      args.onEvent(
+        {
+          event: "collaboration.updated",
+          data: { type: "collaboration_updated", snapshot },
+        },
+        identity,
+      ),
   });
   const agentSessionFiles = createAgentSessionFileAccess({
     sshHost: config.sshHost,
@@ -293,6 +302,25 @@ export function createLegacyConnectionRuntime(args: {
         `[bridge] subscription closed connection=${identity.id}, reconnecting in 2s...`,
       ),
   });
+  const collaborationSubscriptionLoop = createEventSubscriptionLoop({
+    subscribe: () => herdr.subscribe(COLLABORATION_EVENTS),
+    onReady: () =>
+      console.log(
+        `[bridge] subscribed to collaboration events connection=${identity.id}`,
+      ),
+    onSubscribeError: (error) =>
+      console.warn(
+        `[bridge] collaboration events unavailable connection=${identity.id}:`,
+        sanitizeConnectionError(error),
+      ),
+    retrySubscribeError: (error) => {
+      const message = error.message.toLowerCase();
+      return !(
+        message.includes("collaboration.updated") &&
+        (message.includes("unknown") || message.includes("invalid request"))
+      );
+    },
+  });
 
   let transportStart: Promise<void> | null = null;
   let transportStarted = false;
@@ -321,6 +349,7 @@ export function createLegacyConnectionRuntime(args: {
     backgroundStarted = true;
     workspaceAutoSync.start();
     subscriptionLoop.start();
+    collaborationSubscriptionLoop.start();
     agentStatusSubscriptions.start();
   }
 
@@ -334,6 +363,7 @@ export function createLegacyConnectionRuntime(args: {
     const autoSyncStop = workspaceAutoSync.stop();
     terminalBridge.dispose();
     const subscriptionStop = subscriptionLoop.stop();
+    const collaborationSubscriptionStop = collaborationSubscriptionLoop.stop();
     const agentStatusStop = agentStatusSubscriptions.stop();
     const lastStepStop = lastStepTurns
       .stop()
@@ -344,6 +374,7 @@ export function createLegacyConnectionRuntime(args: {
     stopTask = Promise.all([
       autoSyncStop,
       subscriptionStop,
+      collaborationSubscriptionStop,
       agentStatusStop,
       lastStepStop,
       transportCleanup,

@@ -655,6 +655,11 @@ textarea:focus {
 .collaboration-avatar.is-self {
   box-shadow: 0 0 0 1px var(--accent);
 }
+.collaboration-avatar.is-typing {
+  box-shadow:
+    0 0 0 1px var(--accent),
+    0 0 0 4px color-mix(in srgb, var(--participant-color) 24%, transparent);
+}
 .collaboration-avatar.activity-away {
   filter: saturate(0.4);
   opacity: 0.58;
@@ -6939,6 +6944,15 @@ textarea:focus {
 }
 .terminal-pane-access.is-observe::before {
   background: var(--yellow);
+}
+.terminal-pane-presence {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--accent);
+  font-size: 9px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 .terminal-collaboration-lock {
   position: absolute;

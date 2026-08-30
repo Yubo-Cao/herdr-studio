@@ -1,4 +1,4 @@
-import type { ConnectionClient } from "./api";
+import type { ConnectionClient, HerdrEventMsg } from "./api";
 import type { State } from "./store";
 
 export type CollaborationParticipant = {
@@ -11,6 +11,8 @@ export type CollaborationParticipant = {
   workspace_id?: string;
   tab_id?: string;
   pane_id?: string;
+  typing?: boolean;
+  typing_expires_at_unix_ms?: number;
   updated_at_unix_ms: number;
   expires_at_unix_ms: number;
 };
@@ -21,6 +23,7 @@ export type CollaborationPaneClaim = {
   acquired_at_unix_ms: number;
   updated_at_unix_ms: number;
   expires_at_unix_ms: number;
+  protected_until_unix_ms?: number;
 };
 
 export type CollaborationSnapshot = {
@@ -46,6 +49,16 @@ const COLORS = [
 ];
 let cachedProfile: CollaborationProfile | null = null;
 let clientSessionId: string | null = null;
+const snapshots = new Map<string, CollaborationSnapshot>();
+const snapshotListeners = new Set<
+  (scope: string, snapshot: CollaborationSnapshot) => void
+>();
+const TYPING_IDLE_MS = 1_600;
+const TYPING_REFRESH_MS = 800;
+let typingScope = "";
+let typingDeadline = 0;
+let typingLastSentAt = 0;
+let typingTimer: ReturnType<typeof setTimeout> | null = null;
 
 function randomId() {
   try {
@@ -147,11 +160,80 @@ function parseSnapshot(result: unknown): CollaborationSnapshot | null {
   };
 }
 
+function collaborationScope(client: ConnectionClient): string {
+  return `${client.connectionId}:${client.generation}:${client.serverRuntimeGeneration ?? "legacy"}`;
+}
+
+export function publishCollaborationSnapshot(
+  client: ConnectionClient,
+  snapshot: CollaborationSnapshot,
+) {
+  const scope = collaborationScope(client);
+  snapshots.set(scope, snapshot);
+  snapshotListeners.forEach((listener) => listener(scope, snapshot));
+}
+
+export function subscribeCollaborationSnapshot(
+  client: ConnectionClient,
+  listener: (snapshot: CollaborationSnapshot | null) => void,
+) {
+  const scope = collaborationScope(client);
+  listener(snapshots.get(scope) ?? null);
+  const scopedListener = (
+    changedScope: string,
+    snapshot: CollaborationSnapshot,
+  ) => {
+    if (changedScope === scope) listener(snapshot);
+  };
+  snapshotListeners.add(scopedListener);
+  return () => {
+    snapshotListeners.delete(scopedListener);
+  };
+}
+
+export function acceptCollaborationEvent(
+  client: ConnectionClient,
+  event: HerdrEventMsg,
+): boolean {
+  if (
+    (event.event !== "collaboration.updated" &&
+      event.event !== "collaboration_updated") ||
+    event.connection_id !== client.connectionId ||
+    !client.isCurrent() ||
+    !client.acceptsServerGeneration(event.connection_generation)
+  ) {
+    return false;
+  }
+  const parsed = parseSnapshot({ snapshot: event.data.snapshot });
+  if (!parsed) return false;
+  publishCollaborationSnapshot(client, parsed);
+  return true;
+}
+
+export function participantIsTyping(
+  participant: CollaborationParticipant,
+  now = Date.now(),
+): boolean {
+  return (
+    participant.typing === true &&
+    (participant.typing_expires_at_unix_ms === undefined ||
+      participant.typing_expires_at_unix_ms > now)
+  );
+}
+
+export function shouldTakeOverPaneFromMouse(event: {
+  button: number;
+  shiftKey: boolean;
+}): boolean {
+  return event.button === 0 && event.shiftKey;
+}
+
 export function collaborationPresenceParams(
   snapshot: Pick<
     State,
     "workspaces" | "tabs" | "panes" | "selectedPaneId" | "layout"
   >,
+  typing = false,
 ) {
   const profile = collaborationProfile();
   const workspace = snapshot.workspaces.find((entry) => entry.focused);
@@ -170,6 +252,7 @@ export function collaborationPresenceParams(
     role: "editor",
     activity: document.visibilityState === "hidden" ? "away" : "active",
     surface: "web",
+    typing,
     ...(workspace ? { workspace_id: workspace.workspace_id } : {}),
     ...(tab ? { tab_id: tab.tab_id } : {}),
     ...(paneId ? { pane_id: paneId } : {}),
@@ -182,12 +265,52 @@ export async function updateCollaborationPresence(
     State,
     "workspaces" | "tabs" | "panes" | "selectedPaneId" | "layout"
   >,
+  options: { typing?: boolean } = {},
 ): Promise<CollaborationSnapshot> {
+  const scope = collaborationScope(client);
+  const typing =
+    options.typing ?? (typingScope === scope && typingDeadline > Date.now());
   const result = await client.call(
     "collaboration.update",
-    collaborationPresenceParams(snapshot),
+    collaborationPresenceParams(snapshot, typing),
   );
   const parsed = parseSnapshot(result);
   if (!parsed) throw new Error("invalid collaboration snapshot");
+  publishCollaborationSnapshot(client, parsed);
   return parsed;
+}
+
+export function markCollaborationTyping(
+  client: ConnectionClient,
+  readState: () => Pick<
+    State,
+    "workspaces" | "tabs" | "panes" | "selectedPaneId" | "layout"
+  >,
+) {
+  if (!client.isCurrent()) return;
+  const scope = collaborationScope(client);
+  const now = Date.now();
+  if (typingScope !== scope) {
+    typingScope = scope;
+    typingLastSentAt = 0;
+  }
+  typingDeadline = now + TYPING_IDLE_MS;
+  if (now - typingLastSentAt >= TYPING_REFRESH_MS) {
+    typingLastSentAt = now;
+    void updateCollaborationPresence(client, readState(), {
+      typing: true,
+    }).catch(() => null);
+  }
+  if (typingTimer) clearTimeout(typingTimer);
+  const expectedDeadline = typingDeadline;
+  typingTimer = setTimeout(() => {
+    if (typingScope !== scope || typingDeadline !== expectedDeadline) return;
+    typingTimer = null;
+    typingDeadline = 0;
+    typingLastSentAt = 0;
+    if (!client.isCurrent()) return;
+    void updateCollaborationPresence(client, readState(), {
+      typing: false,
+    }).catch(() => null);
+  }, TYPING_IDLE_MS);
 }

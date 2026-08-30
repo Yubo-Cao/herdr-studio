@@ -8,6 +8,8 @@ type Participant = {
   workspace_id?: string;
   tab_id?: string;
   pane_id?: string;
+  typing: boolean;
+  typing_expires_at_unix_ms?: number;
   updated_at_unix_ms: number;
   expires_at_unix_ms: number;
 };
@@ -18,21 +20,37 @@ type Claim = {
   acquired_at_unix_ms: number;
   updated_at_unix_ms: number;
   expires_at_unix_ms: number;
+  protected_until_unix_ms?: number;
 };
 
 const LEASE_TTL_MS = 45_000;
+const TYPING_TTL_MS = 3_000;
+const MAX_CONTROL_PROTECTION_MS = 60_000;
 
 export function createCollaborationService(args: {
   herdrCall: (method: string, params?: Record<string, unknown>) => Promise<any>;
+  onSnapshot?: (snapshot: {
+    participants: Participant[];
+    pane_claims: Claim[];
+    lease_ttl_ms: number;
+  }) => void;
+  now?: () => number;
 }) {
   const participants = new Map<string, Participant>();
   const claims = new Map<string, Claim>();
   let useFallback = false;
 
   const prune = () => {
-    const now = Date.now();
+    const now = args.now?.() ?? Date.now();
     for (const [id, participant] of participants) {
       if (participant.expires_at_unix_ms <= now) participants.delete(id);
+      else if (
+        participant.typing_expires_at_unix_ms !== undefined &&
+        participant.typing_expires_at_unix_ms <= now
+      ) {
+        participant.typing = false;
+        delete participant.typing_expires_at_unix_ms;
+      }
     }
     for (const [paneId, claim] of claims) {
       if (
@@ -64,7 +82,7 @@ export function createCollaborationService(args: {
     method: string,
     params: Record<string, unknown> = {},
   ) => {
-    const now = Date.now();
+    const now = args.now?.() ?? Date.now();
     prune();
     if (method === "collaboration.update") {
       const participantId = String(params.participant_id ?? "");
@@ -92,6 +110,10 @@ export function createCollaborationService(args: {
         ...(typeof params.pane_id === "string"
           ? { pane_id: params.pane_id }
           : {}),
+        typing: params.typing === true,
+        ...(params.typing === true
+          ? { typing_expires_at_unix_ms: now + TYPING_TTL_MS }
+          : {}),
         updated_at_unix_ms: now,
         expires_at_unix_ms: now + LEASE_TTL_MS,
       };
@@ -102,7 +124,9 @@ export function createCollaborationService(args: {
           claim.expires_at_unix_ms = now + LEASE_TTL_MS;
         }
       }
-      return snapshot();
+      const result = snapshot();
+      args.onSnapshot?.(result.snapshot);
+      return result;
     }
     if (method === "collaboration.list") return snapshot();
     if (method === "collaboration.leave") {
@@ -111,6 +135,7 @@ export function createCollaborationService(args: {
       for (const [paneId, claim] of claims) {
         if (claim.participant_id === participantId) claims.delete(paneId);
       }
+      if (released) args.onSnapshot?.(snapshot().snapshot);
       return { type: "collaboration_released", released };
     }
     if (method === "collaboration.claim") {
@@ -122,13 +147,27 @@ export function createCollaborationService(args: {
       if (!participant) throw new Error("participant_not_registered");
       if (participant.role === "viewer") throw new Error("permission_denied");
       const existing = claims.get(paneId);
+      const protectedByCurrentOwner =
+        existing?.participant_id !== participantId &&
+        existing?.protected_until_unix_ms !== undefined &&
+        existing.protected_until_unix_ms > now;
       if (
         existing &&
         existing.participant_id !== participantId &&
-        params.takeover !== true
+        (protectedByCurrentOwner || params.takeover !== true)
       ) {
         return { type: "collaboration_claim", granted: false, claim: existing };
       }
+      const requestedProtection = Math.min(
+        MAX_CONTROL_PROTECTION_MS,
+        Math.max(0, Math.trunc(Number(params.protect_ms ?? 0) || 0)),
+      );
+      const previousProtection =
+        existing?.participant_id === participantId &&
+        existing.protected_until_unix_ms !== undefined &&
+        existing.protected_until_unix_ms > now
+          ? existing.protected_until_unix_ms
+          : 0;
       const claim: Claim = {
         pane_id: paneId,
         participant_id: participantId,
@@ -138,8 +177,17 @@ export function createCollaborationService(args: {
             : now,
         updated_at_unix_ms: now,
         expires_at_unix_ms: now + LEASE_TTL_MS,
+        ...(requestedProtection > 0 || previousProtection > 0
+          ? {
+              protected_until_unix_ms: Math.max(
+                previousProtection,
+                now + requestedProtection,
+              ),
+            }
+          : {}),
       };
       claims.set(paneId, claim);
+      args.onSnapshot?.(snapshot().snapshot);
       return { type: "collaboration_claim", granted: true, claim };
     }
     if (method === "collaboration.release") {
@@ -149,6 +197,7 @@ export function createCollaborationService(args: {
       if (!paneId) throw new Error("pane_id required");
       const released = claims.get(paneId)?.participant_id === participantId;
       if (released) claims.delete(paneId);
+      if (released) args.onSnapshot?.(snapshot().snapshot);
       return { type: "collaboration_released", released };
     }
     throw new Error(`unknown collaboration method: ${method}`);
