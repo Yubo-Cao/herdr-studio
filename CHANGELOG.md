@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.12 - 2026-08-30
+
 ### Fixed
 
 - Point the installer, in-app updater, package metadata, service documentation,
