@@ -51,6 +51,8 @@ Closed panes are removed from the history automatically.
   path into the terminal. This also works through `--ssh-host`.
 - Relay OSC 52 clipboard writes from local or remote terminal applications to
   the initiating browser.
+- Drag-select any terminal region and copy only that selection from the pane
+  toolbar, with `Cmd+C`, or with `Ctrl+C`/`Ctrl+Shift+C`.
 - `Cmd/Ctrl`-click HTTP(S) links to open them safely in a new tab.
 - `Cmd/Ctrl`-click workspace-relative or absolute file paths in terminal output
   to preview text, Markdown, or images without leaving the terminal.
@@ -235,6 +237,10 @@ browser and do not change Herdr server configuration.
   resolution limits described above.
 - Connect multiple browsers to one bridge and receive pushed Herdr events in
   each client.
+- See the live Studio participant roster. Each browser page has an independent
+  collaboration session, can control several panes, and can watch a pane owned
+  by another session without resizing it or sending input. Taking control is an
+  explicit action.
 - Pause or resume the current browser connection, see the connected-client
   count, or pause the other clients.
 - Enable browser task-completion notifications that return directly to the

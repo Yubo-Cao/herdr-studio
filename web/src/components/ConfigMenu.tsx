@@ -8,6 +8,7 @@ import {
   GitBranch,
   Keyboard,
   Moon,
+  MonitorCog,
   Palette,
   RefreshCw,
   ScrollText,
@@ -208,7 +209,9 @@ export function ConfigMenu({
               <div className="config-title">Appearance</div>
               <div className="config-preference-row">
                 <span className="config-item-icon">
-                  {theme === "system" ? (
+                  {theme === "session" ? (
+                    <MonitorCog size={15} />
+                  ) : theme === "system" ? (
                     <SunMoon size={15} />
                   ) : theme === "light" ? (
                     <Sun size={15} />
@@ -218,9 +221,18 @@ export function ConfigMenu({
                 </span>
                 <div className="config-item-copy">
                   <strong>Theme</strong>
-                  <span>Application appearance</span>
+                  <span>Primary UI and terminal appearance</span>
                 </div>
                 <div className="config-theme-control" aria-label="Theme">
+                  <button
+                    type="button"
+                    aria-label="Follow Herdr session theme"
+                    aria-pressed={theme === "session"}
+                    className={theme === "session" ? "is-active" : ""}
+                    onClick={() => onThemeChange("session")}
+                  >
+                    <MonitorCog size={14} />
+                  </button>
                   <button
                     type="button"
                     aria-label="Use light theme"

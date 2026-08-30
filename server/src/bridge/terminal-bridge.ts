@@ -26,6 +26,22 @@ type SharedTerminalSession = {
   lastFrameLogAt: number;
   /** Last error Herdr reported on the stream, e.g. a takeover notice. */
   lastError: string | null;
+  mode: "control" | "observe";
+  takeoverRequested: boolean;
+  suppressCloseNotification: boolean;
+};
+
+type TerminalAccess = {
+  participantId: string | null;
+  paneId: string;
+  canInput: boolean;
+  hasClaim: boolean;
+};
+
+type AppearanceReport = {
+  appearance: "light" | "dark";
+  foreground: string;
+  background: string;
 };
 
 type ClipboardTarget = {
@@ -37,6 +53,7 @@ type ClipboardTarget = {
 const CLIPBOARD_INPUT_WINDOW_MS = 30_000;
 const CLIPBOARD_RELAY_READY_WAIT_MS = 500;
 const TERMINAL_FIRST_FRAME_WAIT_MS = 20_000;
+const TERMINAL_CONTROL_DECISION_WAIT_MS = 750;
 // Herdr rejects OSC 52 bodies above 256 KiB before emitting Clipboard.
 const MAX_TERMINAL_CLIPBOARD_BASE64_CHARS = 256 * 1024;
 const STANDARD_BASE64_RE =
@@ -64,14 +81,23 @@ export function createTerminalBridge(args: {
     rows: number;
     paneId: string | null;
   }) => Promise<boolean>;
+  herdrCall?: (
+    method: string,
+    params?: Record<string, unknown>,
+  ) => Promise<any>;
 }) {
   const terminals = new Map<ServerWebSocket<unknown>, TerminalSession>();
   const terminalViewers = new Map<ServerWebSocket<unknown>, Set<string>>();
   const sharedTerminals = new Map<string, SharedTerminalSession>();
+  const terminalAccess = new Map<
+    ServerWebSocket<unknown>,
+    Map<string, TerminalAccess>
+  >();
   let clipboardRelay: ThinClient | null = null;
   let clipboardRelayConnecting: Promise<void> | null = null;
   let clipboardTarget: ClipboardTarget | null = null;
   let clipboardRelaySize: { cols: number; rows: number } | null = null;
+  let latestAppearance: AppearanceReport | null = null;
   let clipboardRelayRevision = 0;
   let lifecycleRevision = 0;
   let disposed = false;
@@ -161,6 +187,22 @@ export function createTerminalBridge(args: {
     clipboardRelayConnecting = null;
     clipboardRelaySize = null;
     clipboardRelayRevision += 1;
+  }
+
+  function sendLatestAppearance() {
+    if (!latestAppearance || !clipboardRelay || clipboardRelay.isClosed) {
+      return false;
+    }
+    const rgb = (value: string) =>
+      `${value.slice(1, 3)}/${value.slice(3, 5)}/${value.slice(5, 7)}`;
+    const report =
+      `\u001b]10;rgb:${rgb(latestAppearance.foreground)}\u001b\\` +
+      `\u001b]11;rgb:${rgb(latestAppearance.background)}\u001b\\` +
+      (latestAppearance.appearance === "light"
+        ? "\u001b[?997;2n"
+        : "\u001b[?997;1n");
+    clipboardRelay.input(Buffer.from(report, "utf8"));
+    return true;
   }
 
   // The clipboard relay doubles as the server's foreground app client, whose
@@ -256,6 +298,7 @@ export function createTerminalBridge(args: {
           relay.close();
           return;
         }
+        sendLatestAppearance();
         console.log("[bridge] clipboard relay connected", connectionDetail);
       })
       .catch((error) => {
@@ -339,6 +382,31 @@ export function createTerminalBridge(args: {
     return seen;
   }
 
+  async function waitForTerminalControlDecision(
+    shared: SharedTerminalSession,
+  ): Promise<boolean | null> {
+    let timer: ReturnType<typeof setTimeout> | null = null;
+    const decision = await Promise.race([
+      shared.firstFrame,
+      new Promise<null>((resolve) => {
+        timer = setTimeout(
+          () => resolve(null),
+          TERMINAL_CONTROL_DECISION_WAIT_MS,
+        );
+      }),
+    ]);
+    if (timer) clearTimeout(timer);
+    return decision;
+  }
+
+  function isOccupiedTerminalControl(error: string | null): boolean {
+    const normalized = error?.toLowerCase() ?? "";
+    return (
+      normalized.includes("already has an attached client") &&
+      normalized.includes("takeover")
+    );
+  }
+
   async function syncClipboardRelayAfterAttach(
     shared: SharedTerminalSession,
     size: { cols: number; rows: number },
@@ -375,9 +443,38 @@ export function createTerminalBridge(args: {
         sharedTerminals.delete(id);
       }
       viewed?.delete(id);
+      const accessByTerminal = terminalAccess.get(ws);
+      const access = accessByTerminal?.get(id);
+      accessByTerminal?.delete(id);
+      if (access?.hasClaim && access.participantId && args.herdrCall) {
+        const stillControlled = Array.from(terminalAccess.values()).some(
+          (entries) =>
+            Array.from(entries.values()).some(
+              (entry) =>
+                entry.hasClaim &&
+                entry.participantId === access.participantId &&
+                entry.paneId === access.paneId,
+            ),
+        );
+        if (!stillControlled) {
+          void args
+            .herdrCall("collaboration.release", {
+              participant_id: access.participantId,
+              pane_id: access.paneId,
+            })
+            .catch((error) =>
+              console.warn(
+                "[bridge] collaboration claim release failed",
+                connectionDetail,
+                formatError(error),
+              ),
+            );
+        }
+      }
     }
     if (!viewed || viewed.size === 0) {
       terminalViewers.delete(ws);
+      terminalAccess.delete(ws);
       terminals.delete(ws);
       if (clipboardTarget?.ws === ws) clipboardTarget = null;
       return;
@@ -395,12 +492,26 @@ export function createTerminalBridge(args: {
     terminalId: string,
     cols: number,
     rows: number,
+    mode: "control" | "observe",
+    takeover = false,
   ): SharedTerminalSession {
     if (disposed) throw new Error("terminal bridge disposed");
     const creationRevision = lifecycleRevision;
     const existing = sharedTerminals.get(terminalId);
-    if (existing && !existing.thin.isClosed) return existing;
+    if (
+      existing &&
+      !existing.thin.isClosed &&
+      !(existing.mode === "observe" && mode === "control")
+    ) {
+      return existing;
+    }
+    const inheritedViewers = new Set(existing?.viewers ?? []);
     if (existing) {
+      // An observe -> control transition needs a fresh Herdr connection, but
+      // every browser watching the old stream must stay subscribed. Clear the
+      // retired stream's set first so its expected close cannot publish a
+      // misleading terminal_closed event to those viewers.
+      existing.viewers.clear();
       existing.thin.close();
       sharedTerminals.delete(terminalId);
     }
@@ -418,12 +529,15 @@ export function createTerminalBridge(args: {
       terminalId,
       cols,
       rows,
-      viewers: new Set(),
+      viewers: inheritedViewers,
       frames: 0,
       bytes: 0,
       firstFrameLogged: false,
       lastFrameLogAt: 0,
       lastError: null,
+      mode,
+      takeoverRequested: takeover,
+      suppressCloseNotification: false,
     };
     sharedTerminals.set(terminalId, shared);
     console.log(
@@ -431,6 +545,7 @@ export function createTerminalBridge(args: {
       connectionDetail,
       `terminal=${terminalId}`,
       `size=${cols}x${rows}`,
+      `mode=${mode}`,
       `socket=${args.clientSocketPath}`,
     );
 
@@ -491,6 +606,15 @@ export function createTerminalBridge(args: {
     });
     thin.on("error", (error) => {
       shared.lastError = formatError(error);
+      if (
+        shared.mode === "control" &&
+        !shared.takeoverRequested &&
+        isOccupiedTerminalControl(shared.lastError)
+      ) {
+        // The bridge will transparently reconnect as an observer. Do not flash
+        // a terminal-closed error while that compatibility transition occurs.
+        shared.suppressCloseNotification = true;
+      }
       console.error(
         "[thin]",
         connectionDetail,
@@ -518,7 +642,11 @@ export function createTerminalBridge(args: {
       // over, and the stream can also die with the server. Viewers only see
       // silence otherwise, so tell them to re-attach instead of leaving a
       // blank terminal behind.
-      if (isCurrent(creationRevision) && shared.viewers.size > 0) {
+      if (
+        isCurrent(creationRevision) &&
+        !shared.suppressCloseNotification &&
+        shared.viewers.size > 0
+      ) {
         console.log(
           "[bridge] terminal stream closed with live viewers",
           connectionDetail,
@@ -543,7 +671,11 @@ export function createTerminalBridge(args: {
           thin.close();
           throw new Error("terminal bridge disposed");
         }
-        thin.attach(terminalId, true);
+        if (mode === "observe") {
+          thin.observe(terminalId);
+        } else {
+          thin.control(terminalId, takeover);
+        }
       });
     shared.connecting = terminalReady
       .then(() => undefined)
@@ -593,6 +725,41 @@ export function createTerminalBridge(args: {
         const cols = Number(params.cols ?? 100);
         const rows = Number(params.rows ?? 30);
         if (!terminalId) return fail("terminal_id required");
+        const participantId =
+          typeof params.participant_id === "string" && params.participant_id
+            ? params.participant_id
+            : null;
+        const paneId =
+          typeof params.pane_id === "string" && params.pane_id
+            ? params.pane_id
+            : terminalId;
+        let canInput = true;
+        let hasClaim = false;
+        let claim: unknown = null;
+        if (participantId && args.herdrCall) {
+          try {
+            const result = await args.herdrCall("collaboration.claim", {
+              participant_id: participantId,
+              pane_id: paneId,
+              takeover: params.takeover === true,
+            });
+            hasClaim = result?.granted === true;
+            canInput = hasClaim;
+            claim = result?.claim ?? null;
+          } catch (error) {
+            // An older Herdr server has no collaboration API. Preserve the
+            // historical single-user writable attach in that case.
+            if (!formatError(error).includes("unknown")) throw error;
+          }
+        }
+        const accessByTerminal = terminalAccess.get(ws) ?? new Map();
+        accessByTerminal.set(terminalId, {
+          participantId,
+          paneId,
+          canInput,
+          hasClaim,
+        });
+        terminalAccess.set(ws, accessByTerminal);
         const relaySize = relaySizeFromParams(params, { cols, rows });
         const relayRevision = relaySize ? ++clipboardRelayRevision : null;
 
@@ -609,13 +776,51 @@ export function createTerminalBridge(args: {
         terminals.set(ws, { terminalId, cols, rows });
         viewed.add(terminalId);
         terminalViewers.set(ws, viewed);
-        const shared = getSharedTerminal(terminalId, cols, rows);
+        let shared = getSharedTerminal(
+          terminalId,
+          cols,
+          rows,
+          canInput ? "control" : "observe",
+          params.takeover === true,
+        );
         shared.viewers.add(ws);
         try {
           await shared.connecting;
         } catch (e) {
           detachTerminalViewer(ws, terminalId);
           throw e;
+        }
+        if (canInput && params.takeover !== true) {
+          const decision = await waitForTerminalControlDecision(shared);
+          if (
+            decision === false &&
+            isOccupiedTerminalControl(shared.lastError)
+          ) {
+            // A stock/direct Herdr client or another Studio bridge already owns
+            // terminal input. Preserve that client by reconnecting read-only;
+            // only the explicit Take control action is allowed to evict it.
+            const viewers = new Set(shared.viewers);
+            shared.viewers.clear();
+            canInput = false;
+            const access = terminalAccess.get(ws)?.get(terminalId);
+            if (access) access.canInput = false;
+            const observer = getSharedTerminal(
+              terminalId,
+              cols,
+              rows,
+              "observe",
+            );
+            for (const viewer of viewers) observer.viewers.add(viewer);
+            observer.viewers.add(ws);
+            await observer.connecting;
+            shared = observer;
+          } else if (decision === false) {
+            throw new Error(
+              isCurrent(operationRevision)
+                ? (shared.lastError ?? "terminal stream closed")
+                : "terminal bridge disposed",
+            );
+          }
         }
         if (
           !isCurrent(operationRevision) ||
@@ -654,6 +859,26 @@ export function createTerminalBridge(args: {
           shared.thin.close();
           throw new Error("terminal bridge disposed");
         }
+        if (canInput && participantId) {
+          const closedPayload = serialize({
+            terminal_closed: {
+              terminal_id: terminalId,
+              reason: "terminal control was taken over by another collaborator",
+            },
+          });
+          for (const [viewer, accessEntries] of terminalAccess) {
+            const previous = accessEntries.get(terminalId);
+            if (
+              !previous?.canInput ||
+              previous.participantId === participantId
+            ) {
+              continue;
+            }
+            previous.canInput = false;
+            previous.hasClaim = false;
+            args.safeSend(viewer, closedPayload, "terminal-control-taken-over");
+          }
+        }
         console.log(
           "[bridge] terminal attached",
           connectionDetail,
@@ -662,8 +887,17 @@ export function createTerminalBridge(args: {
           `viewers=${shared.viewers.size}`,
           `size=${cols}x${rows}`,
           `shared=${sharedMode}`,
+          `access=${canInput ? "control" : "observe"}`,
         );
-        return reply({ ok: true });
+        return reply(
+          participantId
+            ? {
+                ok: true,
+                access: canInput ? "control" : "observe",
+                claim,
+              }
+            : { ok: true },
+        );
       }
 
       if (method === "terminal.relay_resize") {
@@ -695,6 +929,29 @@ export function createTerminalBridge(args: {
         return reply({ ok: true, confirmed });
       }
 
+      if (method === "terminal.appearance") {
+        const appearance = params.appearance === "light" ? "light" : "dark";
+        const foreground = String(params.foreground ?? "");
+        const background = String(params.background ?? "");
+        const validHex = (value: string) => /^#[0-9a-f]{6}$/i.test(value);
+        if (!validHex(foreground) || !validHex(background)) {
+          return fail("foreground and background must be #rrggbb colors");
+        }
+        latestAppearance = { appearance, foreground, background };
+        // Do not create the foreground app relay before a terminal has produced
+        // its first frame: doing so would resize the live TUI to a synthetic
+        // browser viewport. The attach path creates the relay at the real size
+        // and forwards the latest appearance as soon as it is ready.
+        const relayed = sendLatestAppearance();
+        return reply({
+          ok: true,
+          appearance,
+          foreground,
+          background,
+          deferred: !relayed,
+        });
+      }
+
       const session = terminals.get(ws);
       const requestedTerminalId =
         typeof params.terminal_id === "string" && params.terminal_id
@@ -723,6 +980,9 @@ export function createTerminalBridge(args: {
       }
       if (method === "terminal.input") {
         if (!thin || !requestedTerminalId) return fail("no terminal attached");
+        if (!terminalAccess.get(ws)?.get(requestedTerminalId)?.canInput) {
+          return fail("pane is controlled by another collaborator");
+        }
         const b64 = String(params.data ?? "");
         if (!b64 || !STANDARD_BASE64_RE.test(b64)) {
           return fail("invalid terminal input");
@@ -739,6 +999,10 @@ export function createTerminalBridge(args: {
       }
       if (method === "terminal.resize") {
         if (!thin || !shared) return fail("no terminal attached");
+        const access = terminalAccess.get(ws)?.get(requestedTerminalId ?? "");
+        if (!access?.canInput && shared.mode === "control") {
+          return reply({ ok: true, ignored: true });
+        }
         const cols = Number(params.cols ?? 100);
         const rows = Number(params.rows ?? 30);
         const relaySize = relaySizeFromParams(params, { cols, rows });
@@ -760,6 +1024,11 @@ export function createTerminalBridge(args: {
       }
       if (method === "terminal.scroll") {
         if (!thin) return fail("no terminal attached");
+        if (!terminalAccess.get(ws)?.get(requestedTerminalId ?? "")?.canInput) {
+          return fail(
+            "pane is read-only while another collaborator controls it",
+          );
+        }
         const direction = params.direction === "up" ? "up" : "down";
         const lines = Number(params.lines ?? 3);
         const column =
@@ -798,6 +1067,7 @@ export function createTerminalBridge(args: {
     for (const shared of sharedTerminals.values()) shared.thin.close();
     sharedTerminals.clear();
     terminalViewers.clear();
+    terminalAccess.clear();
     terminals.clear();
   }
 

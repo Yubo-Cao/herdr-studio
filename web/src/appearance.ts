@@ -17,6 +17,7 @@ export function normalizeAccentColor(value: string | null): AccentColor {
 }
 
 export const THEME_OPTIONS = [
+  { value: "session", label: "Session" },
   { value: "dark", label: "Dark" },
   { value: "light", label: "Light" },
   { value: "system", label: "System" },
@@ -28,9 +29,12 @@ export type ResolvedTheme = "dark" | "light";
 export function normalizeThemePreference(
   value: string | null,
 ): ThemePreference {
-  return value === "light" || value === "dark" || value === "system"
+  return value === "session" ||
+    value === "light" ||
+    value === "dark" ||
+    value === "system"
     ? value
-    : "dark";
+    : "session";
 }
 
 export function resolveSystemTheme(

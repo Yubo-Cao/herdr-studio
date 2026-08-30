@@ -3,6 +3,7 @@ import { bridge, type ConnectionClient } from "./api";
 import {
   __storeTesting,
   activateConnectionState,
+  adjacentPaneId,
   automaticUpdateChecksEnabledFromStorage,
   bindTaskNotificationActivation,
   connectionEventIsActive,
@@ -14,7 +15,9 @@ import {
   nextRecentPaneIds,
   noticeAutoDismissDelay,
   numberedCreatedTabRename,
+  projectClientView,
   reconcileConnectionCatalogSessions,
+  responseViewTarget,
   stabilizeRefreshPatch,
   type ServerSessionState,
   type State,
@@ -27,7 +30,7 @@ import {
   taskNotificationTargetIsCurrent,
   worktreeRemovalCompletionNotice,
 } from "./store";
-import type { Pane } from "./types";
+import type { Pane, PaneLayout } from "./types";
 
 describe("automatic update check preference", () => {
   test("defaults to enabled and honors an explicit disabled value", () => {
@@ -326,6 +329,142 @@ function partitionState(): State {
     dismissedUpdateVersion: null,
   };
 }
+
+describe("browser-local server view", () => {
+  const workspaces = [
+    {
+      workspace_id: "w1",
+      number: 1,
+      label: "One",
+      focused: false,
+      pane_count: 1,
+      tab_count: 1,
+      active_tab_id: "t1",
+      agent_status: "idle",
+    },
+    {
+      workspace_id: "w2",
+      number: 2,
+      label: "Two",
+      focused: true,
+      pane_count: 1,
+      tab_count: 1,
+      active_tab_id: "t2",
+      agent_status: "idle",
+    },
+  ];
+  const tabs = [
+    {
+      tab_id: "t1",
+      workspace_id: "w1",
+      number: 1,
+      label: "One",
+      focused: false,
+      pane_count: 1,
+      agent_status: "idle",
+    },
+    {
+      tab_id: "t2",
+      workspace_id: "w2",
+      number: 1,
+      label: "Two",
+      focused: true,
+      pane_count: 1,
+      agent_status: "idle",
+    },
+  ];
+  const panes: Pane[] = [
+    {
+      pane_id: "p1",
+      terminal_id: "term1",
+      workspace_id: "w1",
+      tab_id: "t1",
+      focused: false,
+      agent_status: "idle",
+      revision: 1,
+    },
+    {
+      pane_id: "p2",
+      terminal_id: "term2",
+      workspace_id: "w2",
+      tab_id: "t2",
+      focused: true,
+      agent_status: "idle",
+      revision: 1,
+    },
+  ];
+
+  test("keeps an established browser selection when server-global focus moves", () => {
+    const projected = projectClientView(workspaces, tabs, panes, {
+      viewWorkspaceId: "w1",
+      viewTabId: "t1",
+      selectedPaneId: "p1",
+    });
+
+    expect(projected.viewWorkspaceId).toBe("w1");
+    expect(projected.viewTabId).toBe("t1");
+    expect(projected.selectedPaneId).toBe("p1");
+    expect(
+      projected.workspaces.find((workspace) => workspace.focused)?.workspace_id,
+    ).toBe("w1");
+    expect(projected.tabs.find((tab) => tab.focused)?.tab_id).toBe("t1");
+    expect(projected.panes.find((entry) => entry.focused)?.pane_id).toBe("p1");
+  });
+
+  test("uses server focus only to initialize a browser without a local view", () => {
+    const projected = projectClientView(workspaces, tabs, panes, {
+      viewWorkspaceId: null,
+      viewTabId: null,
+      selectedPaneId: null,
+    });
+    expect(projected).toMatchObject({
+      viewWorkspaceId: "w2",
+      viewTabId: "t2",
+      selectedPaneId: "p2",
+    });
+  });
+
+  test("finds directional neighbors without changing server focus", () => {
+    const layout: PaneLayout = {
+      workspace_id: "w1",
+      tab_id: "t1",
+      zoomed: false,
+      area: { x: 0, y: 0, width: 100, height: 100 },
+      focused_pane_id: "left",
+      panes: [
+        {
+          pane_id: "left",
+          focused: true,
+          rect: { x: 0, y: 0, width: 50, height: 100 },
+        },
+        {
+          pane_id: "right-top",
+          focused: false,
+          rect: { x: 50, y: 0, width: 50, height: 50 },
+        },
+        {
+          pane_id: "right-bottom",
+          focused: false,
+          rect: { x: 50, y: 50, width: 50, height: 50 },
+        },
+      ],
+      splits: [],
+    };
+    expect(adjacentPaneId(layout, "left", "right")).toBe("right-top");
+    expect(adjacentPaneId(layout, "right-bottom", "up")).toBe("right-top");
+    expect(adjacentPaneId(layout, "left", "left")).toBeNull();
+  });
+
+  test("extracts a local view from creation responses", () => {
+    expect(
+      responseViewTarget({
+        workspace: { workspace_id: "w3" },
+        tab: { tab_id: "t3" },
+        root_pane: { pane_id: "p3" },
+      }),
+    ).toEqual({ workspaceId: "w3", tabId: "t3", paneId: "p3" });
+  });
+});
 
 describe("connection-partitioned store state", () => {
   test("keeps the store generation aligned when pausing an already-disconnected bridge", () => {
@@ -847,11 +986,7 @@ describe("connection-partitioned store state", () => {
       });
       await store.focusTaskNotificationTarget(target);
       expect(store.get().activeConnectionId).toBe("alpha");
-      expect(calls).toEqual([
-        "alpha:pane.get",
-        "alpha:workspace.focus",
-        "alpha:tab.focus",
-      ]);
+      expect(calls).toEqual(["alpha:pane.get"]);
 
       calls.length = 0;
       activeConnectionId = "beta";
@@ -942,7 +1077,32 @@ describe("stabilizeRefreshPatch", () => {
 
   test("keeps the store silent when an idle refresh changes nothing", async () => {
     const originalConnection = bridge.connection;
-    const snapshot = partitionState();
+    const base = partitionState();
+    const projected = projectClientView(
+      base.workspaces,
+      base.tabs,
+      base.panes,
+      {
+        viewWorkspaceId: "same-workspace",
+        viewTabId: "same-tab",
+        selectedPaneId: "same-pane",
+      },
+    );
+    const snapshot: State = {
+      ...base,
+      ...projected,
+      pendingFocusWorkspaceId: null,
+      recentPaneIds: ["same-pane"],
+      sessionsByConnectionId: {
+        ...base.sessionsByConnectionId,
+        alpha: {
+          ...base.sessionsByConnectionId.alpha,
+          ...projected,
+          pendingFocusWorkspaceId: null,
+          recentPaneIds: ["same-pane"],
+        },
+      },
+    };
     bridge.connection = (() => ({
       connectionId: "alpha",
       generation: 10,

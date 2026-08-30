@@ -684,6 +684,7 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     worktreeRemovalCoordinator,
     worktreeRemovalRuntime,
     terminalBridge,
+    collaboration,
   } = connection;
   const {
     listWorkspaceFiles,
@@ -790,6 +791,15 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
       params ?? {},
       requestIsCurrent,
     );
+  }
+  if (method.startsWith("collaboration.")) {
+    try {
+      const result = await collaboration.call(method, params ?? {});
+      sendReply({ id, result }, method);
+    } catch (e) {
+      sendError(`${method}-error`, e);
+    }
+    return;
   }
   if (method.startsWith("settings.")) {
     return handleSettingsRpc(ws, id, method, params ?? {}, requestIsCurrent);

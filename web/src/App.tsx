@@ -41,6 +41,7 @@ import { CloseButton } from "./components/CloseButton";
 import { CommandCombobox } from "./components/CommandCombobox";
 import { CONFIG_MENU_ID, ConfigMenu } from "./components/ConfigMenu";
 import { ConnectionSwitcher } from "./components/ConnectionSwitcher";
+import { CollaborationBar } from "./components/CollaborationBar";
 import {
   type ActiveDiffSelection,
   clearDiffViewerResourceCache,
@@ -77,6 +78,7 @@ import {
   paneJumpEntries,
   paneJumpTargetId,
 } from "./paneJump";
+import { paneLayoutNeedsSwitcher } from "./paneLayoutSizing";
 import {
   isTaskNotificationTarget,
   type Notice,
@@ -766,6 +768,10 @@ function TerminalPaneLayout({
   );
   const mobile = useMobileLayout();
   const layoutRef = useRef<HTMLDivElement | null>(null);
+  const [layoutElement, setLayoutElement] = useState<HTMLDivElement | null>(
+    null,
+  );
+  const [responsivePaneSwitcher, setResponsivePaneSwitcher] = useState(false);
   const layout = s.layout;
   const visiblePanes =
     layout?.panes.filter((lp) =>
@@ -790,6 +796,34 @@ function TerminalPaneLayout({
     );
   };
 
+  const setLayoutContainer = useCallback((element: HTMLDivElement | null) => {
+    layoutRef.current = element;
+    setLayoutElement(element);
+  }, []);
+
+  useLayoutEffect(() => {
+    if (!layoutElement || !layout) {
+      setResponsivePaneSwitcher(false);
+      return;
+    }
+
+    const update = () => {
+      setResponsivePaneSwitcher(
+        paneLayoutNeedsSwitcher(layout, layoutElement.clientWidth),
+      );
+    };
+    update();
+
+    if (typeof ResizeObserver === "undefined") {
+      window.addEventListener("resize", update);
+      return () => window.removeEventListener("resize", update);
+    }
+
+    const observer = new ResizeObserver(update);
+    observer.observe(layoutElement);
+    return () => observer.disconnect();
+  }, [layout, layoutElement]);
+
   if (!layout || layout.zoomed || visiblePanes.length <= 1) {
     return (
       <TerminalView
@@ -805,7 +839,7 @@ function TerminalPaneLayout({
     );
   }
 
-  if (mobile && activePaneId) {
+  if ((mobile || responsivePaneSwitcher) && activePaneId) {
     const activeIndex = Math.max(
       0,
       visiblePanes.findIndex((lp) => lp.pane_id === activePaneId),
@@ -816,7 +850,11 @@ function TerminalPaneLayout({
       ];
     const nextPane = visiblePanes[(activeIndex + 1) % visiblePanes.length];
     return (
-      <div className="pane-switcher-layout" aria-label="Terminal pane switcher">
+      <div
+        ref={setLayoutContainer}
+        className="pane-switcher-layout is-compact"
+        aria-label="Terminal pane switcher"
+      >
         <div className="pane-switcher">
           <button
             type="button"
@@ -930,7 +968,11 @@ function TerminalPaneLayout({
   };
 
   return (
-    <div ref={layoutRef} className="pane-layout" aria-label="Terminal panes">
+    <div
+      ref={setLayoutContainer}
+      className="pane-layout"
+      aria-label="Terminal panes"
+    >
       {visiblePanes.map((layoutPane) => {
         const rect = layoutPane.rect;
         const isActive = layoutPane.pane_id === activePaneId;
@@ -1026,6 +1068,9 @@ export default function App() {
   const [mobileView, setMobileView] = useState<MobileView>("session");
   const [theme, setTheme] = useState<Theme>(() => loadTheme());
   const [systemTheme, setSystemTheme] = useState<ResolvedTheme>(() =>
+    loadSystemTheme(),
+  );
+  const [sessionTheme, setSessionTheme] = useState<ResolvedTheme>(() =>
     loadSystemTheme(),
   );
   const [accentColor, setAccentColor] = useState<AccentColor>(() =>
@@ -2196,14 +2241,76 @@ export default function App() {
     media.addEventListener("change", onChange);
     return () => media.removeEventListener("change", onChange);
   }, []);
+  useEffect(() => {
+    if (theme !== "session" || s.status !== "connected") return;
+    let cancelled = false;
+    let supported = true;
+    let timer: number | null = null;
+    const refresh = () => {
+      if (!supported) return;
+      void connectionClient
+        .call("session.appearance")
+        .then((result) => {
+          const appearance = result?.appearance;
+          if (!cancelled && (appearance === "light" || appearance === "dark")) {
+            setSessionTheme(appearance);
+          }
+        })
+        .catch(() => {
+          supported = false;
+          if (timer !== null) window.clearInterval(timer);
+          if (!cancelled) setSessionTheme(systemTheme);
+        });
+    };
+    const onVisibility = () => {
+      if (document.visibilityState === "visible") refresh();
+    };
+    refresh();
+    timer = window.setInterval(refresh, 5_000);
+    document.addEventListener("visibilitychange", onVisibility);
+    return () => {
+      cancelled = true;
+      if (timer !== null) window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", onVisibility);
+    };
+  }, [connectionClient, s.status, systemTheme, theme]);
   useLayoutEffect(() => {
-    const resolvedTheme = theme === "system" ? systemTheme : theme;
+    const resolvedTheme =
+      theme === "session"
+        ? sessionTheme
+        : theme === "system"
+          ? systemTheme
+          : theme;
     document.documentElement.dataset.theme = resolvedTheme;
     document.documentElement.style.colorScheme = resolvedTheme;
     localStorage.setItem(THEME_KEY, theme);
     document.documentElement.dataset.accent = accentColor;
     localStorage.setItem(ACCENT_COLOR_KEY, accentColor);
-  }, [accentColor, systemTheme, theme]);
+    const styles = getComputedStyle(document.documentElement);
+    const foreground = styles.getPropertyValue("--terminal-fg").trim();
+    const background = styles.getPropertyValue("--terminal-bg").trim();
+    window.dispatchEvent(new CustomEvent("herdr:appearance-change"));
+    if (
+      s.status === "connected" &&
+      /^#[0-9a-f]{6}$/i.test(foreground) &&
+      /^#[0-9a-f]{6}$/i.test(background)
+    ) {
+      void connectionClient
+        .call("terminal.appearance", {
+          appearance: resolvedTheme,
+          foreground,
+          background,
+        })
+        .catch(() => {});
+    }
+  }, [
+    accentColor,
+    connectionClient,
+    s.status,
+    sessionTheme,
+    systemTheme,
+    theme,
+  ]);
   useEffect(() => {
     localStorage.setItem(
       MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY,
@@ -2409,6 +2516,7 @@ export default function App() {
             <span className="brand-version">v{packageJson.version}</span>
           </div>
           <ConnectionSwitcher />
+          <CollaborationBar />
         </div>
         <div className="topbar-actions">
           <div className="topbar-command-group">

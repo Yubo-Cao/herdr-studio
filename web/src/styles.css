@@ -1,22 +1,25 @@
 :root {
   color-scheme: dark;
-  --bg: #1a1b26;
-  --topbar: #202331;
-  --panel: #202331;
-  --panel-2: #24283b;
-  --input-bg: #11141b;
-  --terminal-bg: #0b0d12;
-  --border: #2f3549;
+  --bg: #0d1117;
+  --topbar: #161b22;
+  --panel: #161b22;
+  --panel-2: #21262d;
+  --input-bg: #0d1117;
+  --terminal-bg: #0d1117;
+  --terminal-fg: #d0d7de;
+  --terminal-cursor: #58a6ff;
+  --terminal-selection: rgba(56, 139, 253, 0.34);
+  --border: #30363d;
   --border-soft: rgba(255, 255, 255, 0.07);
-  --text: #d5dcff;
-  --text-strong: #ffffff;
-  --text-code: #d6d9e2;
-  --muted: #737aa2;
-  --accent: #7aa2f7;
-  --accent-2: #3d7dff;
-  --accent-soft: rgba(122, 162, 247, 0.18);
-  --accent-hover: rgba(122, 162, 247, 0.28);
-  --accent-active: rgba(122, 162, 247, 0.45);
+  --text: #c9d1d9;
+  --text-strong: #f0f6fc;
+  --text-code: #c9d1d9;
+  --muted: #8b949e;
+  --accent: #2f81f7;
+  --accent-2: #1f6feb;
+  --accent-soft: rgba(56, 139, 253, 0.16);
+  --accent-hover: rgba(56, 139, 253, 0.24);
+  --accent-active: rgba(56, 139, 253, 0.36);
   --shell-bg: var(--bg);
   --shell-panel: var(--panel);
   --shell-topbar: var(--topbar);
@@ -80,23 +83,26 @@
 
 :root[data-theme="light"] {
   color-scheme: light;
-  --bg: #e1e2e7;
-  --topbar: #d8d9e0;
-  --panel: #d8d9e0;
-  --panel-2: #c4c8da;
-  --input-bg: #f6f7f9;
-  --terminal-bg: #0b0d12;
-  --border: #b6bbd1;
+  --bg: #f6f8fa;
+  --topbar: #ffffff;
+  --panel: #ffffff;
+  --panel-2: #f6f8fa;
+  --input-bg: #ffffff;
+  --terminal-bg: #ffffff;
+  --terminal-fg: #24292f;
+  --terminal-cursor: #0969da;
+  --terminal-selection: rgba(9, 105, 218, 0.22);
+  --border: #d0d7de;
   --border-soft: rgba(31, 47, 102, 0.12);
-  --text: #1f2f66;
-  --text-strong: #101936;
-  --text-code: #26345f;
-  --muted: #68709a;
-  --accent: #2e7de9;
-  --accent-2: #1f5fd6;
-  --accent-soft: rgba(46, 125, 233, 0.14);
-  --accent-hover: rgba(46, 125, 233, 0.2);
-  --accent-active: rgba(46, 125, 233, 0.3);
+  --text: #24292f;
+  --text-strong: #1f2328;
+  --text-code: #24292f;
+  --muted: #57606a;
+  --accent: #0969da;
+  --accent-2: #0550ae;
+  --accent-soft: rgba(9, 105, 218, 0.12);
+  --accent-hover: rgba(9, 105, 218, 0.18);
+  --accent-active: rgba(9, 105, 218, 0.26);
   --green: #248b4c;
   --red: #d03b3b;
   --yellow: #a36f00;
@@ -579,10 +585,11 @@ textarea:focus {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
   gap: 16px;
-  padding: 10px 16px;
+  min-height: 52px;
+  padding: 8px 16px;
   border-bottom: 1px solid var(--shell-border);
   background: var(--shell-topbar);
-  box-shadow: inset 0 3px 0 var(--shell-topbar-mark);
+  box-shadow: inset 0 2px 0 var(--shell-topbar-mark);
 }
 .topbar-start,
 .topbar-actions {
@@ -593,6 +600,92 @@ textarea:focus {
 }
 .topbar-start {
   overflow: hidden;
+}
+.collaboration-bar {
+  position: relative;
+  min-width: 0;
+  flex: 0 0 auto;
+}
+.collaboration-roster {
+  height: 30px;
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  padding: 0 8px;
+  border: 1px solid var(--topbar-control-border);
+  border-radius: 7px;
+  background: var(--topbar-control-bg);
+  color: var(--muted);
+}
+.collaboration-count,
+.collaboration-live {
+  font-size: 11px;
+  font-weight: 650;
+}
+.collaboration-live {
+  color: var(--success-text);
+}
+.collaboration-live::before {
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  margin-right: 5px;
+  border-radius: 999px;
+  background: var(--green);
+  box-shadow: 0 0 0 3px var(--success-soft);
+  content: "";
+}
+.collaboration-avatars {
+  display: flex;
+  padding-left: 4px;
+}
+.collaboration-avatar {
+  width: 24px;
+  height: 24px;
+  margin-left: -5px;
+  padding: 0;
+  border: 2px solid var(--topbar);
+  border-radius: 999px;
+  background: var(--participant-color);
+  color: #fff;
+  box-shadow: none;
+  font-size: 10px;
+  font-weight: 800;
+}
+.collaboration-avatar.is-self {
+  box-shadow: 0 0 0 1px var(--accent);
+}
+.collaboration-avatar.activity-away {
+  filter: saturate(0.4);
+  opacity: 0.58;
+}
+.collaboration-editor {
+  position: absolute;
+  z-index: 180;
+  top: calc(100% + 8px);
+  left: 0;
+  width: 270px;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) 28px 28px;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+  box-shadow: var(--shadow-lg);
+}
+.collaboration-editor input {
+  min-width: 0;
+  height: 30px;
+  padding: 0 8px;
+}
+.collaboration-editor button {
+  width: 28px;
+  height: 28px;
+  padding: 0;
+  display: inline-grid;
+  place-items: center;
 }
 .topbar-actions {
   justify-self: end;
@@ -1550,8 +1643,8 @@ textarea:focus {
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 284px 8px 1fr; /* overridden inline */
-  padding: 12px;
+  grid-template-columns: 284px 8px minmax(0, 1fr); /* overridden inline */
+  padding: 10px;
   overflow: hidden;
 }
 .resizer {
@@ -2039,8 +2132,8 @@ textarea:focus {
 .panel {
   background: var(--shell-panel);
   border: 1px solid var(--shell-border);
-  border-radius: 12px;
-  padding: 14px;
+  border-radius: 8px;
+  padding: 12px;
   overflow: auto;
   min-height: 0;
 }
@@ -2123,7 +2216,8 @@ textarea:focus {
   flex: 1 1 auto;
   margin: 0 -4px;
   padding: 0 4px;
-  overflow: auto;
+  overflow-x: hidden;
+  overflow-y: auto;
 }
 .workspace-agent-layout-control {
   flex: 0 0 auto;
@@ -2163,6 +2257,7 @@ textarea:focus {
   color: var(--text-strong);
 }
 .tree-row {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -2237,7 +2332,8 @@ textarea:focus {
   outline-offset: 1px;
 }
 .ws-label {
-  flex: 1;
+  min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
@@ -2333,10 +2429,15 @@ textarea:focus {
   padding: 4px;
   background: var(--shell-panel);
   border: 1px solid var(--shell-border);
-  border-radius: 10px;
+  border-radius: 8px;
   overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
 }
 .tabbar-tab {
+  min-width: 42px;
+  max-width: 220px;
+  flex: 0 1 auto;
   display: inline-flex;
   align-items: center;
   gap: 6px;
@@ -2357,7 +2458,10 @@ textarea:focus {
   color: var(--text-strong);
 }
 .tabbar-name {
+  min-width: 0;
+  overflow: hidden;
   font-weight: 500;
+  text-overflow: ellipsis;
 }
 .tabbar-agent-marker {
   height: 21px;
@@ -2487,6 +2591,7 @@ textarea:focus {
   overflow: auto;
 }
 .agent-row {
+  min-width: 0;
   display: flex;
   align-items: center;
   gap: 6px;
@@ -6651,10 +6756,15 @@ textarea:focus {
 }
 .pane-layout {
   position: relative;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
+  overflow: hidden;
   background: var(--terminal-bg);
 }
 .pane-switcher-layout {
+  width: 100%;
+  min-width: 0;
   min-height: 0;
   display: flex;
   flex-direction: column;
@@ -6664,9 +6774,20 @@ textarea:focus {
   flex: 1 1 auto;
 }
 .pane-switcher {
-  display: none;
+  flex: 0 0 auto;
+  display: grid;
+  grid-template-columns: 34px minmax(0, 1fr) 34px;
+  align-items: center;
+  gap: 6px;
+  min-height: 38px;
+  padding: 4px 6px;
+  border-bottom: 1px solid var(--shell-border);
+  background: var(--shell-panel);
 }
 .pane-switcher-button {
+  width: 34px;
+  height: 28px;
+  padding: 0;
   display: inline-flex;
   align-items: center;
   justify-content: center;
@@ -6703,6 +6824,10 @@ textarea:focus {
 .pane-layout-cell.is-active .terminal-view {
   border-color: var(--accent);
   box-shadow: inset 0 0 0 1px var(--accent-soft);
+}
+.pane-layout-cell.is-active .terminal-pane-head {
+  border-color: var(--accent);
+  box-shadow: inset 0 1px 0 var(--accent-soft);
 }
 .pane-resize-handle {
   position: absolute;
@@ -6747,8 +6872,118 @@ textarea:focus {
 }
 .terminal-shell {
   position: relative;
+  width: 100%;
+  min-width: 0;
   min-height: 0;
   display: flex;
+  flex-direction: column;
+  overflow: hidden;
+}
+.terminal-pane-head {
+  min-width: 0;
+  min-height: 31px;
+  flex: 0 0 31px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 4px 3px 8px;
+  border: 1px solid var(--border-soft);
+  border-bottom: 0;
+  border-radius: 8px 8px 0 0;
+  background: color-mix(in srgb, var(--panel) 92%, var(--terminal-bg));
+  color: var(--muted);
+}
+.terminal-pane-identity {
+  min-width: 0;
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.terminal-pane-number {
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
+  display: inline-grid;
+  place-items: center;
+  border: 1px solid var(--border-soft);
+  border-radius: 5px;
+  background: var(--panel-2);
+  color: var(--text);
+  font: 700 9px / 1 var(--mono-font);
+  font-variant-numeric: tabular-nums;
+}
+.terminal-pane-name {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 10px;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.terminal-pane-access {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  font-size: 9px;
+  font-weight: 650;
+}
+.terminal-pane-access::before {
+  width: 5px;
+  height: 5px;
+  border-radius: 50%;
+  background: var(--green);
+  content: "";
+}
+.terminal-pane-access.is-observe::before {
+  background: var(--yellow);
+}
+.terminal-collaboration-lock {
+  position: absolute;
+  top: 41px;
+  left: 50%;
+  z-index: 6;
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  max-width: calc(100% - 120px);
+  padding: 7px 8px 7px 11px;
+  border: 1px solid color-mix(in srgb, var(--accent) 44%, var(--border));
+  border-radius: 8px;
+  background: color-mix(in srgb, var(--panel) 90%, transparent);
+  box-shadow: var(--shadow-lg);
+  transform: translateX(-50%);
+  -webkit-backdrop-filter: blur(12px);
+  backdrop-filter: blur(12px);
+}
+.terminal-collaboration-lock > div {
+  min-width: 0;
+  display: grid;
+  gap: 1px;
+}
+.terminal-collaboration-lock strong,
+.terminal-collaboration-lock span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.terminal-collaboration-lock strong {
+  color: var(--text-strong);
+  font-size: 11px;
+}
+.terminal-collaboration-lock span {
+  color: var(--muted);
+  font-size: 10px;
+}
+.terminal-collaboration-lock button {
+  flex: 0 0 auto;
+  min-height: 28px;
+  border-color: color-mix(in srgb, var(--accent) 56%, var(--border));
+  background: var(--accent-soft);
+  color: var(--text-strong);
+  font-weight: 650;
 }
 /* Flex child that owns the terminal region. The mobile composer docks below
    it as a sibling, so overlays that must center over the terminal (side
@@ -6767,7 +7002,7 @@ textarea:focus {
   min-height: 0;
   background: var(--terminal-bg);
   border: 1px solid var(--border);
-  border-radius: 10px;
+  border-radius: 0 0 8px 8px;
   overflow: hidden;
   overscroll-behavior: contain;
   touch-action: none;
@@ -6798,26 +7033,21 @@ textarea:focus {
   touch-action: none;
 }
 .terminal-pane-toolbar {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 3;
+  min-width: 0;
+  flex: 0 0 auto;
   display: flex;
   align-items: center;
   gap: 4px;
-  padding: 3px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: rgba(32, 35, 49, 0.88);
-  box-shadow: var(--shadow-lg);
-  opacity: 0.24;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  opacity: 0.58;
   transition:
     opacity 120ms ease,
     border-color 120ms ease;
 }
-.terminal-shell:hover .terminal-pane-toolbar,
+.terminal-pane-head:hover .terminal-pane-toolbar,
 .terminal-pane-toolbar:focus-within {
-  border-color: var(--border);
   opacity: 1;
 }
 .terminal-pane-action {
@@ -6825,10 +7055,11 @@ textarea:focus {
   align-items: center;
   justify-content: center;
   width: 26px;
-  height: 24px;
+  height: 23px;
   padding: 0;
-  border-radius: 6px;
-  color: #c9cdd6;
+  border: 0;
+  border-radius: 5px;
+  color: var(--terminal-fg);
   background: transparent;
   touch-action: manipulation;
 }
@@ -7503,8 +7734,8 @@ textarea:focus {
   justify-content: center;
   gap: 8px;
   border-radius: 9px;
-  background: rgba(11, 13, 18, 0.78);
-  color: #c9cdd6;
+  background: color-mix(in srgb, var(--terminal-bg) 78%, transparent);
+  color: var(--terminal-fg);
   font:
     13px / 1 ui-monospace,
     SFMono-Regular,
@@ -7564,6 +7795,24 @@ textarea:focus {
 }
 
 @media (max-width: 768px) {
+  .collaboration-live,
+  .collaboration-count,
+  .collaboration-roster > svg {
+    display: none;
+  }
+  .collaboration-roster {
+    padding: 0 3px;
+  }
+  .collaboration-avatars {
+    padding-left: 0;
+  }
+  .collaboration-editor {
+    position: fixed;
+    top: calc(52px + env(safe-area-inset-top, 0px));
+    right: 8px;
+    left: auto;
+    width: min(300px, calc(100vw - 16px));
+  }
   .mobile-shortcuts-modal {
     max-height: calc(
       100dvh -
@@ -8777,6 +9026,12 @@ textarea:focus {
     border-bottom: none;
     border-left: none;
     border-radius: 0;
+  }
+  .terminal-pane-head {
+    display: none;
+  }
+  .terminal-collaboration-lock {
+    top: 10px;
   }
   .pane-layout {
     display: flex;
