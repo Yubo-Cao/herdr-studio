@@ -9,6 +9,51 @@ import { prepareTerminalPasteText } from "./terminalPaste";
  * switch never mixes drafts or sends text to the wrong pane.
  */
 const drafts = new Map<string, string>();
+const selections = new Map<string, { start: number; end: number }>();
+const retiredDraftKeys = new Set<string>();
+let activeDraftScopePrefix: string | null = null;
+type TerminalComposerDraftListener = (text: string) => void;
+type TerminalComposerSubmissionListener = (pending: boolean) => void;
+type TerminalComposerUploadListener = (count: number) => void;
+const draftListeners = new Map<string, Set<TerminalComposerDraftListener>>();
+const pendingSubmissions = new Set<string>();
+const submissionListeners = new Map<
+  string,
+  Set<TerminalComposerSubmissionListener>
+>();
+const pendingUploads = new Map<string, number>();
+const uploadListeners = new Map<string, Set<TerminalComposerUploadListener>>();
+
+function notifyTerminalComposerDraft(key: string, text: string): void {
+  for (const listener of draftListeners.get(key) ?? []) listener(text);
+}
+
+function notifyTerminalComposerSubmission(key: string, pending: boolean): void {
+  for (const listener of submissionListeners.get(key) ?? []) listener(pending);
+}
+
+function notifyTerminalComposerUpload(key: string, count: number): void {
+  for (const listener of uploadListeners.get(key) ?? []) listener(count);
+}
+
+function clearTerminalComposerUploads(key: string): void {
+  if (!pendingUploads.delete(key)) return;
+  notifyTerminalComposerUpload(key, 0);
+}
+
+function terminalComposerDraftScopePrefix(
+  connectionId: string,
+  connectionGeneration: number,
+): string {
+  return `${JSON.stringify([connectionId, connectionGeneration]).slice(0, -1)},`;
+}
+
+function terminalComposerDraftKeyIsActive(key: string): boolean {
+  return (
+    !retiredDraftKeys.has(key) &&
+    (activeDraftScopePrefix === null || key.startsWith(activeDraftScopePrefix))
+  );
+}
 
 export function terminalComposerDraftKey(
   connectionId: string,
@@ -24,16 +69,178 @@ export function readTerminalComposerDraft(key: string): string {
   return drafts.get(key) ?? "";
 }
 
-export function writeTerminalComposerDraft(key: string, text: string): void {
-  if (text) {
-    drafts.set(key, text);
-  } else {
-    drafts.delete(key);
+export function readTerminalComposerSelection(
+  key: string,
+): { start: number; end: number } | null {
+  return selections.get(key) ?? null;
+}
+
+/** Records the live textarea selection so async uploads use the latest mount. */
+export function writeTerminalComposerSelection(
+  key: string,
+  selectionStart: number,
+  selectionEnd: number,
+): void {
+  if (!terminalComposerDraftKeyIsActive(key)) return;
+  const length = readTerminalComposerDraft(key).length;
+  if (length === 0) {
+    selections.delete(key);
+    return;
   }
+  const start = Math.max(0, Math.min(selectionStart, length));
+  const end = Math.max(start, Math.min(selectionEnd, length));
+  selections.set(key, { start, end });
+}
+
+export function writeTerminalComposerDraft(key: string, text: string): void {
+  if (!text) {
+    clearTerminalComposerDraft(key);
+    return;
+  }
+  if (!terminalComposerDraftKeyIsActive(key)) return;
+  if (drafts.get(key) === text) return;
+  drafts.set(key, text);
+  notifyTerminalComposerDraft(key, text);
 }
 
 export function clearTerminalComposerDraft(key: string): void {
-  drafts.delete(key);
+  selections.delete(key);
+  if (!drafts.delete(key)) return;
+  notifyTerminalComposerDraft(key, "");
+}
+
+/** Keeps mounted composers synchronized with async updates to their draft. */
+export function subscribeTerminalComposerDraft(
+  key: string,
+  listener: TerminalComposerDraftListener,
+): () => void {
+  const listeners = draftListeners.get(key) ?? new Set();
+  listeners.add(listener);
+  draftListeners.set(key, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) draftListeners.delete(key);
+  };
+}
+
+export function terminalComposerSubmissionPending(key: string): boolean {
+  return pendingSubmissions.has(key);
+}
+
+/** Starts at most one submission for a pane draft, even across remounts. */
+export function beginTerminalComposerSubmission(key: string): boolean {
+  if (!terminalComposerDraftKeyIsActive(key)) return false;
+  if (pendingSubmissions.has(key)) return false;
+  pendingSubmissions.add(key);
+  notifyTerminalComposerSubmission(key, true);
+  return true;
+}
+
+export function finishTerminalComposerSubmission(key: string): void {
+  if (!pendingSubmissions.delete(key)) return;
+  notifyTerminalComposerSubmission(key, false);
+}
+
+export function subscribeTerminalComposerSubmission(
+  key: string,
+  listener: TerminalComposerSubmissionListener,
+): () => void {
+  const listeners = submissionListeners.get(key) ?? new Set();
+  listeners.add(listener);
+  submissionListeners.set(key, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) submissionListeners.delete(key);
+  };
+}
+
+export function terminalComposerUploadCount(key: string): number {
+  return pendingUploads.get(key) ?? 0;
+}
+
+/** Tracks uploads across composer remounts for the same pane draft. */
+export function beginTerminalComposerUpload(key: string): boolean {
+  if (!terminalComposerDraftKeyIsActive(key)) return false;
+  const count = terminalComposerUploadCount(key) + 1;
+  pendingUploads.set(key, count);
+  notifyTerminalComposerUpload(key, count);
+  return true;
+}
+
+export function finishTerminalComposerUpload(key: string): void {
+  const count = terminalComposerUploadCount(key);
+  if (count <= 0) return;
+  if (count === 1) {
+    clearTerminalComposerUploads(key);
+    return;
+  }
+  pendingUploads.set(key, count - 1);
+  notifyTerminalComposerUpload(key, count - 1);
+}
+
+export function subscribeTerminalComposerUpload(
+  key: string,
+  listener: TerminalComposerUploadListener,
+): () => void {
+  const listeners = uploadListeners.get(key) ?? new Set();
+  listeners.add(listener);
+  uploadListeners.set(key, listeners);
+  return () => {
+    listeners.delete(listener);
+    if (listeners.size === 0) uploadListeners.delete(key);
+  };
+}
+
+/**
+ * Activates the app's single browser routing scope. Drafts and submissions
+ * outside it are unreachable, and retired async work cannot write them back.
+ */
+export function activateTerminalComposerDraftScope(
+  connectionId: string,
+  connectionGeneration: number,
+): void {
+  activeDraftScopePrefix = terminalComposerDraftScopePrefix(
+    connectionId,
+    connectionGeneration,
+  );
+  for (const key of drafts.keys()) {
+    if (!terminalComposerDraftKeyIsActive(key)) clearTerminalComposerDraft(key);
+  }
+  for (const key of selections.keys()) {
+    if (!terminalComposerDraftKeyIsActive(key)) selections.delete(key);
+  }
+  for (const key of pendingSubmissions) {
+    if (!terminalComposerDraftKeyIsActive(key)) {
+      finishTerminalComposerSubmission(key);
+    }
+  }
+  for (const key of pendingUploads.keys()) {
+    if (!terminalComposerDraftKeyIsActive(key)) {
+      clearTerminalComposerUploads(key);
+    }
+  }
+}
+
+/** Inserts into the latest shared draft so async completions cannot overwrite it. */
+export function insertIntoTerminalComposerDraft(
+  key: string,
+  insertion: string,
+  selectionStart?: number,
+  selectionEnd?: number,
+): { text: string; caret: number } {
+  const current = readTerminalComposerDraft(key);
+  if (!terminalComposerDraftKeyIsActive(key)) {
+    return { text: current, caret: current.length };
+  }
+  const storedSelection = readTerminalComposerSelection(key);
+  const start = selectionStart ?? storedSelection?.start ?? current.length;
+  const end = selectionEnd ?? storedSelection?.end ?? start;
+  const next = terminalComposerInsertAtCaret(current, start, end, insertion);
+  // Publish the selection before the draft notification so a remounted
+  // subscriber restores this caret when it renders the inserted path.
+  selections.set(key, { start: next.caret, end: next.caret });
+  writeTerminalComposerDraft(key, next.text);
+  return next;
 }
 
 /** Test hook: number of retained drafts. */
@@ -58,16 +265,22 @@ export function terminalComposerDraftPaneIds(
   );
 }
 
-/** Discards drafts for panes the user explicitly confirmed closing. */
+/** Discards drafts and retires async work for panes confirmed closing. */
 export function clearTerminalComposerDrafts(
   connectionId: string,
   connectionGeneration: number,
   paneIds: readonly string[],
 ): void {
   for (const paneId of paneIds) {
-    clearTerminalComposerDraft(
-      terminalComposerDraftKey(connectionId, connectionGeneration, paneId),
+    const key = terminalComposerDraftKey(
+      connectionId,
+      connectionGeneration,
+      paneId,
     );
+    retiredDraftKeys.add(key);
+    clearTerminalComposerDraft(key);
+    finishTerminalComposerSubmission(key);
+    clearTerminalComposerUploads(key);
   }
 }
 

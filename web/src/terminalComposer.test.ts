@@ -1,15 +1,28 @@
 import { describe, expect, test } from "bun:test";
 import {
+  activateTerminalComposerDraftScope,
+  beginTerminalComposerSubmission,
+  beginTerminalComposerUpload,
   clearTerminalComposerDraft,
   clearTerminalComposerDrafts,
+  finishTerminalComposerSubmission,
+  finishTerminalComposerUpload,
+  insertIntoTerminalComposerDraft,
   readTerminalComposerDraft,
+  readTerminalComposerSelection,
+  subscribeTerminalComposerDraft,
+  subscribeTerminalComposerSubmission,
+  subscribeTerminalComposerUpload,
   terminalComposerCloseWarning,
   terminalComposerDraftCount,
   terminalComposerDraftKey,
   terminalComposerDraftPaneIds,
   terminalComposerInsertAtCaret,
   terminalComposerRequest,
+  terminalComposerSubmissionPending,
+  terminalComposerUploadCount,
   writeTerminalComposerDraft,
+  writeTerminalComposerSelection,
 } from "./terminalComposer";
 
 describe("terminal composer drafts", () => {
@@ -76,6 +89,135 @@ describe("terminal composer drafts", () => {
       readTerminalComposerDraft(terminalComposerDraftKey("c", 2, "p1")),
     ).toBe("gen");
     clearTerminalComposerDrafts("c", 2, ["p1"]);
+  });
+
+  test("notifies active composers when async work updates a draft", () => {
+    const key = terminalComposerDraftKey("notify", 1, "p1");
+    const observed: string[] = [];
+    const unsubscribe = subscribeTerminalComposerDraft(key, (text) =>
+      observed.push(text),
+    );
+
+    writeTerminalComposerDraft(key, "sent command");
+    clearTerminalComposerDraft(key);
+    unsubscribe();
+    writeTerminalComposerDraft(key, "after unsubscribe");
+
+    expect(observed).toEqual(["sent command", ""]);
+    clearTerminalComposerDraft(key);
+  });
+
+  test("serializes submissions per draft key across mounts", () => {
+    const first = terminalComposerDraftKey("submit", 1, "p1");
+    const otherPane = terminalComposerDraftKey("submit", 1, "p2");
+    const observed: boolean[] = [];
+    const unsubscribe = subscribeTerminalComposerSubmission(first, (pending) =>
+      observed.push(pending),
+    );
+
+    expect(beginTerminalComposerSubmission(first)).toBe(true);
+    expect(terminalComposerSubmissionPending(first)).toBe(true);
+    expect(beginTerminalComposerSubmission(first)).toBe(false);
+    expect(beginTerminalComposerSubmission(otherPane)).toBe(true);
+
+    finishTerminalComposerSubmission(first);
+    expect(terminalComposerSubmissionPending(first)).toBe(false);
+    expect(observed).toEqual([true, false]);
+
+    unsubscribe();
+    finishTerminalComposerSubmission(otherPane);
+  });
+
+  test("tracks uploads across composer remounts", () => {
+    const key = terminalComposerDraftKey("upload-pending", 1, "p1");
+    const observed: number[] = [];
+    const unsubscribe = subscribeTerminalComposerUpload(key, (count) =>
+      observed.push(count),
+    );
+
+    expect(beginTerminalComposerUpload(key)).toBe(true);
+    expect(terminalComposerUploadCount(key)).toBe(1);
+    expect(beginTerminalComposerUpload(key)).toBe(true);
+    finishTerminalComposerUpload(key);
+    expect(terminalComposerUploadCount(key)).toBe(1);
+    finishTerminalComposerUpload(key);
+
+    expect(terminalComposerUploadCount(key)).toBe(0);
+    expect(observed).toEqual([1, 2, 1, 0]);
+    unsubscribe();
+  });
+
+  test("inserts async results into the latest shared draft", () => {
+    const key = terminalComposerDraftKey("upload", 1, "p1");
+    writeTerminalComposerDraft(key, "newer edits");
+
+    expect(insertIntoTerminalComposerDraft(key, "/tmp/image.png")).toEqual({
+      text: "newer edits /tmp/image.png ",
+      caret: 27,
+    });
+    expect(readTerminalComposerDraft(key)).toBe("newer edits /tmp/image.png ");
+
+    clearTerminalComposerDraft(key);
+  });
+
+  test("uses the latest shared caret when an upload completes after remount", () => {
+    const key = terminalComposerDraftKey("caret", 1, "p1");
+    writeTerminalComposerDraft(key, "echo after");
+    // A newly mounted textarea publishes its current selection under the same
+    // draft key before an upload started by the prior mount completes.
+    writeTerminalComposerSelection(key, 5, 5);
+
+    expect(insertIntoTerminalComposerDraft(key, "/tmp/image.png")).toEqual({
+      text: "echo /tmp/image.png after",
+      caret: 20,
+    });
+    expect(readTerminalComposerSelection(key)).toEqual({ start: 20, end: 20 });
+
+    clearTerminalComposerDraft(key);
+    expect(readTerminalComposerSelection(key)).toBeNull();
+  });
+
+  test("retires drafts, submissions, uploads, and stale writes on scope changes", () => {
+    const first = terminalComposerDraftKey("conn-a", 1, "p1");
+    const second = terminalComposerDraftKey("conn-b", 2, "p1");
+    activateTerminalComposerDraftScope("conn-a", 1);
+    writeTerminalComposerDraft(first, "secret command");
+    expect(beginTerminalComposerSubmission(first)).toBe(true);
+    expect(beginTerminalComposerUpload(first)).toBe(true);
+
+    activateTerminalComposerDraftScope("conn-b", 2);
+
+    expect(readTerminalComposerDraft(first)).toBe("");
+    expect(terminalComposerSubmissionPending(first)).toBe(false);
+    expect(terminalComposerUploadCount(first)).toBe(0);
+    writeTerminalComposerDraft(first, "restored by stale failure");
+    expect(insertIntoTerminalComposerDraft(first, "/tmp/stale.png")).toEqual({
+      text: "",
+      caret: 0,
+    });
+    expect(readTerminalComposerDraft(first)).toBe("");
+
+    writeTerminalComposerDraft(second, "current draft");
+    expect(readTerminalComposerDraft(second)).toBe("current draft");
+    clearTerminalComposerDraft(second);
+  });
+
+  test("pane closure retires async work for that draft key", () => {
+    const key = terminalComposerDraftKey("conn-b", 2, "closing-pane");
+    writeTerminalComposerDraft(key, "draft");
+    expect(beginTerminalComposerSubmission(key)).toBe(true);
+    expect(beginTerminalComposerUpload(key)).toBe(true);
+
+    clearTerminalComposerDrafts("conn-b", 2, ["closing-pane"]);
+
+    expect(terminalComposerSubmissionPending(key)).toBe(false);
+    expect(terminalComposerUploadCount(key)).toBe(0);
+    expect(beginTerminalComposerSubmission(key)).toBe(false);
+    expect(beginTerminalComposerUpload(key)).toBe(false);
+    expect(insertIntoTerminalComposerDraft(key, "/tmp/stale.png")).toEqual({
+      text: "",
+      caret: 0,
+    });
   });
 
   test("close warning matches the draft count", () => {

@@ -1,90 +1,38 @@
 import {
+  ClipboardAddon,
+  type ClipboardSelectionType,
+} from "@xterm/addon-clipboard";
+import { FitAddon } from "@xterm/addon-fit";
+import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
+import type { IBufferLine, ILink } from "@xterm/xterm";
+import { Terminal } from "@xterm/xterm";
+import { Columns2, Keyboard, Maximize2, Rows2, X } from "lucide-react";
+import {
+  type CSSProperties,
   useCallback,
   useEffect,
   useLayoutEffect,
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
 } from "react";
-import { Terminal } from "@xterm/xterm";
-import type { IBufferLine, ILink } from "@xterm/xterm";
-import {
-  ClipboardAddon,
-  type ClipboardSelectionType,
-} from "@xterm/addon-clipboard";
-import { FitAddon } from "@xterm/addon-fit";
-import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
-import {
-  Columns2,
-  Keyboard,
-  Maximize2,
-  Rows2,
-  SquarePen,
-  X,
-} from "lucide-react";
 import "@xterm/xterm/css/xterm.css";
-import { shallowEqual, store, useStoreSelector } from "../store";
-import { paneCanClose } from "../paneJump";
 import { bridge, type ConnectionClient } from "../api";
+import { mobileTerminalShortcutExecution } from "../mobileTerminalShortcutAction";
 import {
-  registerTerminalConnectionDisposer,
-  terminalConnectionKey,
-  terminalPushMatches,
-  type TerminalConnectionIdentity,
-} from "../terminalConnection";
-import { ConfirmDialog, MessageDialog } from "./ModalDialogs";
-import { paneHasAgentHistory } from "./agentSession";
-import {
-  findTerminalHttpLinks,
-  sanitizeTerminalHttpUrl,
-} from "../terminalLinks";
-import {
-  findTerminalFileLinkCandidates,
-  type ResolvedTerminalFile,
-  type TerminalFileLinkCandidate,
-  TerminalFileResolutionCache,
-} from "../terminalFileLinks";
-import {
-  terminalPasteInputText,
-  terminalPasteRequest,
-  type TerminalPasteTextareaSnapshot,
-} from "../terminalPaste";
+  defaultMobileTerminalShortcutRows,
+  defaultMobileTerminalSideShortcuts,
+  type MobileTerminalShortcut,
+  type MobileTerminalShortcutRows,
+  type MobileTerminalSideShortcuts,
+  mobileTerminalShortcutOption,
+} from "../mobileTerminalShortcuts";
+import { paneCanClose } from "../paneJump";
+import { shallowEqual, store, useStoreSelector } from "../store";
 import {
   createTerminalClipboardProvider,
   decodeTerminalClipboard,
 } from "../terminalClipboard";
-import {
-  macCommandEditingSequence,
-  modifiedEnterSequence,
-} from "../terminalKeys";
-import {
-  isTerminalImeCommittedInputType,
-  terminalImeEventTime,
-  terminalImeFallbackText,
-  TerminalImeFallbackTracker,
-  TerminalImeKeyEventTracker,
-  TerminalImeTextareaFallbackTracker,
-} from "../terminalIme";
-import { terminalPageScroll, terminalWheelScroll } from "../terminalScroll";
-import { TerminalSelectionDragGuard } from "../terminalSelectionGuard";
-import { terminalFocusBlockedByOverlay } from "../terminalFocus";
-import {
-  TerminalAttachFrameWatchdog,
-  TerminalResizeSync,
-  rememberTerminalRelayViewport,
-  terminalAttachWatchdogMs,
-  terminalRelayViewportSize,
-} from "../terminalResize";
-import {
-  defaultMobileTerminalShortcutRows,
-  defaultMobileTerminalSideShortcuts,
-  mobileTerminalShortcutOption,
-  type MobileTerminalShortcut,
-  type MobileTerminalShortcutRows,
-  type MobileTerminalSideShortcuts,
-} from "../mobileTerminalShortcuts";
-import { mobileTerminalShortcutExecution } from "../mobileTerminalShortcutAction";
 import {
   clearTerminalComposerDrafts,
   terminalComposerCloseWarning,
@@ -92,14 +40,59 @@ import {
   terminalComposerDraftPaneIds,
   terminalComposerRequest,
 } from "../terminalComposer";
+import {
+  registerTerminalConnectionDisposer,
+  type TerminalConnectionIdentity,
+  terminalConnectionKey,
+  terminalPushMatches,
+} from "../terminalConnection";
+import {
+  findTerminalFileLinkCandidates,
+  type ResolvedTerminalFile,
+  type TerminalFileLinkCandidate,
+  TerminalFileResolutionCache,
+} from "../terminalFileLinks";
+import { terminalFocusBlockedByOverlay } from "../terminalFocus";
 import { uploadTerminalImage } from "../terminalImageUpload";
-import { TerminalComposer } from "./TerminalComposer";
+import {
+  isTerminalImeCommittedInputType,
+  TerminalImeFallbackTracker,
+  TerminalImeKeyEventTracker,
+  TerminalImeTextareaFallbackTracker,
+  terminalImeEventTime,
+  terminalImeFallbackText,
+} from "../terminalIme";
+import {
+  macCommandEditingSequence,
+  modifiedEnterSequence,
+} from "../terminalKeys";
+import {
+  findTerminalHttpLinks,
+  sanitizeTerminalHttpUrl,
+} from "../terminalLinks";
+import {
+  type TerminalPasteTextareaSnapshot,
+  terminalPasteInputText,
+  terminalPasteRequest,
+} from "../terminalPaste";
 import {
   readTerminalRecoveryReloadAt,
   shouldArmTerminalRecoveryResume,
   shouldReloadTerminalAfterResume,
   writeTerminalRecoveryReloadAt,
 } from "../terminalRecovery";
+import {
+  rememberTerminalRelayViewport,
+  TerminalAttachFrameWatchdog,
+  TerminalResizeSync,
+  terminalAttachWatchdogMs,
+  terminalRelayViewportSize,
+} from "../terminalResize";
+import { terminalPageScroll, terminalWheelScroll } from "../terminalScroll";
+import { TerminalSelectionDragGuard } from "../terminalSelectionGuard";
+import { paneHasAgentHistory } from "./agentSession";
+import { ConfirmDialog, MessageDialog } from "./ModalDialogs";
+import { TerminalComposer } from "./TerminalComposer";
 
 const SYSTEM_CLIPBOARD = "c" as ClipboardSelectionType;
 
@@ -409,6 +402,8 @@ export function TerminalView({
   showMobileKeys = true,
   mobileShortcuts = defaultMobileTerminalShortcutRows(),
   mobileSideShortcuts = defaultMobileTerminalSideShortcuts(),
+  composerOpen: controlledComposerOpen,
+  onComposerOpenChange,
   agentHistoryOpen: controlledAgentHistoryOpen,
   onAgentHistoryOpenChange,
   onOpenWorkspaceFile,
@@ -417,6 +412,8 @@ export function TerminalView({
   showMobileKeys?: boolean;
   mobileShortcuts?: MobileTerminalShortcutRows;
   mobileSideShortcuts?: MobileTerminalSideShortcuts;
+  composerOpen?: boolean;
+  onComposerOpenChange?: (open: boolean) => void;
   agentHistoryOpen?: boolean;
   onAgentHistoryOpenChange?: (open: boolean) => void;
   onOpenWorkspaceFile?: (request: TerminalWorkspaceFileRequest) => void;
@@ -483,7 +480,7 @@ export function TerminalView({
   const [pasteLoading, setPasteLoading] = useState(false);
   const [attachRetry, setAttachRetry] = useState(0);
   const [mobileKeysOpen, setMobileKeysOpen] = useState(false);
-  const [composerOpen, setComposerOpen] = useState(false);
+  const [localComposerOpen, setLocalComposerOpen] = useState(false);
   const [closePaneRequested, setClosePaneRequested] = useState(false);
   const [localAgentHistoryOpen, setLocalAgentHistoryOpen] = useState(false);
   const containerRef = useCallback(
@@ -530,6 +527,21 @@ export function TerminalView({
   const isActivePane = !!pane && (!paneId || pane.pane_id === activePaneId);
   const canShowAgentHistory = isActivePane && paneHasAgentHistory(pane);
   const canClosePane = !!pane && paneCanClose(s.panes, pane.pane_id);
+  const composerOpen = controlledComposerOpen ?? localComposerOpen;
+  const composerOpenRef = useRef(composerOpen);
+  composerOpenRef.current = composerOpen;
+  useLayoutEffect(() => {
+    if (!termInstance) return;
+    termInstance.options.disableStdin = composerOpen;
+    if (composerOpen) termInstance.blur();
+  }, [composerOpen, termInstance]);
+  const setComposerOpen = useCallback(
+    (open: boolean) => {
+      if (controlledComposerOpen === undefined) setLocalComposerOpen(open);
+      onComposerOpenChange?.(open);
+    },
+    [controlledComposerOpen, onComposerOpenChange],
+  );
   const agentHistoryOpen = controlledAgentHistoryOpen ?? localAgentHistoryOpen;
   const setAgentHistoryOpen = useCallback(
     (open: boolean) => {
@@ -565,11 +577,11 @@ export function TerminalView({
     paneLayoutRef.current = s.layout;
   }, [s.layout]);
   const focusTerminalSoon = useCallback(() => {
-    if (!isActivePaneRef.current) return;
+    if (!isActivePaneRef.current || composerOpenRef.current) return;
     if (shouldAvoidVirtualKeyboard()) return;
     requestAnimationFrame(() => {
       window.setTimeout(() => {
-        if (!connectionClient.isCurrent()) return;
+        if (!connectionClient.isCurrent() || composerOpenRef.current) return;
         const term = termRef.current;
         const active = document.activeElement;
         const activeElement = active instanceof HTMLElement ? active : null;
@@ -745,6 +757,7 @@ export function TerminalView({
     let terminalEffectDisposed = false;
     const term = new Terminal({
       cursorBlink: true,
+      disableStdin: composerOpenRef.current,
       fontFamily: FONT_FAMILY,
       ...terminalDensity(),
       theme: {
@@ -833,6 +846,7 @@ export function TerminalView({
     let pastePaneIdBeforeInput: string | null = null;
     let lastTerminalTextareaSnapshot = readTerminalTextareaSnapshot();
     term.onData((data) => {
+      if (composerOpenRef.current) return;
       const unsuppressedData = imeTextareaFallback.recordXtermData(data);
       if (!unsuppressedData) return;
       const dataAt = performance.now();
@@ -973,6 +987,7 @@ export function TerminalView({
     ro.observe(container);
 
     const sendText = (text: string) => {
+      if (composerOpenRef.current) return;
       const terminalId = desiredTerminalRef.current;
       if (!terminalId) return;
       const bytes = new TextEncoder().encode(text);
@@ -982,7 +997,7 @@ export function TerminalView({
       text: string,
       destinationPaneId: string | null = paneIdRef.current ?? null,
     ) => {
-      if (!text) return;
+      if (!text || composerOpenRef.current) return;
       if (destinationPaneId) {
         const request = terminalPasteRequest(destinationPaneId, text);
         await connectionClient.call(request.method, request.params);
@@ -1057,7 +1072,7 @@ export function TerminalView({
     };
     let clipboardPasteInFlight = false;
     const pasteFromBrowserClipboard = async () => {
-      if (clipboardPasteInFlight) return;
+      if (composerOpenRef.current || clipboardPasteInFlight) return;
       clipboardPasteInFlight = true;
       const destinationPaneId = paneIdRef.current ?? null;
       try {
@@ -1128,6 +1143,11 @@ export function TerminalView({
       isTerminalImeCommittedInputType(input.inputType);
 
     term.attachCustomKeyEventHandler((e) => {
+      if (composerOpenRef.current) {
+        e.preventDefault();
+        e.stopPropagation();
+        return false;
+      }
       if (applePlatform && e.type === "keydown") {
         imeKeyEvent.begin();
       }
@@ -2086,29 +2106,6 @@ export function TerminalView({
               </div>
             </div>
           </div>
-        ) : null}
-        {showMobileKeys ? (
-          <button
-            type="button"
-            className={`terminal-composer-toggle ${
-              composerOpen ? "is-open" : ""
-            }`}
-            title={
-              composerOpen
-                ? "Close terminal composer"
-                : "Open terminal composer"
-            }
-            aria-label={
-              composerOpen
-                ? "Close terminal composer"
-                : "Open terminal composer"
-            }
-            aria-expanded={composerOpen}
-            onPointerDown={preventPaneActionFocus}
-            onClick={() => setComposerOpen((value) => !value)}
-          >
-            <SquarePen size={16} />
-          </button>
         ) : null}
         {composerOpen ? (
           <TerminalComposer

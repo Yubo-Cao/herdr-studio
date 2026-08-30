@@ -31,8 +31,37 @@ export async function uploadTerminalImage(
     },
     body: file,
   });
-  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const body = (await res.text()).trim();
+    if (!client.isCurrent()) {
+      throw new Error("connection changed during upload");
+    }
+    let detail = body;
+    if (body) {
+      try {
+        const payload: unknown = JSON.parse(body);
+        if (payload && typeof payload === "object" && !Array.isArray(payload)) {
+          const error = (payload as { error?: unknown }).error;
+          if (typeof error === "string" && error) detail = error;
+        }
+      } catch {
+        // Auth proxies and generic HTTP servers commonly return plain text or
+        // HTML errors. The response is already a failure, so preserve its body.
+      }
+    }
+    throw new Error(
+      detail || res.statusText || `Image upload failed (${res.status})`,
+    );
+  }
+
+  const data: unknown = await res.json();
   if (!client.isCurrent()) throw new Error("connection changed during upload");
-  if (!res.ok) throw new Error(data.error || res.statusText);
-  return data.path as string;
+  if (data === null || typeof data !== "object" || Array.isArray(data)) {
+    throw new Error("image upload response was not an object");
+  }
+  const payload = data as { path?: unknown };
+  if (typeof payload.path !== "string" || payload.path.length === 0) {
+    throw new Error("image upload response did not include a path");
+  }
+  return payload.path;
 }
