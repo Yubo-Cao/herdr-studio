@@ -32,13 +32,20 @@ import {
 } from "./process";
 import { decodePreviewBuffer, previewLimitForPath } from "./preview";
 
+function lexicalTargetInsideRoot(rootReal: string, requestedPath: string) {
+  const targetPath = resolve(rootReal, requestedPath);
+  assertInsideRoot(rootReal, targetPath);
+  return targetPath;
+}
+
 export async function listLocalFiles(
   rootPath: string,
   relativePath: string,
   showHidden: boolean,
 ): Promise<FileListResult> {
   const rootReal = await realpath(rootPath);
-  const targetReal = await realpath(resolve(rootReal, relativePath)).catch(
+  const targetPath = lexicalTargetInsideRoot(rootReal, relativePath);
+  const targetReal = await realpath(targetPath).catch(
     (error: NodeJS.ErrnoException) => {
       if (error.code === "ENOENT" || error.code === "ELOOP") {
         throw new Error("file explorer symlink is broken or unavailable");
@@ -46,7 +53,6 @@ export async function listLocalFiles(
       throw error;
     },
   );
-  assertInsideRoot(rootReal, targetReal);
   const dirents = await readdir(targetReal, { withFileTypes: true });
   const visibleDirents = dirents.filter(
     (dirent) => showHidden || !dirent.name.startsWith("."),
@@ -75,18 +81,18 @@ export async function listLocalFiles(
           if (!linkTargetReal) {
             symlinkStatus = "broken";
           } else {
+            const targetInfo = await stat(linkTargetReal).catch(() => null);
+            if (targetInfo) {
+              info = targetInfo;
+              symlinkTargetType = targetInfo.isDirectory()
+                ? "directory"
+                : targetInfo.isFile()
+                  ? "file"
+                  : undefined;
+            }
             try {
               assertInsideRoot(rootReal, linkTargetReal);
               symlinkStatus = "internal";
-              const targetInfo = await stat(linkTargetReal).catch(() => null);
-              if (targetInfo) {
-                info = targetInfo;
-                symlinkTargetType = targetInfo.isDirectory()
-                  ? "directory"
-                  : targetInfo.isFile()
-                    ? "file"
-                    : undefined;
-              }
             } catch {
               symlinkStatus = "external";
             }
@@ -144,10 +150,10 @@ export async function resolveLocalFilePaths(
     requestedPaths.map(async (requestedPath) => {
       try {
         const requestedAbsolute = requestedPath.startsWith("/");
-        const targetReal = await realpath(
-          requestedAbsolute ? requestedPath : resolve(rootReal, requestedPath),
-        );
-        if (!requestedAbsolute) assertInsideRoot(rootReal, targetReal);
+        const targetPath = requestedAbsolute
+          ? requestedPath
+          : lexicalTargetInsideRoot(rootReal, requestedPath);
+        const targetReal = await realpath(targetPath);
         const info = await stat(targetReal);
         return info.isFile() ? requestedPath : null;
       } catch {
@@ -164,17 +170,17 @@ export async function readLocalFile(
 ): Promise<FilePreviewResult> {
   const rootReal = await realpath(rootPath);
   const requestedAbsolute = requestedPath.startsWith("/");
-  const targetReal = await realpath(
-    requestedAbsolute ? requestedPath : resolve(rootReal, requestedPath),
-  );
-  if (!requestedAbsolute) assertInsideRoot(rootReal, targetReal);
+  const targetPath = requestedAbsolute
+    ? requestedPath
+    : lexicalTargetInsideRoot(rootReal, requestedPath);
+  const targetReal = await realpath(targetPath);
   const info = await stat(targetReal);
   if (!info.isFile()) {
     throw new Error("only regular files can be previewed");
   }
   const displayPath = requestedAbsolute
     ? targetReal
-    : relativePreviewPath(rootReal, targetReal);
+    : relativePreviewPath(rootReal, targetPath);
   const previewLimit = previewLimitForPath(displayPath, info.size);
   const raw = Buffer.from(
     await Bun.file(targetReal)
@@ -200,14 +206,14 @@ export async function downloadLocalFile(
 ): Promise<FileDownloadResult> {
   const rootReal = await realpath(rootPath);
   const requestedAbsolute = requestedPath.startsWith("/");
-  const targetReal = await realpath(
-    requestedAbsolute ? requestedPath : resolve(rootReal, requestedPath),
-  );
-  if (!requestedAbsolute) assertInsideRoot(rootReal, targetReal);
+  const targetPath = requestedAbsolute
+    ? requestedPath
+    : lexicalTargetInsideRoot(rootReal, requestedPath);
+  const targetReal = await realpath(targetPath);
   const info = await stat(targetReal);
   const displayPath = requestedAbsolute
     ? targetReal
-    : relativePreviewPath(rootReal, targetReal);
+    : relativePreviewPath(rootReal, targetPath);
   if (info.isDirectory()) {
     const archiveName = `${basename(targetReal) || "download"}.tar.gz`;
     const result = await runBinaryProcessWithTimeout(
@@ -254,8 +260,8 @@ export async function uploadLocalFile(
   body: Buffer,
 ): Promise<FileUploadResult> {
   const rootReal = await realpath(rootPath);
-  const directoryReal = await realpath(resolve(rootReal, directory));
-  assertInsideRoot(rootReal, directoryReal);
+  const directoryPath = lexicalTargetInsideRoot(rootReal, directory);
+  const directoryReal = await realpath(directoryPath);
   const info = await stat(directoryReal);
   if (!info.isDirectory()) throw new Error("upload target is not a directory");
   const targetPath = resolve(directoryReal, filename);
@@ -272,7 +278,7 @@ export async function uploadLocalFile(
     });
   await writeFile(targetPath, body);
   return {
-    path: relativePreviewPath(rootReal, targetPath),
+    path: relativeExplorerPath(directory, filename),
     size: body.length,
     overwritten: existed,
   };
@@ -283,9 +289,7 @@ export async function deleteLocalFile(
   requestedPath: string,
 ): Promise<FileDeleteResult> {
   const rootReal = await realpath(rootPath);
-  const targetPath = resolve(rootReal, requestedPath);
-  const parentReal = await realpath(dirname(targetPath));
-  assertInsideRoot(rootReal, parentReal);
+  const targetPath = lexicalTargetInsideRoot(rootReal, requestedPath);
   const info = await lstat(targetPath);
   await rm(targetPath, {
     recursive: info.isDirectory(),

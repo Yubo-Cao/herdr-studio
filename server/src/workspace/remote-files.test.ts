@@ -4,6 +4,8 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { shQuote } from "../utils/process-utils";
 import {
+  deleteRemoteFile,
+  downloadRemoteFile,
   listRemoteFiles,
   parseRemoteFileDelete,
   parseRemoteFileDownload,
@@ -11,17 +13,23 @@ import {
   parseRemoteFilePreview,
   parseRemoteFileResolutions,
   parseRemoteFileUpload,
+  readRemoteFile,
+  resolveRemoteFilePaths,
+  uploadRemoteFile,
 } from "./remote-files";
 
 function b64(value: string) {
   return Buffer.from(value, "utf8").toString("base64");
 }
 
-async function runShellCommand(command: string) {
+async function runShellCommand(command: string, input = "") {
   const proc = Bun.spawn(["bash", "-lc", command], {
+    stdin: "pipe",
     stdout: "pipe",
     stderr: "pipe",
   });
+  proc.stdin.write(input);
+  proc.stdin.end();
   const [code, stdout, stderr] = await Promise.all([
     proc.exited,
     new Response(proc.stdout).text(),
@@ -40,7 +48,7 @@ async function withTempDir<T>(fn: (dir: string) => Promise<T>) {
 }
 
 describe("remote file protocol parsers", () => {
-  test("filters ignored files and follows safe directory symlinks remotely", async () => {
+  test("filters ignored files and follows explicit symlinks remotely", async () => {
     await withTempDir(async (root) => {
       const outside = await mkdtemp(join(tmpdir(), "herdr-gui-outside-"));
       try {
@@ -55,8 +63,15 @@ describe("remote file protocol parsers", () => {
         ).toBe(0);
         await mkdir(join(root, "target"));
         await writeFile(join(root, "target", "child.txt"), "child");
+        await mkdir(join(outside, "shared"));
+        await writeFile(join(outside, "shared", "outside-child.txt"), "child");
+        await writeFile(join(outside, "outside.txt"), "outside");
         await symlink("target", join(root, "link-dir"));
-        await symlink(outside, join(root, "external-link"));
+        await symlink(join(outside, "shared"), join(root, "external-link"));
+        await symlink(
+          join(outside, "outside.txt"),
+          join(root, "external-file"),
+        );
         await symlink("missing", join(root, "broken-link"));
         let sshCalls = 0;
         const list = await listRemoteFiles({
@@ -90,7 +105,18 @@ describe("remote file protocol parsers", () => {
         });
         expect(
           list.entries.find((entry) => entry.name === "external-link"),
-        ).toMatchObject({ type: "symlink", symlink_status: "external" });
+        ).toMatchObject({
+          type: "symlink",
+          symlink_status: "external",
+          symlink_target_type: "directory",
+        });
+        expect(
+          list.entries.find((entry) => entry.name === "external-file"),
+        ).toMatchObject({
+          type: "symlink",
+          symlink_status: "external",
+          symlink_target_type: "file",
+        });
         expect(
           list.entries.find((entry) => entry.name === "broken-link"),
         ).toMatchObject({ type: "symlink", symlink_status: "broken" });
@@ -107,17 +133,150 @@ describe("remote file protocol parsers", () => {
         expect(linked.entries.map((entry) => entry.name)).toEqual([
           "child.txt",
         ]);
+        const runProcessWithCodeTimeout = async (argv: string[]) =>
+          runShellCommand(argv.at(-1) ?? "");
         await expect(
           listRemoteFiles({
             host: "example.test",
             rootPath: root,
             relativePath: "external-link",
             showHidden: false,
-            runProcessWithCodeTimeout: async (argv) =>
-              runShellCommand(argv.at(-1) ?? ""),
+            runProcessWithCodeTimeout,
+            shQuote,
+          }),
+        ).resolves.toMatchObject({
+          path: "external-link",
+          entries: [{ name: "outside-child.txt" }],
+        });
+        await expect(
+          readRemoteFile({
+            host: "example.test",
+            rootPath: root,
+            requestedPath: "external-file",
+            runProcessWithCodeTimeout,
+            shQuote,
+          }),
+        ).resolves.toMatchObject({ path: "external-file", text: "outside" });
+        await expect(
+          resolveRemoteFilePaths({
+            host: "example.test",
+            rootPath: root,
+            requestedPaths: ["external-file"],
+            runProcessWithCodeTimeout,
+            shQuote,
+          }),
+        ).resolves.toEqual(["external-file"]);
+        await expect(
+          uploadRemoteFile({
+            host: "example.test",
+            rootPath: root,
+            directory: "external-link",
+            filename: "uploaded.txt",
+            body: Buffer.from("uploaded"),
+            shQuote,
+            runProcessWithInputTimeoutImpl: async (argv, input) =>
+              runShellCommand(argv.at(-1) ?? "", String(input)),
+          }),
+        ).resolves.toEqual({
+          path: "external-link/uploaded.txt",
+          size: 8,
+          overwritten: false,
+        });
+        const download = await downloadRemoteFile({
+          host: "example.test",
+          rootPath: root,
+          requestedPath: "external-link/uploaded.txt",
+          runProcessWithCodeTimeout,
+          shQuote,
+        });
+        expect(download.path).toBe("external-link/uploaded.txt");
+        expect(await new Response(download.body).text()).toBe("uploaded");
+        await expect(
+          deleteRemoteFile({
+            host: "example.test",
+            rootPath: root,
+            requestedPath: "external-link/uploaded.txt",
+            runProcessWithCodeTimeout,
+            shQuote,
+          }),
+        ).resolves.toEqual({
+          path: "external-link/uploaded.txt",
+          type: "file",
+        });
+        expect(
+          await Bun.file(join(outside, "shared", "uploaded.txt")).exists(),
+        ).toBe(false);
+        await expect(
+          deleteRemoteFile({
+            host: "example.test",
+            rootPath: root,
+            requestedPath: "external-file",
+            runProcessWithCodeTimeout,
+            shQuote,
+          }),
+        ).resolves.toEqual({ path: "external-file", type: "symlink" });
+        expect(await Bun.file(join(outside, "outside.txt")).exists()).toBe(
+          true,
+        );
+
+        await expect(
+          listRemoteFiles({
+            host: "example.test",
+            rootPath: root,
+            relativePath: "..",
+            showHidden: false,
+            runProcessWithCodeTimeout,
             shQuote,
           }),
         ).rejects.toThrow("file explorer path escaped the workspace checkout");
+        await expect(
+          readRemoteFile({
+            host: "example.test",
+            rootPath: root,
+            requestedPath: "../outside.txt",
+            runProcessWithCodeTimeout,
+            shQuote,
+          }),
+        ).rejects.toThrow("file explorer path escaped the workspace checkout");
+        await expect(
+          downloadRemoteFile({
+            host: "example.test",
+            rootPath: root,
+            requestedPath: "../outside.txt",
+            runProcessWithCodeTimeout,
+            shQuote,
+          }),
+        ).rejects.toThrow("file explorer path escaped the workspace checkout");
+        await expect(
+          uploadRemoteFile({
+            host: "example.test",
+            rootPath: root,
+            directory: "..",
+            filename: "outside.txt",
+            body: Buffer.from("outside"),
+            shQuote,
+            runProcessWithInputTimeoutImpl: async (argv, input) =>
+              runShellCommand(argv.at(-1) ?? "", String(input)),
+          }),
+        ).rejects.toThrow("file explorer path escaped the workspace checkout");
+        await expect(
+          deleteRemoteFile({
+            host: "example.test",
+            rootPath: root,
+            requestedPath: "../outside.txt",
+            runProcessWithCodeTimeout,
+            shQuote,
+          }),
+        ).rejects.toThrow("file explorer path escaped the workspace checkout");
+        await expect(
+          resolveRemoteFilePaths({
+            host: "example.test",
+            rootPath: root,
+            requestedPaths: ["../outside.txt"],
+            runProcessWithCodeTimeout,
+            shQuote,
+          }),
+        ).resolves.toEqual([]);
       } finally {
         await rm(outside, { recursive: true, force: true });
       }

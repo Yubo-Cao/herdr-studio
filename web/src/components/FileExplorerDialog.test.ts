@@ -44,7 +44,7 @@ function client(
 }
 
 describe("file explorer git status", () => {
-  test("treats only internal directory symlinks as expandable", () => {
+  test("treats resolved directory symlinks as expandable", () => {
     const base = {
       name: "link",
       path: "link",
@@ -66,7 +66,7 @@ describe("file explorer git status", () => {
         symlink_status: "external",
         symlink_target_type: "directory",
       }),
-    ).toBe(false);
+    ).toBe(true);
     expect(
       isExplorerDirectoryEntry({
         ...base,

@@ -54,16 +54,23 @@ describe("local workspace file operations", () => {
     });
   });
 
-  test("follows only symlinks whose targets stay inside the workspace", async () => {
+  test("follows explicit symlinks while rejecting lexical traversal", async () => {
     await withTempDir(async (root) => {
       const outside = await mkdtemp(join(tmpdir(), "herdr-gui-outside-"));
       try {
         await mkdir(join(root, "target-dir"));
         await writeFile(join(root, "target-dir", "child.txt"), "child");
         await writeFile(join(root, "target.txt"), "target");
+        await mkdir(join(outside, "shared"));
+        await writeFile(join(outside, "shared", "outside-child.txt"), "child");
+        await writeFile(join(outside, "outside.txt"), "outside");
         await symlink("target-dir", join(root, "link-dir"));
         await symlink("target.txt", join(root, "link-file"));
-        await symlink(outside, join(root, "external-link"));
+        await symlink(join(outside, "shared"), join(root, "external-link"));
+        await symlink(
+          join(outside, "outside.txt"),
+          join(root, "external-file"),
+        );
         await symlink("missing", join(root, "broken-link"));
 
         const list = await listLocalFiles(root, "", false);
@@ -83,7 +90,18 @@ describe("local workspace file operations", () => {
         });
         expect(
           list.entries.find((entry) => entry.name === "external-link"),
-        ).toMatchObject({ type: "symlink", symlink_status: "external" });
+        ).toMatchObject({
+          type: "symlink",
+          symlink_status: "external",
+          symlink_target_type: "directory",
+        });
+        expect(
+          list.entries.find((entry) => entry.name === "external-file"),
+        ).toMatchObject({
+          type: "symlink",
+          symlink_status: "external",
+          symlink_target_type: "file",
+        });
         expect(
           list.entries.find((entry) => entry.name === "broken-link"),
         ).toMatchObject({ type: "symlink", symlink_status: "broken" });
@@ -96,7 +114,51 @@ describe("local workspace file operations", () => {
         });
         await expect(
           listLocalFiles(root, "external-link", false),
-        ).rejects.toThrow("file explorer path escaped the workspace checkout");
+        ).resolves.toMatchObject({
+          path: "external-link",
+          entries: [{ name: "outside-child.txt" }],
+        });
+        await expect(
+          readLocalFile(root, "external-file"),
+        ).resolves.toMatchObject({ path: "external-file", text: "outside" });
+        await expect(
+          resolveLocalFilePaths(root, ["external-file"]),
+        ).resolves.toEqual(["external-file"]);
+
+        await expect(
+          uploadLocalFile(
+            root,
+            "external-link",
+            "uploaded.txt",
+            Buffer.from("uploaded"),
+          ),
+        ).resolves.toEqual({
+          path: "external-link/uploaded.txt",
+          size: 8,
+          overwritten: false,
+        });
+        const download = await downloadLocalFile(
+          root,
+          "external-link/uploaded.txt",
+        );
+        expect(download.path).toBe("external-link/uploaded.txt");
+        expect(await new Response(download.body).text()).toBe("uploaded");
+        await expect(
+          deleteLocalFile(root, "external-link/uploaded.txt"),
+        ).resolves.toEqual({
+          path: "external-link/uploaded.txt",
+          type: "file",
+        });
+        expect(
+          await Bun.file(join(outside, "shared", "uploaded.txt")).exists(),
+        ).toBe(false);
+        await expect(deleteLocalFile(root, "external-file")).resolves.toEqual({
+          path: "external-file",
+          type: "symlink",
+        });
+        expect(await Bun.file(join(outside, "outside.txt")).exists()).toBe(
+          true,
+        );
         await expect(
           listLocalFiles(root, "broken-link", false),
         ).rejects.toThrow("file explorer symlink is broken or unavailable");
@@ -210,6 +272,15 @@ describe("local workspace file operations", () => {
       await expect(
         uploadLocalFile(root, "..", "x", Buffer.from("")),
       ).rejects.toThrow("file explorer path escaped the workspace checkout");
+      await expect(readLocalFile(root, "../outside.txt")).rejects.toThrow(
+        "file explorer path escaped the workspace checkout",
+      );
+      await expect(downloadLocalFile(root, "../outside.txt")).rejects.toThrow(
+        "file explorer path escaped the workspace checkout",
+      );
+      await expect(deleteLocalFile(root, "../outside.txt")).rejects.toThrow(
+        "file explorer path escaped the workspace checkout",
+      );
     });
   });
 });

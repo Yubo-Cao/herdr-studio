@@ -65,7 +65,7 @@ export function isExplorerDirectoryEntry(entry: FileExplorerEntry) {
   return (
     entry.type === "directory" ||
     (entry.type === "symlink" &&
-      entry.symlink_status === "internal" &&
+      entry.symlink_status !== "broken" &&
       entry.symlink_target_type === "directory")
   );
 }
@@ -1897,17 +1897,11 @@ function FileExplorerContent({
       toggleDirectory(entry.path);
       return;
     }
-    if (
-      entry.type === "symlink" &&
-      (entry.symlink_status === "external" || entry.symlink_status === "broken")
-    ) {
+    if (entry.type === "symlink" && entry.symlink_status === "broken") {
       store.notify({
         kind: "error",
         message: "Cannot open symlink",
-        detail:
-          entry.symlink_status === "external"
-            ? "The symlink target is outside this workspace."
-            : "The symlink target does not exist or cannot be resolved.",
+        detail: "The symlink target does not exist or cannot be resolved.",
       });
       return;
     }
