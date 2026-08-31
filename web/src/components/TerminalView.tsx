@@ -18,6 +18,7 @@ import {
 } from "react";
 import "@xterm/xterm/css/xterm.css";
 import { bridge, type ConnectionClient } from "../api";
+import { resolveTerminalFontFamily } from "../appearance";
 import { mobileTerminalShortcutExecution } from "../mobileTerminalShortcutAction";
 import {
   defaultMobileTerminalShortcutRows,
@@ -144,8 +145,6 @@ function xtermThemeFromCss() {
     selectionBackground: value("--terminal-selection", "rgba(56,139,253,0.34)"),
   };
 }
-const FONT_FAMILY =
-  'SFMono-Regular, Menlo, Monaco, "0xProto Nerd Font Mono", "JetBrainsMonoNL Nerd Font", "MesloLGS NF", "Hack Nerd Font", "FiraCode Nerd Font", Consolas, "Liberation Mono", "Courier New", "Noto Sans Mono CJK SC", "Source Han Mono SC", "Sarasa Mono SC", "Herdr Nerd Symbols", monospace';
 const LINK_BLUE = "\x1b[94m";
 const RESET_FOREGROUND = "\x1b[39m";
 const ANSI_SEQUENCE_RE =
@@ -430,6 +429,7 @@ export type TerminalWorkspaceFileRequest = {
 
 export function TerminalView({
   paneId,
+  fontFamily = "",
   showMobileKeys = true,
   mobileShortcuts = defaultMobileTerminalShortcutRows(),
   mobileSideShortcuts = defaultMobileTerminalSideShortcuts(),
@@ -440,6 +440,7 @@ export function TerminalView({
   onOpenWorkspaceFile,
 }: {
   paneId?: string;
+  fontFamily?: string;
   showMobileKeys?: boolean;
   mobileShortcuts?: MobileTerminalShortcutRows;
   mobileSideShortcuts?: MobileTerminalSideShortcuts;
@@ -525,6 +526,11 @@ export function TerminalView({
   // and without an instance change in the deps the attach effect would not
   // fire again, leaving the recreated terminal detached and blank.
   const [termInstance, setTermInstance] = useState<Terminal | null>(null);
+  // The init effect intentionally stays independent of this preference so a
+  // font edit never tears down the terminal connection. The live-update effect
+  // below applies later changes and refits the existing instance.
+  const fontFamilyRef = useRef(fontFamily);
+  fontFamilyRef.current = fontFamily;
   const [terminalAccess, setTerminalAccess] = useState<"control" | "observe">(
     "control",
   );
@@ -796,7 +802,7 @@ export function TerminalView({
     const term = new Terminal({
       cursorBlink: true,
       disableStdin: composerOpenRef.current,
-      fontFamily: FONT_FAMILY,
+      fontFamily: resolveTerminalFontFamily(fontFamilyRef.current),
       ...terminalDensity(),
       theme: xtermThemeFromCss(),
       allowProposedApi: true,
@@ -1815,6 +1821,15 @@ export function TerminalView({
     scrollPage,
     terminalIdentity,
   ]);
+
+  useEffect(() => {
+    if (!termInstance) return;
+    const resolvedFontFamily = resolveTerminalFontFamily(fontFamily);
+    if (termInstance.options.fontFamily === resolvedFontFamily) return;
+    termInstance.options.fontFamily = resolvedFontFamily;
+    const size = fitVisibleTerminal();
+    if (size) resizeSyncRef.current?.sendNow(size);
+  }, [fitVisibleTerminal, fontFamily, termInstance]);
 
   // attach / re-attach when the rendered pane changes
   useEffect(() => {
