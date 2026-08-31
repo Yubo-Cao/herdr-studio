@@ -103,11 +103,10 @@ target="$root_real"
 if [ -n "$rel" ]; then
   target="$root_real/$rel"
 fi
-target_real="$(cd "$target" && pwd -P)"
-case "$target_real/" in
-  "$root_real"/*|"$root_real/") ;;
-  *) echo "file explorer path escaped the workspace checkout" >&2; exit 13 ;;
+case "$rel" in
+  /*|..|../*|*/../*|*/..) echo "file explorer path escaped the workspace checkout" >&2; exit 13 ;;
 esac
+target_real="$(cd "$target" && pwd -P)"
 printf 'ROOT\\t%s\\n' "$(printf '%s' "$root_real" | base64 | tr -d '\\n')"
 count=0
 names=()
@@ -144,15 +143,15 @@ for name in "\${visible_names[@]}"; do
   if [ -L "$p" ]; then
     type=symlink
     if link_real="$(realpath "$p" 2>/dev/null)" && [ -e "$link_real" ]; then
+      metadata_path="$link_real"
+      if [ -d "$link_real" ]; then
+        symlink_target_type=directory
+      elif [ -f "$link_real" ]; then
+        symlink_target_type=file
+      fi
       case "$link_real/" in
         "$root_real"/*|"$root_real"/)
           symlink_status=internal
-          metadata_path="$link_real"
-          if [ -d "$link_real" ]; then
-            symlink_target_type=directory
-          elif [ -f "$link_real" ]; then
-            symlink_target_type=file
-          fi
           ;;
         *) symlink_status=external ;;
       esac
@@ -202,17 +201,17 @@ export async function resolveRemoteFilePaths({
 set -eu
 root=${shQuote(rootPath)}
 root_real="$(cd "$root" && pwd -P)"
-root_prefix="\${root_real%/}/"
 requests=(${requests})
 for request in "\${requests[@]}"; do
   case "$request" in
     /*) target="$request"; requested_absolute=1 ;;
-    *) target="$root_real/$request"; requested_absolute=0 ;;
+    *)
+      case "$request" in ..|../*|*/../*|*/..) continue ;; esac
+      target="$root_real/$request"
+      requested_absolute=0
+      ;;
   esac
   target_real="$(realpath "$target" 2>/dev/null)" || continue
-  if [ "$requested_absolute" != "1" ]; then
-    case "$target_real/" in "$root_prefix"*) ;; *) continue ;; esac
-  fi
   [ -f "$target_real" ] || continue
   printf 'FILE\\t%s\\n' "$(printf '%s' "$request" | base64 | tr -d '\\n')"
 done
@@ -286,12 +285,13 @@ image_limit=${PREVIEW_IMAGE_MAX_BYTES}
 root_real="$(cd "$root" && pwd -P)"
 case "$request" in
   /*) target="$request"; requested_absolute=1 ;;
-  *) target="$root_real/$request"; requested_absolute=0 ;;
+  *)
+    case "$request" in ..|../*|*/../*|*/..) echo "file explorer path escaped the workspace checkout" >&2; exit 13 ;; esac
+    target="$root_real/$request"
+    requested_absolute=0
+    ;;
 esac
 target_real="$(realpath "$target")"
-if [ "$requested_absolute" != "1" ]; then
-  case "$target_real/" in "$root_real"/*) ;; *) exit 13 ;; esac
-fi
 if [ ! -f "$target_real" ]; then
   echo "only regular files can be previewed" >&2
   exit 14
@@ -301,7 +301,7 @@ mtime="$(stat -c %Y "$target_real" 2>/dev/null || stat -f %m "$target_real" 2>/d
 if [ "$requested_absolute" = "1" ]; then
   rel="$target_real"
 else
-  rel="\${target_real#"$root_real"/}"
+  rel="$request"
 fi
 limit="$text_limit"
 case "$(printf '%s' "$rel" | tr '[:upper:]' '[:lower:]')" in
@@ -379,12 +379,13 @@ request=${shQuote(requestedPath)}
 root_real="$(cd "$root" && pwd -P)"
 case "$request" in
   /*) target="$request"; requested_absolute=1 ;;
-  *) target="$root_real/$request"; requested_absolute=0 ;;
+  *)
+    case "$request" in ..|../*|*/../*|*/..) echo "file explorer path escaped the workspace checkout" >&2; exit 13 ;; esac
+    target="$root_real/$request"
+    requested_absolute=0
+    ;;
 esac
 target_real="$(realpath "$target")"
-if [ "$requested_absolute" != "1" ]; then
-  case "$target_real/" in "$root_real"/*) ;; *) exit 13 ;; esac
-fi
 if [ ! -f "$target_real" ] && [ ! -d "$target_real" ]; then
   echo "only regular files and directories can be downloaded" >&2
   exit 14
@@ -392,7 +393,7 @@ fi
 if [ "$requested_absolute" = "1" ]; then
   rel="$target_real"
 else
-  rel="\${target_real#"$root_real"/}"
+  rel="$request"
 fi
 name="\${target_real##*/}"
 if [ -d "$target_real" ]; then
@@ -444,6 +445,7 @@ export async function uploadRemoteFile({
   filename,
   body,
   shQuote,
+  runProcessWithInputTimeoutImpl = runProcessWithInputTimeout,
 }: {
   host: string;
   rootPath: string;
@@ -451,6 +453,7 @@ export async function uploadRemoteFile({
   filename: string;
   body: Buffer;
   shQuote: (value: string) => string;
+  runProcessWithInputTimeoutImpl?: typeof runProcessWithInputTimeout;
 }) {
   const command = `
 set -euo pipefail
@@ -462,8 +465,10 @@ target_dir="$root_real"
 if [ -n "$rel" ]; then
   target_dir="$root_real/$rel"
 fi
+case "$rel" in
+  /*|..|../*|*/../*|*/..) echo "file explorer path escaped the workspace checkout" >&2; exit 13 ;;
+esac
 dir_real="$(cd "$target_dir" && pwd -P)"
-case "$dir_real/" in "$root_real"/*|"$root_real/") ;; *) exit 13 ;; esac
 if [ ! -d "$dir_real" ]; then
   echo "upload target is not a directory" >&2
   exit 14
@@ -477,10 +482,10 @@ fi
 if [ -e "$target" ]; then overwritten=1; fi
 base64 -d > "$target"
 size="$(stat -c %s "$target" 2>/dev/null || stat -f %z "$target" 2>/dev/null || printf 0)"
-rel_path="\${target#"$root_real"/}"
+if [ -n "$rel" ]; then rel_path="$rel/$name"; else rel_path="$name"; fi
 printf 'META\\t%s\\t%s\\t%s\\n' "$(printf '%s' "$rel_path" | base64 | tr -d '\\n')" "$size" "$overwritten"
 `;
-  const result = await runProcessWithInputTimeout(
+  const result = await runProcessWithInputTimeoutImpl(
     sshCommandArgv(host, `bash -lc ${shQuote(command)}`),
     body.toString("base64"),
     UPLOAD_TIMEOUT_MS,
@@ -526,10 +531,10 @@ set -euo pipefail
 root=${shQuote(rootPath)}
 rel=${shQuote(requestedPath)}
 root_real="$(cd "$root" && pwd -P)"
+case "$rel" in
+  /*|..|../*|*/../*|*/..) echo "file explorer path escaped the workspace checkout" >&2; exit 13 ;;
+esac
 target="$root_real/$rel"
-parent="$(dirname "$target")"
-parent_real="$(cd "$parent" && pwd -P)"
-case "$parent_real/" in "$root_real"/*|"$root_real/") ;; *) exit 13 ;; esac
 if [ ! -e "$target" ] && [ ! -L "$target" ]; then
   echo "file does not exist" >&2
   exit 14

@@ -41,12 +41,12 @@ export function entrySort(a: FileExplorerEntry, b: FileExplorerEntry) {
   const aIsDirectory =
     a.type === "directory" ||
     (a.type === "symlink" &&
-      a.symlink_status === "internal" &&
+      a.symlink_status !== "broken" &&
       a.symlink_target_type === "directory");
   const bIsDirectory =
     b.type === "directory" ||
     (b.type === "symlink" &&
-      b.symlink_status === "internal" &&
+      b.symlink_status !== "broken" &&
       b.symlink_target_type === "directory");
   if (aIsDirectory && !bIsDirectory) return -1;
   if (!aIsDirectory && bIsDirectory) return 1;

@@ -13,7 +13,8 @@
 ### Fixed
 
 - Make File Explorer honor native Git ignore rules and safely follow file and
-  directory symlinks whose targets remain inside the workspace.
+  directory symlinks, including explicit links to targets outside the checkout,
+  while continuing to reject lexical path traversal.
 
 ## 0.4.14 - 2026-08-31
 
