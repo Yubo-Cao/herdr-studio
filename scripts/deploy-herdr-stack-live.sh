@@ -83,7 +83,7 @@ done
 [[ $herdr_service =~ ^[A-Za-z0-9@_.-]+$ ]] || fail "invalid Herdr service name"
 [[ $studio_service =~ ^[A-Za-z0-9@_.-]+$ ]] || fail "invalid Studio service name"
 
-for command_name in systemctl install mv mktemp sha256sum jq readlink awk date; do
+for command_name in systemctl install mv mktemp sha256sum jq readlink awk date find grep; do
   command -v "$command_name" >/dev/null 2>&1 ||
     fail "required command not found: $command_name"
 done
@@ -177,12 +177,20 @@ for pid in "${before_pids[@]}"; do
   mapfile -d '' -t argv < "/proc/$pid/cmdline" || true
   ((${#argv[@]} >= 2)) || continue
   [[ ${argv[1]} == server ]] || continue
+  # A named session (`herdr --session <name>`) starts a server with the same
+  # argv inside this unit's cgroup, listening on its own socket under
+  # sessions/<name>/. Only the default-session server is being replaced, and it
+  # is the one started without HERDR_SESSION; excluding the rest keeps a stray
+  # throwaway session from blocking deployment or being handed off by mistake.
+  if grep -qz '^HERDR_SESSION=' "/proc/$pid/environ" 2>/dev/null; then
+    continue
+  fi
   if ((${#argv[@]} == 2)) || [[ ${argv[2]} == --handoff-import ]]; then
     server_pids+=("$pid")
   fi
 done
 [[ ${#server_pids[@]} -eq 1 ]] ||
-  fail "expected exactly one running Herdr server in $herdr_service's cgroup; found ${#server_pids[@]}"
+  fail "expected exactly one running default-session Herdr server in $herdr_service's cgroup; found ${#server_pids[@]}"
 old_server_pid=${server_pids[0]}
 
 printf 'Handing off %s (PID %s) to Herdr %s, protocol %s...\n' \
