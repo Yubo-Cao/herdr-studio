@@ -2163,11 +2163,12 @@ export const store = {
             tabId,
           );
           if (relaySize) {
-            // Pre-size background runtimes for the target tab while the current
-            // tab's direct attachments are still locked. The bridge confirms the
-            // projected viewport through pane.layout before focus proceeds, so
-            // the target is stable before it becomes visible.
-            await lease.client
+            // Pre-size background runtimes for the target tab, but do not put
+            // this optional network round-trip on the browser-local navigation
+            // path. The target terminal's attach also carries its measured
+            // viewport, so a failed or slow relay resize must never delay the
+            // tab becoming visible or the target layout refresh starting.
+            void lease.client
               .call("terminal.relay_resize", {
                 cols: relaySize.cols,
                 rows: relaySize.rows,
@@ -2178,7 +2179,10 @@ export const store = {
           return { tab_id: tabId };
         }),
       {
-        refresh: "none",
+        // The local selection changes synchronously above. Fetch its layout
+        // immediately instead of waiting for the relay resize to emit an event
+        // or for the next metadata poll.
+        refresh: "immediate",
         retryOnReconnect: true,
       },
     );

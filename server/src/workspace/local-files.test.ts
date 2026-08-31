@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import {
@@ -21,6 +21,91 @@ async function withTempDir<T>(fn: (dir: string) => Promise<T>) {
 }
 
 describe("local workspace file operations", () => {
+  test("uses Git ignore semantics without hiding tracked or negated files", async () => {
+    await withTempDir(async (root) => {
+      await Bun.spawn(["git", "init", "-q", root]).exited;
+      await mkdir(join(root, "cache"));
+      await mkdir(join(root, "nested"));
+      await writeFile(
+        join(root, ".gitignore"),
+        ["*.log", "!keep.log", "cache/", ""].join("\n"),
+      );
+      await writeFile(join(root, "ignored.log"), "ignored");
+      await writeFile(join(root, "keep.log"), "kept by negation");
+      await writeFile(join(root, "tracked.log"), "tracked");
+      await writeFile(
+        join(root, "nested", ".gitignore"),
+        ["*.tmp", "!keep.tmp", ""].join("\n"),
+      );
+      await writeFile(join(root, "nested", "ignored.tmp"), "ignored");
+      await writeFile(join(root, "nested", "keep.tmp"), "kept");
+      expect(
+        await Bun.spawn(["git", "-C", root, "add", "-f", "tracked.log"]).exited,
+      ).toBe(0);
+
+      const top = await listLocalFiles(root, "", false);
+      expect(top.entries.map((entry) => entry.name)).toEqual([
+        "nested",
+        "keep.log",
+        "tracked.log",
+      ]);
+      const nested = await listLocalFiles(root, "nested", false);
+      expect(nested.entries.map((entry) => entry.name)).toEqual(["keep.tmp"]);
+    });
+  });
+
+  test("follows only symlinks whose targets stay inside the workspace", async () => {
+    await withTempDir(async (root) => {
+      const outside = await mkdtemp(join(tmpdir(), "herdr-gui-outside-"));
+      try {
+        await mkdir(join(root, "target-dir"));
+        await writeFile(join(root, "target-dir", "child.txt"), "child");
+        await writeFile(join(root, "target.txt"), "target");
+        await symlink("target-dir", join(root, "link-dir"));
+        await symlink("target.txt", join(root, "link-file"));
+        await symlink(outside, join(root, "external-link"));
+        await symlink("missing", join(root, "broken-link"));
+
+        const list = await listLocalFiles(root, "", false);
+        expect(
+          list.entries.find((entry) => entry.name === "link-dir"),
+        ).toMatchObject({
+          type: "symlink",
+          symlink_status: "internal",
+          symlink_target_type: "directory",
+        });
+        expect(
+          list.entries.find((entry) => entry.name === "link-file"),
+        ).toMatchObject({
+          type: "symlink",
+          symlink_status: "internal",
+          symlink_target_type: "file",
+        });
+        expect(
+          list.entries.find((entry) => entry.name === "external-link"),
+        ).toMatchObject({ type: "symlink", symlink_status: "external" });
+        expect(
+          list.entries.find((entry) => entry.name === "broken-link"),
+        ).toMatchObject({ type: "symlink", symlink_status: "broken" });
+
+        await expect(
+          listLocalFiles(root, "link-dir", false),
+        ).resolves.toMatchObject({ entries: [{ name: "child.txt" }] });
+        await expect(readLocalFile(root, "link-file")).resolves.toMatchObject({
+          text: "target",
+        });
+        await expect(
+          listLocalFiles(root, "external-link", false),
+        ).rejects.toThrow("file explorer path escaped the workspace checkout");
+        await expect(
+          listLocalFiles(root, "broken-link", false),
+        ).rejects.toThrow("file explorer symlink is broken or unavailable");
+      } finally {
+        await rm(outside, { recursive: true, force: true });
+      }
+    });
+  });
+
   test("lists files with hidden filtering and directory-first sorting", async () => {
     await withTempDir(async (root) => {
       await mkdir(join(root, "src"));

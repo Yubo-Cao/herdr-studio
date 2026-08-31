@@ -30,6 +30,10 @@ import {
   taskNotificationTargetIsCurrent,
   worktreeRemovalCompletionNotice,
 } from "./store";
+import {
+  clearTerminalRelayViewports,
+  rememberTerminalRelayViewport,
+} from "./terminalResize";
 import type { Pane, PaneLayout } from "./types";
 
 describe("automatic update check preference", () => {
@@ -422,6 +426,127 @@ describe("browser-local server view", () => {
       viewTabId: "t2",
       selectedPaneId: "p2",
     });
+  });
+
+  test("focuses and refreshes a tab without waiting for relay resize", async () => {
+    const previousState = store.get();
+    const originalConnection = bridge.connection;
+    let resolveRelay!: () => void;
+    let relaySettled = false;
+    const relay = new Promise<void>((resolve) => {
+      resolveRelay = () => {
+        relaySettled = true;
+        resolve();
+      };
+    });
+    const targetLayout: PaneLayout = {
+      workspace_id: "same-workspace",
+      tab_id: "t2",
+      zoomed: false,
+      area: { x: 0, y: 0, width: 100, height: 50 },
+      focused_pane_id: "p2",
+      panes: [
+        {
+          pane_id: "p2",
+          focused: true,
+          rect: { x: 0, y: 0, width: 100, height: 50 },
+        },
+      ],
+      splits: [],
+    };
+    const snapshot: State = {
+      ...partitionState(),
+      workspaces: [
+        {
+          ...partitionState().workspaces[0],
+          tab_count: 2,
+          active_tab_id: "t1",
+        },
+      ],
+      tabs: [
+        {
+          tab_id: "t1",
+          workspace_id: "same-workspace",
+          number: 1,
+          label: "One",
+          focused: true,
+          pane_count: 1,
+          agent_status: "idle",
+        },
+        {
+          tab_id: "t2",
+          workspace_id: "same-workspace",
+          number: 2,
+          label: "Two",
+          focused: false,
+          pane_count: 1,
+          agent_status: "idle",
+        },
+      ],
+      panes: [
+        { ...partitionState().panes[0], tab_id: "t1", focused: true },
+        {
+          ...partitionState().panes[0],
+          pane_id: "p2",
+          terminal_id: "terminal-2",
+          tab_id: "t2",
+          focused: false,
+        },
+      ],
+      viewWorkspaceId: "same-workspace",
+      viewTabId: "t1",
+      selectedPaneId: "same-pane",
+      layout: null,
+    };
+    const calls: string[] = [];
+    bridge.connection = (() => ({
+      connectionId: "alpha",
+      generation: 10,
+      isCurrent: () => true,
+      call: (async (method: string) => {
+        calls.push(method);
+        if (method === "terminal.relay_resize") return relay;
+        if (method === "workspace.list") {
+          return { workspaces: snapshot.workspaces };
+        }
+        if (method === "tab.list") return { tabs: snapshot.tabs };
+        if (method === "pane.list") return { panes: snapshot.panes };
+        if (method === "pane.layout") return { layout: targetLayout };
+        throw new Error(`unexpected method: ${method}`);
+      }) as ConnectionClient["call"],
+    })) as typeof bridge.connection;
+
+    let stopWatching: () => void = () => undefined;
+    const refreshed = new Promise<void>((resolve) => {
+      stopWatching = store.subscribe(() => {
+        if (store.get().layout?.tab_id === "t2") resolve();
+      });
+    });
+    try {
+      __storeTesting.replaceState(snapshot);
+      rememberTerminalRelayViewport("alpha", 10, "t2", {
+        cols: 120,
+        rows: 36,
+      });
+
+      const focused = await store.focusTab("t2");
+
+      expect(focused).toEqual({ tab_id: "t2" });
+      expect(store.get().viewTabId).toBe("t2");
+      expect(store.get().selectedPaneId).toBe("p2");
+      expect(relaySettled).toBe(false);
+      expect(calls).toContain("terminal.relay_resize");
+      expect(calls).toContain("workspace.list");
+      await refreshed;
+      expect(store.get().layout).toEqual(targetLayout);
+    } finally {
+      stopWatching();
+      resolveRelay();
+      await relay;
+      clearTerminalRelayViewports();
+      bridge.connection = originalConnection;
+      __storeTesting.replaceState(previousState);
+    }
   });
 
   test("finds directional neighbors without changing server focus", () => {

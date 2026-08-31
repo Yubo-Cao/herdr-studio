@@ -61,8 +61,17 @@ function workspaceName(workspace?: { label?: string; workspace_id?: string }) {
   return workspace?.label || workspace?.workspace_id || "";
 }
 
+export function isExplorerDirectoryEntry(entry: FileExplorerEntry) {
+  return (
+    entry.type === "directory" ||
+    (entry.type === "symlink" &&
+      entry.symlink_status === "internal" &&
+      entry.symlink_target_type === "directory")
+  );
+}
+
 function displaySize(entry: FileExplorerEntry) {
-  if (entry.type === "directory") return "";
+  if (isExplorerDirectoryEntry(entry)) return "";
   if (entry.size < 1024) return `${entry.size} B`;
   if (entry.size < 1024 * 1024) return `${Math.round(entry.size / 1024)} KB`;
   return `${(entry.size / 1024 / 1024).toFixed(1)} MB`;
@@ -902,7 +911,7 @@ function FileExplorerEntryMenu({
   if (!state) return null;
 
   const { entry } = state;
-  const isDirectory = entry.type === "directory";
+  const isDirectory = isExplorerDirectoryEntry(entry);
   // Keep ENTRY_MENU_ITEM_COUNT in sync with this array.
   const items = [
     {
@@ -914,7 +923,12 @@ function FileExplorerEntryMenu({
       action: () => onCopy(entry),
     },
     {
-      label: isDirectory ? "Delete directory" : "Delete file",
+      label:
+        entry.type === "symlink"
+          ? "Delete symlink"
+          : isDirectory
+            ? "Delete directory"
+            : "Delete file",
       danger: true,
       action: () => onDelete(entry),
     },
@@ -1495,7 +1509,7 @@ function FileExplorerContent({
   };
 
   const loadPreview = async (entry: FileExplorerEntry) => {
-    if (!workspace?.workspace_id || entry.type === "directory") return;
+    if (!workspace?.workspace_id || isExplorerDirectoryEntry(entry)) return;
     onActiveDiffEntriesChange?.(
       gitStatusMaps.fileStatuses.get(entry.path)?.entries ?? [],
     );
@@ -1594,10 +1608,9 @@ function FileExplorerContent({
     );
     url.searchParams.set("workspace_id", workspace.workspace_id);
     url.searchParams.set("path", entry.path);
-    const filename =
-      entry.type === "directory"
-        ? `${entry.name || "download"}.tar.gz`
-        : entry.name || "download";
+    const filename = isExplorerDirectoryEntry(entry)
+      ? `${entry.name || "download"}.tar.gz`
+      : entry.name || "download";
     void downloadFileFromUrl({ url: url.toString(), filename }).then(
       (result) => {
         if (result === "shared" || !connectionClient.isCurrent()) return;
@@ -1627,7 +1640,7 @@ function FileExplorerContent({
       nextChildren[parent] = (nextChildren[parent] ?? []).filter(
         (candidate) => candidate.path !== entry.path,
       );
-      if (entry.type === "directory") {
+      if (isExplorerDirectoryEntry(entry)) {
         for (const path of Object.keys(nextChildren)) {
           if (path === entry.path || path.startsWith(`${entry.path}/`)) {
             delete nextChildren[path];
@@ -1662,13 +1675,13 @@ function FileExplorerContent({
     const selectedPath = previewEntry?.path;
     const deletedSelection =
       selectedPath === entry.path ||
-      (entry.type === "directory" &&
+      (isExplorerDirectoryEntry(entry) &&
         selectedPath?.startsWith(`${entry.path}/`));
     invalidateFilePreviewCache(
       connectionClient,
       workspace.workspace_id,
       entry.path,
-      entry.type === "directory",
+      isExplorerDirectoryEntry(entry),
     );
     if (!deletedSelection) return;
     setPreviewEntry(null);
@@ -1701,7 +1714,11 @@ function FileExplorerContent({
       store.notify({
         kind: "success",
         message:
-          entry.type === "directory" ? "Directory deleted" : "File deleted",
+          entry.type === "symlink"
+            ? "Symlink deleted"
+            : entry.type === "directory"
+              ? "Directory deleted"
+              : "File deleted",
         detail: entry.path,
         autoDismissMs: 5000,
       });
@@ -1876,8 +1893,25 @@ function FileExplorerContent({
   };
 
   const activateEntry = (entry: FileExplorerEntry) => {
-    if (entry.type === "directory") toggleDirectory(entry.path);
-    else void loadPreview(entry);
+    if (isExplorerDirectoryEntry(entry)) {
+      toggleDirectory(entry.path);
+      return;
+    }
+    if (
+      entry.type === "symlink" &&
+      (entry.symlink_status === "external" || entry.symlink_status === "broken")
+    ) {
+      store.notify({
+        kind: "error",
+        message: "Cannot open symlink",
+        detail:
+          entry.symlink_status === "external"
+            ? "The symlink target is outside this workspace."
+            : "The symlink target does not exist or cannot be resolved.",
+      });
+      return;
+    }
+    void loadPreview(entry);
   };
 
   const focusFirstChild = (current: HTMLElement) => {
@@ -1954,7 +1988,7 @@ function FileExplorerContent({
     depth: number,
     defaultTabStop = false,
   ) => {
-    const isDirectory = entry.type === "directory";
+    const isDirectory = isExplorerDirectoryEntry(entry);
     const uploadDirectory = isDirectory
       ? entry.path
       : parentDirectoryPath(entry.path);
@@ -1965,9 +1999,19 @@ function FileExplorerContent({
     const gitStatus = isDirectory
       ? gitStatusMaps.directoryStatuses.get(entry.path)
       : gitStatusMaps.fileStatuses.get(entry.path);
-    const meta = [entry.type === "symlink" ? "symlink" : "", displaySize(entry)]
-      .filter(Boolean)
-      .join(" · ");
+    const symlinkMeta =
+      entry.type !== "symlink"
+        ? ""
+        : entry.symlink_status === "external"
+          ? "external symlink"
+          : entry.symlink_status === "broken"
+            ? "broken symlink"
+            : entry.symlink_target_type === "directory"
+              ? "symlink to directory"
+              : entry.symlink_target_type === "file"
+                ? "symlink to file"
+                : "symlink";
+    const meta = [symlinkMeta, displaySize(entry)].filter(Boolean).join(" · ");
 
     return (
       <div key={entry.path}>
@@ -2302,13 +2346,15 @@ function FileExplorerContent({
       <ConfirmDialog
         open={!!pendingDeleteEntry}
         title={
-          pendingDeleteEntry?.type === "directory"
-            ? "Delete Directory"
-            : "Delete File"
+          pendingDeleteEntry?.type === "symlink"
+            ? "Delete Symlink"
+            : pendingDeleteEntry && isExplorerDirectoryEntry(pendingDeleteEntry)
+              ? "Delete Directory"
+              : "Delete File"
         }
         message={
           pendingDeleteEntry
-            ? `Delete ${pendingDeleteEntry.type === "directory" ? "directory" : "file"} "${pendingDeleteEntry.path}"? This cannot be undone.`
+            ? `Delete ${pendingDeleteEntry.type === "symlink" ? "symlink" : pendingDeleteEntry.type === "directory" ? "directory" : "file"} "${pendingDeleteEntry.path}"? This cannot be undone.`
             : "Delete this item?"
         }
         confirmLabel="Delete"

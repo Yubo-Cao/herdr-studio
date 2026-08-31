@@ -8,6 +8,7 @@ import {
   explorerRuntimeContextKey,
   filePreviewCacheKey,
   invalidateFilePreviewCache,
+  isExplorerDirectoryEntry,
   prefetchFileExplorerWorkspace,
   requestFilePreview,
 } from "./FileExplorerDialog";
@@ -43,6 +44,37 @@ function client(
 }
 
 describe("file explorer git status", () => {
+  test("treats only internal directory symlinks as expandable", () => {
+    const base = {
+      name: "link",
+      path: "link",
+      type: "symlink" as const,
+      size: 0,
+      mtime_ms: 0,
+      hidden: false,
+    };
+    expect(
+      isExplorerDirectoryEntry({
+        ...base,
+        symlink_status: "internal",
+        symlink_target_type: "directory",
+      }),
+    ).toBe(true);
+    expect(
+      isExplorerDirectoryEntry({
+        ...base,
+        symlink_status: "external",
+        symlink_target_type: "directory",
+      }),
+    ).toBe(false);
+    expect(
+      isExplorerDirectoryEntry({
+        ...base,
+        symlink_status: "broken",
+      }),
+    ).toBe(false);
+  });
+
   test("preserves every diff entry for a partially staged file", () => {
     const unstaged: GitDiffEntry = {
       path: "src/components/App.tsx",

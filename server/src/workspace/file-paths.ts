@@ -38,8 +38,18 @@ export function sanitizeUploadFilename(value: unknown): string {
 }
 
 export function entrySort(a: FileExplorerEntry, b: FileExplorerEntry) {
-  if (a.type === "directory" && b.type !== "directory") return -1;
-  if (a.type !== "directory" && b.type === "directory") return 1;
+  const aIsDirectory =
+    a.type === "directory" ||
+    (a.type === "symlink" &&
+      a.symlink_status === "internal" &&
+      a.symlink_target_type === "directory");
+  const bIsDirectory =
+    b.type === "directory" ||
+    (b.type === "symlink" &&
+      b.symlink_status === "internal" &&
+      b.symlink_target_type === "directory");
+  if (aIsDirectory && !bIsDirectory) return -1;
+  if (!aIsDirectory && bIsDirectory) return 1;
   return a.name.localeCompare(b.name, undefined, { sensitivity: "base" });
 }
 

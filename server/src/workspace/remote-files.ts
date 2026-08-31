@@ -41,13 +41,22 @@ export function parseRemoteFileList(
       continue;
     }
     if (kind !== "ENTRY") continue;
-    const [type, rawSize, rawMtime, rawName] = rest;
+    const [type, rawSize, rawMtime, rawName, symlinkStatus, symlinkTargetType] =
+      rest;
     const name = Buffer.from(rawName ?? "", "base64").toString("utf8");
     if (!name) continue;
     entries.push({
       name,
       path: relativeExplorerPath(relativePath, name),
       type: type === "directory" || type === "symlink" ? type : "file",
+      ...(symlinkStatus === "internal" ||
+      symlinkStatus === "external" ||
+      symlinkStatus === "broken"
+        ? { symlink_status: symlinkStatus }
+        : {}),
+      ...(symlinkTargetType === "directory" || symlinkTargetType === "file"
+        ? { symlink_target_type: symlinkTargetType }
+        : {}),
       size: Number(rawSize) || 0,
       mtime_ms: (Number(rawMtime) || 0) * 1000,
       hidden: name.startsWith("."),
@@ -95,25 +104,71 @@ if [ -n "$rel" ]; then
   target="$root_real/$rel"
 fi
 target_real="$(cd "$target" && pwd -P)"
-case "$target_real/" in "$root_real"/*|"$root_real/") ;; *) exit 13 ;; esac
+case "$target_real/" in
+  "$root_real"/*|"$root_real/") ;;
+  *) echo "file explorer path escaped the workspace checkout" >&2; exit 13 ;;
+esac
 printf 'ROOT\\t%s\\n' "$(printf '%s' "$root_real" | base64 | tr -d '\\n')"
 count=0
+names=()
 while IFS= read -r -d '' p; do
-  name="$(basename "$p")"
+  name="\${p##*/}"
   if [ "$show_hidden" != "1" ] && [ "\${name#\\.}" != "$name" ]; then
     continue
   fi
+  names[(\${#names[@]})]="$name"
+done < <(find "$target_real" -mindepth 1 -maxdepth 1 -print0)
+visible_names=()
+processed=0
+if command -v git >/dev/null 2>&1 && [ "\${#names[@]}" -gt 0 ] && git -C "$target_real" rev-parse --is-inside-work-tree >/dev/null 2>&1; then
+  while IFS= read -r -d '' source && IFS= read -r -d '' line && IFS= read -r -d '' pattern && IFS= read -r -d '' name; do
+    processed=$((processed + 1))
+    if [ -z "$pattern" ] || [ "\${pattern#!}" != "$pattern" ]; then
+      visible_names[(\${#visible_names[@]})]="$name"
+    fi
+  done < <(printf '%s\\0' "\${names[@]}" | git -C "$target_real" check-ignore -z --stdin --verbose --non-matching 2>/dev/null || true)
+fi
+if [ "$processed" -ne "\${#names[@]}" ]; then
+  visible_names=("\${names[@]}")
+fi
+for name in "\${visible_names[@]}"; do
+  p="$target_real/$name"
   count=$((count + 1))
   if [ "$count" -gt "$limit" ]; then
     printf 'TRUNCATED\\n'
     break
   fi
-  if [ -d "$p" ]; then type=directory; elif [ -L "$p" ]; then type=symlink; else type=file; fi
-  size="$(stat -c %s "$p" 2>/dev/null || stat -f %z "$p" 2>/dev/null || printf 0)"
-  mtime="$(stat -c %Y "$p" 2>/dev/null || stat -f %m "$p" 2>/dev/null || printf 0)"
+  symlink_status=""
+  symlink_target_type=""
+  metadata_path="$p"
+  if [ -L "$p" ]; then
+    type=symlink
+    if link_real="$(realpath "$p" 2>/dev/null)" && [ -e "$link_real" ]; then
+      case "$link_real/" in
+        "$root_real"/*|"$root_real"/)
+          symlink_status=internal
+          metadata_path="$link_real"
+          if [ -d "$link_real" ]; then
+            symlink_target_type=directory
+          elif [ -f "$link_real" ]; then
+            symlink_target_type=file
+          fi
+          ;;
+        *) symlink_status=external ;;
+      esac
+    else
+      symlink_status=broken
+    fi
+  elif [ -d "$p" ]; then
+    type=directory
+  else
+    type=file
+  fi
+  size="$(stat -c %s "$metadata_path" 2>/dev/null || stat -f %z "$metadata_path" 2>/dev/null || printf 0)"
+  mtime="$(stat -c %Y "$metadata_path" 2>/dev/null || stat -f %m "$metadata_path" 2>/dev/null || printf 0)"
   name64="$(printf '%s' "$name" | base64 | tr -d '\\n')"
-  printf 'ENTRY\\t%s\\t%s\\t%s\\t%s\\n' "$type" "$size" "$mtime" "$name64"
-done < <(find "$target_real" -mindepth 1 -maxdepth 1 -print0)
+  printf 'ENTRY\\t%s\\t%s\\t%s\\t%s\\t%s\\t%s\\n' "$type" "$size" "$mtime" "$name64" "$symlink_status" "$symlink_target_type"
+done
 `;
   const result = await runProcessWithCodeTimeout(
     sshCommandArgv(host, `bash -lc ${shQuote(command)}`),
