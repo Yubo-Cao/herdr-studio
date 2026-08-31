@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.13 - 2026-08-31
+
 ### Added
 
 - Let users choose an installed terminal font or CSS font stack from the
