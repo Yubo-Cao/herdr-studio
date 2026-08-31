@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
-import { collaborationProfileForSession } from "./collaboration";
+import {
+  acceptCollaborationEvent,
+  collaborationProfileForSession,
+  participantIsTyping,
+  shouldTakeOverPaneFromMouse,
+  subscribeCollaborationSnapshot,
+} from "./collaboration";
+import type { ConnectionClient } from "./api";
 
 describe("collaboration client sessions", () => {
   test("shares presentation without conflating independent client sessions", () => {
@@ -54,5 +61,78 @@ describe("collaboration client sessions", () => {
     );
     expect(fallback.displayName).toBe("Studio user");
     expect(fallback.color).toMatch(/^#[0-9a-f]{6}$/i);
+  });
+});
+
+describe("collaboration interaction signals", () => {
+  test("takes over an observed pane only on Shift + primary click", () => {
+    expect(shouldTakeOverPaneFromMouse({ button: 0, shiftKey: true })).toBe(
+      true,
+    );
+    expect(shouldTakeOverPaneFromMouse({ button: 0, shiftKey: false })).toBe(
+      false,
+    );
+    expect(shouldTakeOverPaneFromMouse({ button: 2, shiftKey: true })).toBe(
+      false,
+    );
+  });
+
+  test("typing status honors its short lease", () => {
+    const participant = {
+      participant_id: "alice",
+      display_name: "Alice",
+      color: "#0969da",
+      role: "editor" as const,
+      activity: "active" as const,
+      surface: "web",
+      typing: true,
+      typing_expires_at_unix_ms: 2_000,
+      updated_at_unix_ms: 1_000,
+      expires_at_unix_ms: 46_000,
+    };
+    expect(participantIsTyping(participant, 1_999)).toBe(true);
+    expect(participantIsTyping(participant, 2_000)).toBe(false);
+  });
+
+  test("publishes generation-scoped collaboration WebSocket events", () => {
+    const client: ConnectionClient = {
+      connectionId: "collaboration-test",
+      generation: 4,
+      serverRuntimeGeneration: 7,
+      call: async () => null,
+      isCurrent: () => true,
+      acceptsServerGeneration: (value) => value === 7,
+    };
+    const seen: unknown[] = [];
+    const unsubscribe = subscribeCollaborationSnapshot(client, (snapshot) =>
+      seen.push(snapshot),
+    );
+    const accepted = acceptCollaborationEvent(client, {
+      connection_id: "collaboration-test",
+      connection_generation: 7,
+      event: "collaboration_updated",
+      data: {
+        type: "collaboration_updated",
+        snapshot: {
+          participants: [],
+          pane_claims: [],
+          lease_ttl_ms: 45_000,
+        },
+      },
+    });
+    const rejected = acceptCollaborationEvent(client, {
+      connection_id: "collaboration-test",
+      connection_generation: 6,
+      event: "collaboration_updated",
+      data: {
+        snapshot: { participants: [], pane_claims: [] },
+      },
+    });
+    unsubscribe();
+
+    expect(accepted).toBe(true);
+    expect(rejected).toBe(false);
+    expect(seen).toHaveLength(2);
+    expect(seen[0]).toBeNull();
   });
 });

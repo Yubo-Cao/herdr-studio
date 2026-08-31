@@ -57,6 +57,7 @@ export function TerminalComposer({
   shortcutRows,
   onRunShortcut,
   onClose,
+  onTyping,
   onSubmit,
   onUploadImage,
   onError,
@@ -65,6 +66,7 @@ export function TerminalComposer({
   shortcutRows: MobileTerminalShortcut[][];
   onRunShortcut: (shortcut: MobileTerminalShortcut) => void;
   onClose: () => void;
+  onTyping: () => void;
   onSubmit: (text: string, submit: boolean) => Promise<void>;
   onUploadImage: (file: File) => Promise<string>;
   onError: (message: string) => void;
@@ -140,6 +142,7 @@ export function TerminalComposer({
   // trim back so the floating form accessory bar clears the action row. A
   // full second lift would push the composer a keyboard height too high.
   const updateText = (textarea: HTMLTextAreaElement) => {
+    onTyping();
     setText(textarea.value);
     writeTerminalComposerDraft(draftKey, textarea.value);
     writeTerminalComposerSelection(

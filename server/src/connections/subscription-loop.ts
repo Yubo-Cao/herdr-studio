@@ -31,6 +31,7 @@ export function createEventSubscriptionLoop(args: {
   onReady?: () => void;
   onSubscribeError?: (error: Error) => void;
   onSubscriptionClosed?: () => void;
+  retrySubscribeError?: (error: Error) => boolean;
 }): EventSubscriptionLoop {
   const retryDelayMs = args.retryDelayMs ?? 2000;
   let generationSequence = 0;
@@ -117,7 +118,9 @@ export function createEventSubscriptionLoop(args: {
         subscription = args.subscribe();
       } catch (error) {
         if (!current(expected)) return;
-        reportError(error);
+        const reported = errorFrom(error);
+        reportError(reported);
+        if (args.retrySubscribeError?.(reported) === false) return;
         await waitForRetry(expected);
         continue;
       }
@@ -131,6 +134,7 @@ export function createEventSubscriptionLoop(args: {
         }
         if (!current(expected) || ready.status === "cancelled") return;
         reportError(ready.error);
+        if (args.retrySubscribeError?.(ready.error) === false) return;
         await waitForRetry(expected);
         continue;
       }

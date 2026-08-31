@@ -225,7 +225,7 @@ async function waitForCondition(
 }
 
 describe("terminal bridge sharing", () => {
-  test("shares one stream while enforcing collaboration control claims", async () => {
+  test("shares terminal input while keeping layout ownership exclusive", async () => {
     const socketPath = await startThinServer();
     const alice = {} as ServerWebSocket<unknown>;
     const bob = {} as ServerWebSocket<unknown>;
@@ -298,14 +298,26 @@ describe("terminal bridge sharing", () => {
       messages
         .get(bob)!
         .map((message) => JSON.parse(message))
-        .find((message) => message.id === "bob-input")?.error?.message,
-    ).toContain("another collaborator");
+        .find((message) => message.id === "bob-input")?.result?.ok,
+    ).toBe(true);
+    await bridge.handleTerminalRpc(bob, "bob-resize", "terminal.resize", {
+      terminal_id: "term_1",
+      cols: 120,
+      rows: 40,
+    });
+    expect(
+      messages
+        .get(bob)!
+        .map((message) => JSON.parse(message))
+        .find((message) => message.id === "bob-resize")?.result?.ignored,
+    ).toBe(true);
 
     await bridge.handleTerminalRpc(bob, "bob-takeover", "terminal.attach", {
       terminal_id: "term_1",
       pane_id: "pane-1",
       participant_id: "bob",
       takeover: true,
+      protect_ms: 15_000,
       cols: 100,
       rows: 30,
     });
@@ -320,7 +332,7 @@ describe("terminal bridge sharing", () => {
         .get(alice)!
         .map((message) => JSON.parse(message))
         .some((message) => message.terminal_closed?.terminal_id === "term_1"),
-    ).toBe(true);
+    ).toBe(false);
 
     bridge.cleanupWs(alice);
     bridge.cleanupWs(bob);

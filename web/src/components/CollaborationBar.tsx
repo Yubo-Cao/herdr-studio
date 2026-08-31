@@ -7,12 +7,16 @@ import {
   type FormEvent,
 } from "react";
 import {
+  acceptCollaborationEvent,
   type CollaborationParticipant,
   type CollaborationSnapshot,
   collaborationProfile,
+  participantIsTyping,
   saveCollaborationProfile,
+  subscribeCollaborationSnapshot,
   updateCollaborationPresence,
 } from "../collaboration";
+import { bridge } from "../api";
 import { shallowEqual, store, useStoreSelector } from "../store";
 import { useConnectionClient } from "../useConnectionClient";
 
@@ -37,6 +41,17 @@ export function CollaborationBar() {
   const profile = collaborationProfile();
   const latestSession = useRef(session);
   latestSession.current = session;
+
+  useEffect(
+    () => subscribeCollaborationSnapshot(client, setSnapshot),
+    [client],
+  );
+
+  useEffect(
+    () =>
+      bridge.onEvent((event) => void acceptCollaborationEvent(client, event)),
+    [client],
+  );
 
   useEffect(() => {
     if (session.status !== "connected" || !client.isCurrent()) return;
@@ -80,6 +95,7 @@ export function CollaborationBar() {
           surface: "web",
           updated_at_unix_ms: Date.now(),
           expires_at_unix_ms: Date.now() + HEARTBEAT_MS,
+          typing: false,
         },
       ];
   const submitName = (event: FormEvent) => {
@@ -101,14 +117,15 @@ export function CollaborationBar() {
         <div className="collaboration-avatars">
           {visibleParticipants.slice(0, 5).map((participant) => {
             const isSelf = participant.participant_id === profile.participantId;
+            const isTyping = participantIsTyping(participant);
             return (
               <button
                 type="button"
-                className={`collaboration-avatar activity-${participant.activity} ${isSelf ? "is-self" : ""}`}
+                className={`collaboration-avatar activity-${participant.activity} ${isSelf ? "is-self" : ""} ${isTyping ? "is-typing" : ""}`}
                 style={
                   { "--participant-color": participant.color } as CSSProperties
                 }
-                title={`${participant.display_name}${participant.pane_id ? " · viewing a pane" : ""}`}
+                title={`${participant.display_name}${isTyping ? " · typing" : participant.pane_id ? " · viewing a pane" : ""}`}
                 aria-label={`${participant.display_name}${isSelf ? " (you)" : ""}`}
                 onClick={() => {
                   if (isSelf) setEditing((value) => !value);
