@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.15 - 2026-08-31
+
 ### Changed
 
 - Replace the free-form terminal font setting with a cross-platform preset
