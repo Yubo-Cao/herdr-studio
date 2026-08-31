@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.4.14 - 2026-08-31
+
 ### Fixed
 
 - Sign macOS release binaries on native runners and verify them before
