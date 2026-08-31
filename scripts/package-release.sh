@@ -54,6 +54,20 @@ update_manifest="$root_dir/dist/herdr-gui-$platform.update.json"
 cd "$root_dir"
 bun run "$build_script"
 
+# Bun's cross-compiled Mach-O binaries carry a linker signature that is not
+# valid after the standalone payload is embedded. Re-sign on a native macOS
+# runner so Gatekeeper does not terminate the executable at launch.
+case "$platform" in
+  darwin-*)
+    command -v codesign >/dev/null 2>&1 || {
+      echo "codesign is required to package $platform" >&2
+      exit 1
+    }
+    codesign --force --sign - "$binary"
+    codesign --verify --deep --strict --verbose=2 "$binary"
+    ;;
+esac
+
 rm -rf "$package_dir"
 mkdir -p "$package_dir"
 cp "$binary" "$package_dir/$binary_name"
