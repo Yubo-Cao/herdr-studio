@@ -73,6 +73,12 @@ export interface Tab {
   agent_status: string;
 }
 
+/** What a memory limit did to a pane's process tree. */
+export interface PaneMemoryIncident {
+  processes: number;
+  limit_bytes: number;
+}
+
 export interface Pane {
   pane_id: string;
   terminal_id: string;
@@ -83,6 +89,13 @@ export interface Pane {
   foreground_cwd?: string;
   agent?: string;
   agent_status: string;
+  /**
+   * Present while this pane's last process tree is known to have been killed
+   * for exceeding its memory limit. A killed tree exits with no status and no
+   * output, so without this the pane is indistinguishable from one whose agent
+   * simply finished.
+   */
+  memory_incident?: PaneMemoryIncident;
   revision: number;
 }
 

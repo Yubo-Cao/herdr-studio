@@ -6,7 +6,7 @@ import {
 } from "./treeKeyboard";
 import { store } from "../store";
 import type { Pane } from "../types";
-import { agentClass, basename, shortId } from "../utils";
+import { agentClass, basename, formatMemoryLimit, shortId } from "../utils";
 import { shouldShowAgentStatusLabel } from "./agentSession";
 import { AgentStatusIcon } from "./AgentStatusIcon";
 import { observeClampedContextMenu } from "./contextMenuPosition";
@@ -188,6 +188,18 @@ export function AgentRow({
               <span className="muted"> · {locationName}</span>
             ) : null}
           </span>
+          {pane.memory_incident ? (
+            <span
+              className="badge badge-blocked agent-row-status"
+              title={`The kernel killed ${pane.memory_incident.processes} process${
+                pane.memory_incident.processes === 1 ? "" : "es"
+              } in this pane at its ${formatMemoryLimit(
+                pane.memory_incident.limit_bytes,
+              )} memory limit`}
+            >
+              killed
+            </span>
+          ) : null}
           {showStatus ? (
             <span
               className={`${agentClass(pane.agent_status)} agent-row-status`}

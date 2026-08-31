@@ -25,6 +25,14 @@ export function agentClass(status?: string): string {
   }
 }
 
+/** Render a memory size the way the Herdr server words the same limit. */
+export function formatMemoryLimit(bytes: number): string {
+  const MIB = 1024 * 1024;
+  const GIB = 1024 * MIB;
+  if (bytes >= GIB) return `${(bytes / GIB).toFixed(1)} GiB`;
+  return `${Math.ceil(bytes / MIB)} MiB`;
+}
+
 export function basename(path?: string): string {
   if (!path) return "";
   const trimmed = path.replace(/\/+$/, "");
