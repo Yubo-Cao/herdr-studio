@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   DEFAULT_TERMINAL_FONT_FAMILY,
+  TERMINAL_FONT_OPTIONS,
   normalizeAccentColor,
   normalizeTerminalFontFamily,
   normalizeThemePreference,
@@ -42,18 +43,39 @@ describe("appearance preferences", () => {
     expect(resolveSystemTheme(matches(false))).toBe("dark");
   });
 
-  test("normalizes a custom terminal font family", () => {
-    expect(normalizeTerminalFontFamily('  "JetBrains Mono"  ')).toBe(
-      '"JetBrains Mono"',
+  test("accepts supported terminal font preset values", () => {
+    expect(normalizeTerminalFontFamily("jetbrains-mono")).toBe(
+      "jetbrains-mono",
     );
-    expect(normalizeTerminalFontFamily("Fira\nCode\u0000")).toBe("Fira Code");
+    expect(normalizeTerminalFontFamily("fira-code")).toBe("fira-code");
     expect(normalizeTerminalFontFamily(null)).toBe("");
   });
 
-  test("keeps the built-in terminal stack as the default and fallback", () => {
+  test("migrates matching legacy font names and stacks to presets", () => {
+    expect(normalizeTerminalFontFamily('  "JetBrains Mono"  ')).toBe(
+      "jetbrains-mono",
+    );
+    expect(normalizeTerminalFontFamily("Fira Code")).toBe("fira-code");
+    expect(
+      normalizeTerminalFontFamily(
+        TERMINAL_FONT_OPTIONS.find((option) => option.value === "cascadia-mono")
+          ?.fontFamily ?? null,
+      ),
+    ).toBe("cascadia-mono");
+  });
+
+  test("falls back safely for unsupported legacy custom values", () => {
+    expect(normalizeTerminalFontFamily('"Custom Corporate Mono"')).toBe("");
+    expect(normalizeTerminalFontFamily("Fira\nCode\u0000")).toBe("fira-code");
+  });
+
+  test("resolves presets with the built-in terminal stack as fallback", () => {
     expect(resolveTerminalFontFamily("")).toBe(DEFAULT_TERMINAL_FONT_FAMILY);
-    expect(resolveTerminalFontFamily('"Iosevka Term"')).toBe(
-      `"Iosevka Term", ${DEFAULT_TERMINAL_FONT_FAMILY}`,
+    expect(resolveTerminalFontFamily("iosevka")).toBe(
+      `"Iosevka Term", Iosevka, ${DEFAULT_TERMINAL_FONT_FAMILY}`,
+    );
+    expect(resolveTerminalFontFamily("not-a-preset")).toBe(
+      DEFAULT_TERMINAL_FONT_FAMILY,
     );
   });
 });

@@ -23,8 +23,8 @@ import type { Theme } from "../App";
 import {
   ACCENT_OPTIONS,
   type AccentColor,
-  MAX_TERMINAL_FONT_FAMILY_LENGTH,
   normalizeTerminalFontFamily,
+  TERMINAL_FONT_OPTIONS,
 } from "../appearance";
 import { connectionHttpPath } from "../connectionHttp";
 import { shallowEqual, store, useStoreSelector } from "../store";
@@ -71,6 +71,31 @@ type ConfigMenuProps = {
     shortcuts: MobileTerminalSideShortcuts,
   ) => void;
 };
+
+type TerminalFontSelectProps = {
+  value: string;
+  onChange: (value: string) => void;
+};
+
+export function TerminalFontSelect({
+  value,
+  onChange,
+}: TerminalFontSelectProps) {
+  return (
+    <select
+      id="terminal-font-family"
+      value={normalizeTerminalFontFamily(value)}
+      aria-label="Terminal font"
+      onChange={(event) => onChange(event.target.value)}
+    >
+      {TERMINAL_FONT_OPTIONS.map((option) => (
+        <option key={option.value || "default"} value={option.value}>
+          {option.label}
+        </option>
+      ))}
+    </select>
+  );
+}
 
 export function ConfigMenu({
   theme,
@@ -342,37 +367,15 @@ export function ConfigMenu({
                   htmlFor="terminal-font-family"
                 >
                   <strong>Terminal font</strong>
-                  <span>Installed font name or CSS font stack</span>
+                  <span>
+                    Choose a preset; unavailable fonts use the default
+                  </span>
                 </label>
                 <div className="config-font-control">
-                  <input
-                    id="terminal-font-family"
-                    type="text"
+                  <TerminalFontSelect
                     value={terminalFontFamily}
-                    maxLength={MAX_TERMINAL_FONT_FAMILY_LENGTH}
-                    placeholder="Default monospace stack"
-                    aria-label="Terminal font family"
-                    autoComplete="off"
-                    spellCheck={false}
-                    onChange={(event) =>
-                      onTerminalFontFamilyChange(event.target.value)
-                    }
-                    onBlur={(event) =>
-                      onTerminalFontFamilyChange(
-                        normalizeTerminalFontFamily(event.target.value),
-                      )
-                    }
+                    onChange={onTerminalFontFamilyChange}
                   />
-                  {terminalFontFamily ? (
-                    <button
-                      type="button"
-                      aria-label="Reset terminal font"
-                      title="Use the default terminal font stack"
-                      onClick={() => onTerminalFontFamilyChange("")}
-                    >
-                      Reset
-                    </button>
-                  ) : null}
                 </div>
               </div>
             </div>

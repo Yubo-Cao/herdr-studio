@@ -2,6 +2,8 @@ export type FileExplorerEntry = {
   name: string;
   path: string;
   type: "directory" | "file" | "symlink";
+  symlink_target_type?: "directory" | "file";
+  symlink_status?: "internal" | "external" | "broken";
   size: number;
   mtime_ms: number;
   hidden: boolean;

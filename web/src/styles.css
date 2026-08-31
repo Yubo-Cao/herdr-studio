@@ -1273,19 +1273,13 @@ textarea:focus {
   display: flex;
   gap: 6px;
 }
-.config-font-control input {
+.config-font-control select {
   width: 100%;
   min-width: 0;
   height: 30px;
   padding: 5px 8px;
   border-radius: 6px;
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 11px;
-}
-.config-font-control button {
-  height: 30px;
-  padding: 4px 8px;
-  border-radius: 6px;
   font-size: 11px;
 }
 .config-theme-control {

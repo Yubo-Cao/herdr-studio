@@ -102,8 +102,11 @@ import {
   subscribeTerminalComposerDraft,
   terminalComposerDraftKey,
 } from "./terminalComposer";
-import { terminalMountKey } from "./terminalConnection";
-import type { FileExplorerEntry, Pane } from "./types";
+import type { FileExplorerEntry, Pane, PaneLayout } from "./types";
+import {
+  TerminalTabLayoutCache,
+  terminalSlotMountKey,
+} from "./terminalTabLayoutCache";
 import {
   connectionClientScopeKey,
   useConnectionClient,
@@ -144,6 +147,7 @@ const LazyTerminalView = lazy(() =>
 
 type TerminalViewProps = {
   paneId?: string;
+  paneLayout?: PaneLayout | null;
   fontFamily?: string;
   showMobileKeys?: boolean;
   mobileShortcuts?: MobileTerminalShortcutRows;
@@ -774,6 +778,7 @@ function TerminalPaneLayout({
       layout: state.layout,
       panes: state.panes,
       selectedPaneId: state.selectedPaneId,
+      viewTabId: state.viewTabId,
     }),
     shallowEqual,
   );
@@ -783,29 +788,44 @@ function TerminalPaneLayout({
     null,
   );
   const [responsivePaneSwitcher, setResponsivePaneSwitcher] = useState(false);
-  const layout = s.layout;
+  const selectedPane = s.panes.find(
+    (pane) => pane.pane_id === s.selectedPaneId,
+  );
+  const activeTabId =
+    s.viewTabId ?? selectedPane?.tab_id ?? s.layout?.tab_id ?? null;
+  const terminalIdentity = {
+    connectionId: s.activeConnectionId,
+    generation: s.connectionGeneration,
+  };
+  const layoutCacheRef = useRef<TerminalTabLayoutCache | null>(null);
+  if (layoutCacheRef.current === null) {
+    layoutCacheRef.current = new TerminalTabLayoutCache();
+  }
+  const layout = layoutCacheRef.current.resolve(
+    terminalIdentity,
+    activeTabId,
+    s.layout,
+  );
   const visiblePanes =
     layout?.panes.filter((lp) =>
       s.panes.some((pane) => pane.pane_id === lp.pane_id),
     ) ?? [];
-  const fallbackPaneId = visiblePanes[0]?.pane_id ?? null;
+  const selectedTabPane =
+    selectedPane?.tab_id === activeTabId ? selectedPane : null;
+  const fallbackPaneId =
+    visiblePanes[0]?.pane_id ??
+    selectedTabPane?.pane_id ??
+    s.panes.find((pane) => pane.tab_id === activeTabId && pane.focused)
+      ?.pane_id ??
+    s.panes.find((pane) => pane.tab_id === activeTabId)?.pane_id ??
+    null;
   const activePaneId =
     visiblePanes.find((lp) => lp.pane_id === s.selectedPaneId)?.pane_id ??
     visiblePanes.find((lp) => lp.pane_id === layout?.focused_pane_id)
       ?.pane_id ??
     fallbackPaneId;
-  const mountKeyForPane = (paneId: string | null) => {
-    const terminalId =
-      s.panes.find((pane) => pane.pane_id === paneId)?.terminal_id ?? null;
-    return terminalMountKey(
-      {
-        connectionId: s.activeConnectionId,
-        generation: s.connectionGeneration,
-      },
-      paneId,
-      terminalId,
-    );
-  };
+  const mountKeyForSlot = (slot: number) =>
+    terminalSlotMountKey(terminalIdentity, slot);
 
   const setLayoutContainer = useCallback((element: HTMLDivElement | null) => {
     layoutRef.current = element;
@@ -838,7 +858,9 @@ function TerminalPaneLayout({
   if (!layout || layout.zoomed || visiblePanes.length <= 1) {
     return (
       <TerminalView
-        key={mountKeyForPane(activePaneId)}
+        key={mountKeyForSlot(0)}
+        paneId={activePaneId ?? undefined}
+        paneLayout={layout}
         fontFamily={fontFamily}
         mobileShortcuts={mobileShortcuts}
         mobileSideShortcuts={mobileSideShortcuts}
@@ -896,8 +918,9 @@ function TerminalPaneLayout({
           </button>
         </div>
         <TerminalView
-          key={mountKeyForPane(activePaneId)}
+          key={mountKeyForSlot(0)}
           paneId={activePaneId}
+          paneLayout={layout}
           fontFamily={fontFamily}
           mobileShortcuts={mobileShortcuts}
           mobileSideShortcuts={mobileSideShortcuts}
@@ -986,12 +1009,12 @@ function TerminalPaneLayout({
       className="pane-layout"
       aria-label="Terminal panes"
     >
-      {visiblePanes.map((layoutPane) => {
+      {visiblePanes.map((layoutPane, slot) => {
         const rect = layoutPane.rect;
         const isActive = layoutPane.pane_id === activePaneId;
         return (
           <div
-            key={mountKeyForPane(layoutPane.pane_id)}
+            key={mountKeyForSlot(slot)}
             className={`pane-layout-cell ${isActive ? "is-active" : ""}`}
             style={{
               left: `${rectPercent(rect.x, area.x, areaWidth)}%`,
@@ -1004,8 +1027,8 @@ function TerminalPaneLayout({
             }}
           >
             <TerminalView
-              key={mountKeyForPane(layoutPane.pane_id)}
               paneId={layoutPane.pane_id}
+              paneLayout={layout}
               fontFamily={fontFamily}
               showMobileKeys={isActive}
               mobileShortcuts={mobileShortcuts}

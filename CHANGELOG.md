@@ -2,6 +2,19 @@
 
 ## Unreleased
 
+### Changed
+
+- Replace the free-form terminal font setting with a cross-platform preset
+  dropdown and migrate recognized legacy values automatically.
+- Make tab switches update their layout immediately, reuse terminal renderers
+  across visited tabs, and keep optional presence and relay RPCs off the
+  visible navigation path.
+
+### Fixed
+
+- Make File Explorer honor native Git ignore rules and safely follow file and
+  directory symlinks whose targets remain inside the workspace.
+
 ## 0.4.14 - 2026-08-31
 
 ### Fixed

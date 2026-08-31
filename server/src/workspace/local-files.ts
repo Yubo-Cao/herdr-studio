@@ -7,7 +7,11 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import { DOWNLOAD_TIMEOUT_MS, LIST_LIMIT } from "./file-constants";
+import {
+  DOWNLOAD_TIMEOUT_MS,
+  LIST_LIMIT,
+  LIST_TIMEOUT_MS,
+} from "./file-constants";
 import {
   assertInsideRoot,
   entrySort,
@@ -22,7 +26,10 @@ import type {
   FilePreviewResult,
   FileUploadResult,
 } from "./file-types";
-import { runBinaryProcessWithTimeout } from "./process";
+import {
+  runBinaryProcessWithTimeout,
+  runProcessWithInputTimeout,
+} from "./process";
 import { decodePreviewBuffer, previewLimitForPath } from "./preview";
 
 export async function listLocalFiles(
@@ -31,28 +38,75 @@ export async function listLocalFiles(
   showHidden: boolean,
 ): Promise<FileListResult> {
   const rootReal = await realpath(rootPath);
-  const targetReal = await realpath(resolve(rootReal, relativePath));
+  const targetReal = await realpath(resolve(rootReal, relativePath)).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT" || error.code === "ELOOP") {
+        throw new Error("file explorer symlink is broken or unavailable");
+      }
+      throw error;
+    },
+  );
   assertInsideRoot(rootReal, targetReal);
   const dirents = await readdir(targetReal, { withFileTypes: true });
-  const entries: FileExplorerEntry[] = [];
-  for (const dirent of dirents) {
-    if (!showHidden && dirent.name.startsWith(".")) continue;
-    const entryPath = join(targetReal, dirent.name);
-    const info = await stat(entryPath).catch(() => null);
-    const type = dirent.isDirectory()
-      ? "directory"
-      : dirent.isSymbolicLink()
-        ? "symlink"
-        : "file";
-    entries.push({
-      name: dirent.name,
-      path: relativeExplorerPath(relativePath, dirent.name),
-      type,
-      size: info?.size ?? 0,
-      mtime_ms: info ? info.mtimeMs : 0,
-      hidden: dirent.name.startsWith("."),
-    });
-  }
+  const visibleDirents = dirents.filter(
+    (dirent) => showHidden || !dirent.name.startsWith("."),
+  );
+  const ignoredNames = await gitIgnoredEntryNames(
+    targetReal,
+    visibleDirents.map((dirent) => dirent.name),
+  );
+  const entries = (
+    await Promise.all(
+      visibleDirents.map(async (dirent): Promise<FileExplorerEntry | null> => {
+        if (ignoredNames.has(dirent.name)) return null;
+        const entryPath = join(targetReal, dirent.name);
+        const linkInfo = await lstat(entryPath).catch(() => null);
+        if (!linkInfo) return null;
+        const type = dirent.isDirectory()
+          ? "directory"
+          : dirent.isSymbolicLink()
+            ? "symlink"
+            : "file";
+        let info = linkInfo;
+        let symlinkTargetType: FileExplorerEntry["symlink_target_type"];
+        let symlinkStatus: FileExplorerEntry["symlink_status"];
+        if (type === "symlink") {
+          const linkTargetReal = await realpath(entryPath).catch(() => null);
+          if (!linkTargetReal) {
+            symlinkStatus = "broken";
+          } else {
+            try {
+              assertInsideRoot(rootReal, linkTargetReal);
+              symlinkStatus = "internal";
+              const targetInfo = await stat(linkTargetReal).catch(() => null);
+              if (targetInfo) {
+                info = targetInfo;
+                symlinkTargetType = targetInfo.isDirectory()
+                  ? "directory"
+                  : targetInfo.isFile()
+                    ? "file"
+                    : undefined;
+              }
+            } catch {
+              symlinkStatus = "external";
+            }
+          }
+        }
+        return {
+          name: dirent.name,
+          path: relativeExplorerPath(relativePath, dirent.name),
+          type,
+          ...(symlinkTargetType
+            ? { symlink_target_type: symlinkTargetType }
+            : {}),
+          ...(symlinkStatus ? { symlink_status: symlinkStatus } : {}),
+          size: info.size,
+          mtime_ms: info.mtimeMs,
+          hidden: dirent.name.startsWith("."),
+        };
+      }),
+    )
+  ).filter((entry): entry is FileExplorerEntry => entry !== null);
   entries.sort(entrySort);
   return {
     root: rootReal,
@@ -60,6 +114,25 @@ export async function listLocalFiles(
     entries: entries.slice(0, LIST_LIMIT),
     truncated: entries.length > LIST_LIMIT,
   };
+}
+
+async function gitIgnoredEntryNames(
+  directoryPath: string,
+  names: string[],
+): Promise<Set<string>> {
+  if (names.length === 0) return new Set();
+  try {
+    const result = await runProcessWithInputTimeout(
+      ["git", "-C", directoryPath, "check-ignore", "-z", "--stdin"],
+      `${names.join("\0")}\0`,
+      LIST_TIMEOUT_MS,
+    );
+    if (result.code !== 0 && result.code !== 1) return new Set();
+    return new Set(result.stdout.split("\0").filter(Boolean));
+  } catch {
+    // A non-Git directory (or a host without Git) keeps the legacy behavior.
+    return new Set();
+  }
 }
 
 export async function resolveLocalFilePaths(

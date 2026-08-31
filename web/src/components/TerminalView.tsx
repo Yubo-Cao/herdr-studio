@@ -82,6 +82,8 @@ import {
   collaborationProfile,
   updateCollaborationPresence,
 } from "../collaboration";
+import { startTerminalAttach } from "../terminalAttach";
+import type { PaneLayout } from "../types";
 import {
   readTerminalRecoveryReloadAt,
   shouldArmTerminalRecoveryResume,
@@ -429,6 +431,7 @@ export type TerminalWorkspaceFileRequest = {
 
 export function TerminalView({
   paneId,
+  paneLayout: renderedPaneLayout,
   fontFamily = "",
   showMobileKeys = true,
   mobileShortcuts = defaultMobileTerminalShortcutRows(),
@@ -440,6 +443,7 @@ export function TerminalView({
   onOpenWorkspaceFile,
 }: {
   paneId?: string;
+  paneLayout?: PaneLayout | null;
   fontFamily?: string;
   showMobileKeys?: boolean;
   mobileShortcuts?: MobileTerminalShortcutRows;
@@ -554,18 +558,19 @@ export function TerminalView({
   const resumedAtRef = useRef<number | null>(null);
   // When the page last became hidden; measures the suspension length.
   const hiddenAtRef = useRef<number | null>(null);
-  const selectedPaneInLayout =
+  const paneLayout =
+    renderedPaneLayout === undefined ? s.layout : renderedPaneLayout;
+  const selectedPaneId =
     s.selectedPaneId &&
-    s.layout?.panes.some((p) => p.pane_id === s.selectedPaneId)
+    s.panes.some((candidate) => candidate.pane_id === s.selectedPaneId)
       ? s.selectedPaneId
       : null;
   const pane = paneId
     ? (s.panes.find((p) => p.pane_id === paneId) ?? null)
-    : (s.panes.find((p) => p.pane_id === selectedPaneInLayout) ??
-      s.panes.find((p) => p.pane_id === s.layout?.focused_pane_id) ??
+    : (s.panes.find((p) => p.pane_id === selectedPaneId) ??
+      s.panes.find((p) => p.pane_id === paneLayout?.focused_pane_id) ??
       null);
-  const activePaneId =
-    selectedPaneInLayout ?? s.layout?.focused_pane_id ?? null;
+  const activePaneId = selectedPaneId ?? paneLayout?.focused_pane_id ?? null;
   const isActivePane = !!pane && (!paneId || pane.pane_id === activePaneId);
   const canShowAgentHistory = isActivePane && paneHasAgentHistory(pane);
   const canClosePane = !!pane && paneCanClose(s.panes, pane.pane_id);
@@ -600,7 +605,7 @@ export function TerminalView({
   const paneTerminalIdRef = useRef(pane?.terminal_id);
   const paneIdRef = useRef(pane?.pane_id);
   const paneTabIdRef = useRef(pane?.tab_id);
-  const paneLayoutRef = useRef(s.layout);
+  const paneLayoutRef = useRef(paneLayout);
   useLayoutEffect(() => {
     isActivePaneRef.current = isActivePane;
   }, [isActivePane]);
@@ -617,8 +622,8 @@ export function TerminalView({
     paneTabIdRef.current = pane?.tab_id;
   }, [pane?.tab_id]);
   useLayoutEffect(() => {
-    paneLayoutRef.current = s.layout;
-  }, [s.layout]);
+    paneLayoutRef.current = paneLayout;
+  }, [paneLayout]);
   const focusTerminalSoon = useCallback(() => {
     if (!isActivePaneRef.current || composerOpenRef.current) return;
     if (shouldAvoidVirtualKeyboard()) return;
@@ -1899,9 +1904,9 @@ export function TerminalView({
     }
     resizeSyncRef.current?.markAttached({ cols, rows });
     const attachStartedAt = performance.now();
-    void updateCollaborationPresence(connectionClient, store.get())
-      .catch(() => null)
-      .then(() =>
+    void startTerminalAttach(
+      () => updateCollaborationPresence(connectionClient, store.get()),
+      () =>
         connectionClient.call("terminal.attach", {
           terminal_id: terminalId,
           pane_id: pane?.pane_id ?? terminalId,
@@ -1914,81 +1919,80 @@ export function TerminalView({
             ? { relay_cols: relaySize.cols, relay_rows: relaySize.rows }
             : {}),
         }),
-      )
-      .then(
-        (result) => {
-          if (!connectionClient.isCurrent()) return;
-          const access = result?.access === "observe" ? "observe" : "control";
-          terminalAccessRef.current = access;
-          setTerminalAccess(access);
-          term.options.disableStdin = access === "observe";
-          if (access === "observe") term.textarea?.blur();
-          takeoverRef.current = false;
-          if (attachingRef.current === terminalId) attachingRef.current = null;
-          if (desiredTerminalRef.current === terminalId) {
-            attachedRef.current = terminalId;
-            focusTerminalSoon();
-            // Resizes observed while the attach was in flight are dropped by
-            // the sync's send guard; push the settled size now (deduped).
-            const settledSize = fitVisibleTerminal();
-            if (settledSize) resizeSyncRef.current?.sendNow(settledSize);
-            const watchdogMs = terminalAttachWatchdogMs(
-              performance.now() - attachStartedAt,
-            );
-            attachWatchdogRef.current?.arm(attachAttempt, watchdogMs, () => {
-              if (
-                !connectionClient.isCurrent() ||
-                desiredTerminalRef.current !== terminalId
-              ) {
-                return;
-              }
-              attachTimeoutCountRef.current += 1;
-              attachedRef.current = null;
-              attachingRef.current = null;
-              void connectionClient
-                .call("terminal.detach", { terminal_id: terminalId })
-                .catch(() => null);
-              if (attachTimeoutCountRef.current > 2) {
-                setTerminalLoading(false);
-                // Repeated attaches produced no frames right after a
-                // foreground resume: the session is wedged in a way in-place
-                // recovery cannot fix (silently killed socket, wedged
-                // stream). Reload once, rate-limited, replicating the
-                // manual refresh that restores the terminal.
-                const now = Date.now();
-                if (
-                  shouldReloadTerminalAfterResume({
-                    now,
-                    resumedAt: resumedAtRef.current,
-                    lastReloadAt: readTerminalRecoveryReloadAt(),
-                  })
-                ) {
-                  writeTerminalRecoveryReloadAt(now);
-                  window.location.reload();
-                  return;
-                }
-                setTerminalAttachError(
-                  "Terminal stopped receiving frames. Reload the app to reconnect.",
-                );
-                return;
-              }
-              setAttachRetry((value) => value + 1);
-            });
-          }
-        },
-        (e) => {
-          if (!connectionClient.isCurrent()) return;
-          attachWatchdogRef.current?.cancel(attachAttempt);
-          if (attachingRef.current === terminalId) attachingRef.current = null;
-          if (desiredTerminalRef.current === terminalId) {
+    ).then(
+      (result) => {
+        if (!connectionClient.isCurrent()) return;
+        const access = result?.access === "observe" ? "observe" : "control";
+        terminalAccessRef.current = access;
+        setTerminalAccess(access);
+        term.options.disableStdin = access === "observe";
+        if (access === "observe") term.textarea?.blur();
+        takeoverRef.current = false;
+        if (attachingRef.current === terminalId) attachingRef.current = null;
+        if (desiredTerminalRef.current === terminalId) {
+          attachedRef.current = terminalId;
+          focusTerminalSoon();
+          // Resizes observed while the attach was in flight are dropped by
+          // the sync's send guard; push the settled size now (deduped).
+          const settledSize = fitVisibleTerminal();
+          if (settledSize) resizeSyncRef.current?.sendNow(settledSize);
+          const watchdogMs = terminalAttachWatchdogMs(
+            performance.now() - attachStartedAt,
+          );
+          attachWatchdogRef.current?.arm(attachAttempt, watchdogMs, () => {
+            if (
+              !connectionClient.isCurrent() ||
+              desiredTerminalRef.current !== terminalId
+            ) {
+              return;
+            }
+            attachTimeoutCountRef.current += 1;
             attachedRef.current = null;
-            setTerminalLoading(false);
-            setTerminalAttachError(e instanceof Error ? e.message : String(e));
-          }
-          console.error("[term] attach failed", e);
-          takeoverRef.current = false;
-        },
-      );
+            attachingRef.current = null;
+            void connectionClient
+              .call("terminal.detach", { terminal_id: terminalId })
+              .catch(() => null);
+            if (attachTimeoutCountRef.current > 2) {
+              setTerminalLoading(false);
+              // Repeated attaches produced no frames right after a
+              // foreground resume: the session is wedged in a way in-place
+              // recovery cannot fix (silently killed socket, wedged
+              // stream). Reload once, rate-limited, replicating the
+              // manual refresh that restores the terminal.
+              const now = Date.now();
+              if (
+                shouldReloadTerminalAfterResume({
+                  now,
+                  resumedAt: resumedAtRef.current,
+                  lastReloadAt: readTerminalRecoveryReloadAt(),
+                })
+              ) {
+                writeTerminalRecoveryReloadAt(now);
+                window.location.reload();
+                return;
+              }
+              setTerminalAttachError(
+                "Terminal stopped receiving frames. Reload the app to reconnect.",
+              );
+              return;
+            }
+            setAttachRetry((value) => value + 1);
+          });
+        }
+      },
+      (e) => {
+        if (!connectionClient.isCurrent()) return;
+        attachWatchdogRef.current?.cancel(attachAttempt);
+        if (attachingRef.current === terminalId) attachingRef.current = null;
+        if (desiredTerminalRef.current === terminalId) {
+          attachedRef.current = null;
+          setTerminalLoading(false);
+          setTerminalAttachError(e instanceof Error ? e.message : String(e));
+        }
+        console.error("[term] attach failed", e);
+        takeoverRef.current = false;
+      },
+    );
   }, [
     container,
     fitVisibleTerminal,
@@ -2128,7 +2132,7 @@ export function TerminalView({
   );
   const paneIndex = Math.max(
     0,
-    s.layout?.panes.findIndex(
+    paneLayout?.panes.findIndex(
       (candidate) => candidate.pane_id === pane.pane_id,
     ) ?? 0,
   );
