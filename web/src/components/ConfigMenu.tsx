@@ -15,11 +15,17 @@ import {
   Server,
   Sun,
   SunMoon,
+  Type as TypeIcon,
   Wifi,
 } from "lucide-react";
 import packageJson from "../../package.json";
 import type { Theme } from "../App";
-import { ACCENT_OPTIONS, type AccentColor } from "../appearance";
+import {
+  ACCENT_OPTIONS,
+  type AccentColor,
+  MAX_TERMINAL_FONT_FAMILY_LENGTH,
+  normalizeTerminalFontFamily,
+} from "../appearance";
 import { connectionHttpPath } from "../connectionHttp";
 import { shallowEqual, store, useStoreSelector } from "../store";
 import { useConnectionClient } from "../useConnectionClient";
@@ -54,10 +60,12 @@ type HerdrInfo = {
 type ConfigMenuProps = {
   theme: Theme;
   accentColor: AccentColor;
+  terminalFontFamily: string;
   mobileTerminalShortcuts: MobileTerminalShortcutRows;
   mobileTerminalSideShortcuts: MobileTerminalSideShortcuts;
   onThemeChange: (theme: Theme) => void;
   onAccentColorChange: (accentColor: AccentColor) => void;
+  onTerminalFontFamilyChange: (fontFamily: string) => void;
   onMobileTerminalShortcutsChange: (rows: MobileTerminalShortcutRows) => void;
   onMobileTerminalSideShortcutsChange: (
     shortcuts: MobileTerminalSideShortcuts,
@@ -67,10 +75,12 @@ type ConfigMenuProps = {
 export function ConfigMenu({
   theme,
   accentColor,
+  terminalFontFamily,
   mobileTerminalShortcuts,
   mobileTerminalSideShortcuts,
   onThemeChange,
   onAccentColorChange,
+  onTerminalFontFamilyChange,
   onMobileTerminalShortcutsChange,
   onMobileTerminalSideShortcutsChange,
 }: ConfigMenuProps) {
@@ -321,6 +331,48 @@ export function ConfigMenu({
                       }}
                     />
                   ))}
+                </div>
+              </div>
+              <div className="config-preference-row config-font-row">
+                <span className="config-item-icon">
+                  <TypeIcon size={15} />
+                </span>
+                <label
+                  className="config-item-copy"
+                  htmlFor="terminal-font-family"
+                >
+                  <strong>Terminal font</strong>
+                  <span>Installed font name or CSS font stack</span>
+                </label>
+                <div className="config-font-control">
+                  <input
+                    id="terminal-font-family"
+                    type="text"
+                    value={terminalFontFamily}
+                    maxLength={MAX_TERMINAL_FONT_FAMILY_LENGTH}
+                    placeholder="Default monospace stack"
+                    aria-label="Terminal font family"
+                    autoComplete="off"
+                    spellCheck={false}
+                    onChange={(event) =>
+                      onTerminalFontFamilyChange(event.target.value)
+                    }
+                    onBlur={(event) =>
+                      onTerminalFontFamilyChange(
+                        normalizeTerminalFontFamily(event.target.value),
+                      )
+                    }
+                  />
+                  {terminalFontFamily ? (
+                    <button
+                      type="button"
+                      aria-label="Reset terminal font"
+                      title="Use the default terminal font stack"
+                      onClick={() => onTerminalFontFamilyChange("")}
+                    >
+                      Reset
+                    </button>
+                  ) : null}
                 </div>
               </div>
             </div>

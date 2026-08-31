@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Added
+
+- Let users choose an installed terminal font or CSS font stack from the
+  Appearance menu, persist it locally, and apply it live to every terminal pane.
+
 ## 0.4.12 - 2026-08-30
 
 ### Fixed

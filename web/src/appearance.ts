@@ -10,6 +10,27 @@ export const ACCENT_OPTIONS = [
 
 export type AccentColor = (typeof ACCENT_OPTIONS)[number]["value"];
 
+export const TERMINAL_FONT_STORAGE_KEY = "terminalFontFamily";
+export const MAX_TERMINAL_FONT_FAMILY_LENGTH = 200;
+
+export const DEFAULT_TERMINAL_FONT_FAMILY =
+  'SFMono-Regular, Menlo, Monaco, "0xProto Nerd Font Mono", "JetBrainsMonoNL Nerd Font", "MesloLGS NF", "Hack Nerd Font", "FiraCode Nerd Font", Consolas, "Liberation Mono", "Courier New", "Noto Sans Mono CJK SC", "Source Han Mono SC", "Sarasa Mono SC", "Herdr Nerd Symbols", monospace';
+
+export function normalizeTerminalFontFamily(value: string | null): string {
+  return (value ?? "")
+    .replace(/[\u0000-\u001f\u007f]/g, " ")
+    .replace(/\s+/g, " ")
+    .trim()
+    .slice(0, MAX_TERMINAL_FONT_FAMILY_LENGTH);
+}
+
+export function resolveTerminalFontFamily(value: string | null): string {
+  const custom = normalizeTerminalFontFamily(value);
+  return custom
+    ? `${custom}, ${DEFAULT_TERMINAL_FONT_FAMILY}`
+    : DEFAULT_TERMINAL_FONT_FAMILY;
+}
+
 export function normalizeAccentColor(value: string | null): AccentColor {
   return ACCENT_OPTIONS.some((option) => option.value === value)
     ? (value as AccentColor)

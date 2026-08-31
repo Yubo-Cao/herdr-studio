@@ -1260,6 +1260,34 @@ textarea:focus {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.config-font-row {
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: start;
+}
+.config-font-row .config-item-icon {
+  grid-row: 1 / span 2;
+}
+.config-font-control {
+  grid-column: 2;
+  min-width: 0;
+  display: flex;
+  gap: 6px;
+}
+.config-font-control input {
+  width: 100%;
+  min-width: 0;
+  height: 30px;
+  padding: 5px 8px;
+  border-radius: 6px;
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 11px;
+}
+.config-font-control button {
+  height: 30px;
+  padding: 4px 8px;
+  border-radius: 6px;
+  font-size: 11px;
+}
 .config-theme-control {
   display: flex;
   gap: 2px;

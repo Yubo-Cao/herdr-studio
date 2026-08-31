@@ -57,6 +57,8 @@ Closed panes are removed from the history automatically.
 - `Cmd/Ctrl`-click workspace-relative or absolute file paths in terminal output
   to preview text, Markdown, or images without leaving the terminal.
 - Preserve IME composition and rapid CJK punctuation input.
+- Choose a locally installed terminal font or CSS font stack from the
+  Appearance menu; Herdr's Nerd Font and symbol fallbacks remain available.
 
 ## Agent Awareness and Session Inspection
 

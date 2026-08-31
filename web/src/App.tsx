@@ -29,10 +29,12 @@ import packageJson from "../package.json";
 import {
   type AccentColor,
   normalizeAccentColor,
+  normalizeTerminalFontFamily,
   normalizeThemePreference,
   type ResolvedTheme,
   resolveSystemTheme,
   SYSTEM_THEME_QUERY,
+  TERMINAL_FONT_STORAGE_KEY,
   type ThemePreference,
 } from "./appearance";
 import { AgentIcon } from "./components/AgentIcon";
@@ -142,6 +144,7 @@ const LazyTerminalView = lazy(() =>
 
 type TerminalViewProps = {
   paneId?: string;
+  fontFamily?: string;
   showMobileKeys?: boolean;
   mobileShortcuts?: MobileTerminalShortcutRows;
   mobileSideShortcuts?: MobileTerminalSideShortcuts;
@@ -236,6 +239,12 @@ function loadSystemTheme(): ResolvedTheme {
 
 function loadAccentColor(): AccentColor {
   return normalizeAccentColor(localStorage.getItem(ACCENT_COLOR_KEY));
+}
+
+function loadTerminalFontFamily(): string {
+  return normalizeTerminalFontFamily(
+    localStorage.getItem(TERMINAL_FONT_STORAGE_KEY),
+  );
 }
 
 function loadMobileTerminalShortcuts(): MobileTerminalShortcutRows {
@@ -740,6 +749,7 @@ function resizeTargetForSplit(
 // Render the active tab's Herdr pane layout; single-pane and zoomed tabs keep
 // the old full terminal view.
 function TerminalPaneLayout({
+  fontFamily,
   mobileShortcuts,
   mobileSideShortcuts,
   composerOpen,
@@ -748,6 +758,7 @@ function TerminalPaneLayout({
   onAgentHistoryOpenChange,
   onOpenWorkspaceFile,
 }: {
+  fontFamily: string;
   mobileShortcuts: MobileTerminalShortcutRows;
   mobileSideShortcuts: MobileTerminalSideShortcuts;
   composerOpen: boolean;
@@ -828,6 +839,7 @@ function TerminalPaneLayout({
     return (
       <TerminalView
         key={mountKeyForPane(activePaneId)}
+        fontFamily={fontFamily}
         mobileShortcuts={mobileShortcuts}
         mobileSideShortcuts={mobileSideShortcuts}
         composerOpen={composerOpen}
@@ -886,6 +898,7 @@ function TerminalPaneLayout({
         <TerminalView
           key={mountKeyForPane(activePaneId)}
           paneId={activePaneId}
+          fontFamily={fontFamily}
           mobileShortcuts={mobileShortcuts}
           mobileSideShortcuts={mobileSideShortcuts}
           composerOpen={composerOpen}
@@ -993,6 +1006,7 @@ function TerminalPaneLayout({
             <TerminalView
               key={mountKeyForPane(layoutPane.pane_id)}
               paneId={layoutPane.pane_id}
+              fontFamily={fontFamily}
               showMobileKeys={isActive}
               mobileShortcuts={mobileShortcuts}
               mobileSideShortcuts={mobileSideShortcuts}
@@ -1075,6 +1089,9 @@ export default function App() {
   );
   const [accentColor, setAccentColor] = useState<AccentColor>(() =>
     loadAccentColor(),
+  );
+  const [terminalFontFamily, setTerminalFontFamily] = useState(
+    loadTerminalFontFamily,
   );
   const [mobileTerminalShortcuts, setMobileTerminalShortcuts] =
     useState<MobileTerminalShortcutRows>(loadMobileTerminalShortcuts);
@@ -2313,6 +2330,12 @@ export default function App() {
   ]);
   useEffect(() => {
     localStorage.setItem(
+      TERMINAL_FONT_STORAGE_KEY,
+      normalizeTerminalFontFamily(terminalFontFamily),
+    );
+  }, [terminalFontFamily]);
+  useEffect(() => {
+    localStorage.setItem(
       MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY,
       serializeMobileTerminalShortcutRows(mobileTerminalShortcuts),
     );
@@ -2333,6 +2356,8 @@ export default function App() {
         setMobileTerminalSideShortcuts(
           parseMobileTerminalSideShortcuts(event.newValue),
         );
+      } else if (event.key === TERMINAL_FONT_STORAGE_KEY) {
+        setTerminalFontFamily(normalizeTerminalFontFamily(event.newValue));
       }
     };
     window.addEventListener("storage", onStorage);
@@ -2530,10 +2555,12 @@ export default function App() {
               key={`${resourceUiKey}:config`}
               theme={theme}
               accentColor={accentColor}
+              terminalFontFamily={terminalFontFamily}
               mobileTerminalShortcuts={mobileTerminalShortcuts}
               mobileTerminalSideShortcuts={mobileTerminalSideShortcuts}
               onThemeChange={setTheme}
               onAccentColorChange={setAccentColor}
+              onTerminalFontFamilyChange={setTerminalFontFamily}
               onMobileTerminalShortcutsChange={setMobileTerminalShortcuts}
               onMobileTerminalSideShortcutsChange={
                 setMobileTerminalSideShortcuts
@@ -2853,6 +2880,7 @@ export default function App() {
           >
             <div className="workspace-terminal-surface">
               <TerminalPaneLayout
+                fontFamily={terminalFontFamily}
                 mobileShortcuts={mobileTerminalShortcuts}
                 mobileSideShortcuts={mobileTerminalSideShortcuts}
                 composerOpen={terminalComposerOpen}
