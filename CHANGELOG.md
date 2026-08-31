@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Fixed
+
+- Sign macOS release binaries on native runners and verify them before
+  publishing so both Intel and Apple Silicon builds launch normally.
+
 ## 0.4.13 - 2026-08-31
 
 ### Added
