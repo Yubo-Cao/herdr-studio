@@ -2,10 +2,12 @@ import {
   type DragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  Suspense,
   useEffect,
   useMemo,
   useRef,
   useState,
+  useSyncExternalStore,
 } from "react";
 import {
   ChevronDown,
@@ -23,11 +25,17 @@ import { connectionHttpPath } from "../connectionHttp";
 import { connectionStorageKey } from "../connectionStorage";
 import { downloadFileFromUrl } from "../downloadFile";
 import { gitDiffCode, type GitDiffCode } from "../gitDiffStatus";
+import { lazyWithReload } from "../lazyWithReload";
 import {
   refreshGitDiffSummary,
   retireGitDiffSummaryResource,
   useGitDiffSummaryState,
 } from "../gitDiffSummaryStore";
+import {
+  fileExplorerRefreshKey,
+  readFileExplorerRefresh,
+  subscribeFileExplorerRefresh,
+} from "../fileExplorerRefresh";
 import { store, useStoreSelector } from "../store";
 import {
   connectionClientScopeKey,
@@ -48,11 +56,16 @@ import {
   keyboardContextMenuPoint,
   treeKeyboardAction,
 } from "./treeKeyboard";
-import {
-  FilePreviewContent,
-  type ActiveFilePreviewSelection,
-  type FilePreviewSelectionMeta,
+import type {
+  ActiveFilePreviewSelection,
+  FilePreviewSelectionMeta,
 } from "./FilePreviewContent";
+
+const FilePreviewContent = lazyWithReload("file-preview", () =>
+  import("./FilePreviewContent").then((module) => ({
+    default: module.FilePreviewContent,
+  })),
+);
 
 const LONG_PRESS_MS = 550;
 const LONG_PRESS_MOVE_PX = 10;
@@ -1194,6 +1207,43 @@ function FileExplorerContent({
     }
   };
 
+  const explorerRefreshKey = fileExplorerRefreshKey(
+    connectionClient,
+    cacheWorkspaceId ?? "",
+  );
+  const explorerRefreshVersion = useSyncExternalStore(
+    (listener) => subscribeFileExplorerRefresh(explorerRefreshKey, listener),
+    () => readFileExplorerRefresh(explorerRefreshKey),
+    () => readFileExplorerRefresh(explorerRefreshKey),
+  );
+  const explorerRefreshRef = useRef({
+    key: explorerRefreshKey,
+    version: explorerRefreshVersion,
+  });
+
+  useEffect(() => {
+    const previous = explorerRefreshRef.current;
+    explorerRefreshRef.current = {
+      key: explorerRefreshKey,
+      version: explorerRefreshVersion,
+    };
+    if (
+      !open ||
+      (previous.key === explorerRefreshKey &&
+        previous.version === explorerRefreshVersion)
+    ) {
+      return;
+    }
+    // A Git mutation landed elsewhere (e.g. the Changes panel): re-list the
+    // visible directories so deleted files and ignored markers stay fresh.
+    const pathsToRefresh = Array.from(expanded);
+    if (!pathsToRefresh.includes("")) pathsToRefresh.unshift("");
+    for (const path of pathsToRefresh) {
+      void loadDirectory(path, true);
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [explorerRefreshKey, explorerRefreshVersion]);
+
   useEffect(() => {
     if (!open) return;
     const resourceChanged =
@@ -2016,7 +2066,9 @@ function FileExplorerContent({
             treeHasFocus && focusedTreePath === entry.path ? "is-focused" : ""
           } ${
             dropTargetPath === entry.path && isDirectory ? "is-drop-target" : ""
-          } ${uploading && isDirectory ? "is-uploading" : ""}`}
+          } ${uploading && isDirectory ? "is-uploading" : ""} ${
+            entry.ignored ? "is-ignored" : ""
+          }`}
           data-file-path={entry.path}
           data-parent-path={parentDirectoryPath(entry.path)}
           role="treeitem"
@@ -2095,9 +2147,13 @@ function FileExplorerContent({
               <File size={16} />
             )}
           </span>
-          <span className="file-main">
-            <span className="file-name">{entry.name}</span>
-            <span className="file-path">{entry.path}</span>
+          <span
+            className="file-name"
+            title={
+              entry.ignored ? `${entry.path} · Ignored by Git` : entry.path
+            }
+          >
+            {entry.name}
           </span>
           {gitStatus ? (
             <span
@@ -2320,12 +2376,14 @@ function FileExplorerContent({
           </div>
         </div>
         {previewPlacement === "inline" ? (
-          <FilePreviewContent
-            entry={previewEntry}
-            preview={preview}
-            loading={previewLoading}
-            error={previewError}
-          />
+          <Suspense fallback={<div role="status">Loading preview...</div>}>
+            <FilePreviewContent
+              entry={previewEntry}
+              preview={preview}
+              loading={previewLoading}
+              error={previewError}
+            />
+          </Suspense>
         ) : null}
       </div>
       <FileExplorerEntryMenu

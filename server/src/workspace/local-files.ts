@@ -7,11 +7,7 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { basename, dirname, join, resolve } from "node:path";
-import {
-  DOWNLOAD_TIMEOUT_MS,
-  LIST_LIMIT,
-  LIST_TIMEOUT_MS,
-} from "./file-constants";
+import { DOWNLOAD_TIMEOUT_MS, LIST_LIMIT } from "./file-constants";
 import {
   assertInsideRoot,
   entrySort,
@@ -26,10 +22,7 @@ import type {
   FilePreviewResult,
   FileUploadResult,
 } from "./file-types";
-import {
-  runBinaryProcessWithTimeout,
-  runProcessWithInputTimeout,
-} from "./process";
+import { runBinaryProcessWithTimeout } from "./process";
 import { decodePreviewBuffer, previewLimitForPath } from "./preview";
 
 function lexicalTargetInsideRoot(rootReal: string, requestedPath: string) {
@@ -57,14 +50,9 @@ export async function listLocalFiles(
   const visibleDirents = dirents.filter(
     (dirent) => showHidden || !dirent.name.startsWith("."),
   );
-  const ignoredNames = await gitIgnoredEntryNames(
-    targetReal,
-    visibleDirents.map((dirent) => dirent.name),
-  );
   const entries = (
     await Promise.all(
       visibleDirents.map(async (dirent): Promise<FileExplorerEntry | null> => {
-        if (ignoredNames.has(dirent.name)) return null;
         const entryPath = join(targetReal, dirent.name);
         const linkInfo = await lstat(entryPath).catch(() => null);
         if (!linkInfo) return null;
@@ -120,25 +108,6 @@ export async function listLocalFiles(
     entries: entries.slice(0, LIST_LIMIT),
     truncated: entries.length > LIST_LIMIT,
   };
-}
-
-async function gitIgnoredEntryNames(
-  directoryPath: string,
-  names: string[],
-): Promise<Set<string>> {
-  if (names.length === 0) return new Set();
-  try {
-    const result = await runProcessWithInputTimeout(
-      ["git", "-C", directoryPath, "check-ignore", "-z", "--stdin"],
-      `${names.join("\0")}\0`,
-      LIST_TIMEOUT_MS,
-    );
-    if (result.code !== 0 && result.code !== 1) return new Set();
-    return new Set(result.stdout.split("\0").filter(Boolean));
-  } catch {
-    // A non-Git directory (or a host without Git) keeps the legacy behavior.
-    return new Set();
-  }
 }
 
 export async function resolveLocalFilePaths(

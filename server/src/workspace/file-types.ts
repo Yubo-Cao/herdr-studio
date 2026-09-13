@@ -7,6 +7,7 @@ export type FileExplorerEntry = {
   size: number;
   mtime_ms: number;
   hidden: boolean;
+  ignored?: boolean;
 };
 
 export type FileListResult = {
@@ -73,6 +74,8 @@ export type GitDiffEntry = {
   additions?: number;
   deletions?: number;
   generated?: boolean;
+  mtime_ms?: number;
+  size?: number;
 };
 
 export type RunProcessWithCodeTimeout = (

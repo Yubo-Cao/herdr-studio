@@ -3,7 +3,6 @@ import { bridge, type ConnectionClient } from "./api";
 import {
   __storeTesting,
   activateConnectionState,
-  adjacentPaneId,
   automaticUpdateChecksEnabledFromStorage,
   bindTaskNotificationActivation,
   connectionEventIsActive,
@@ -15,9 +14,7 @@ import {
   nextRecentPaneIds,
   noticeAutoDismissDelay,
   numberedCreatedTabRename,
-  projectClientView,
   reconcileConnectionCatalogSessions,
-  responseViewTarget,
   stabilizeRefreshPatch,
   type ServerSessionState,
   type State,
@@ -30,11 +27,7 @@ import {
   taskNotificationTargetIsCurrent,
   worktreeRemovalCompletionNotice,
 } from "./store";
-import {
-  clearTerminalRelayViewports,
-  rememberTerminalRelayViewport,
-} from "./terminalResize";
-import type { Pane, PaneLayout } from "./types";
+import type { Pane } from "./types";
 
 describe("automatic update check preference", () => {
   test("defaults to enabled and honors an explicit disabled value", () => {
@@ -333,263 +326,6 @@ function partitionState(): State {
     dismissedUpdateVersion: null,
   };
 }
-
-describe("browser-local server view", () => {
-  const workspaces = [
-    {
-      workspace_id: "w1",
-      number: 1,
-      label: "One",
-      focused: false,
-      pane_count: 1,
-      tab_count: 1,
-      active_tab_id: "t1",
-      agent_status: "idle",
-    },
-    {
-      workspace_id: "w2",
-      number: 2,
-      label: "Two",
-      focused: true,
-      pane_count: 1,
-      tab_count: 1,
-      active_tab_id: "t2",
-      agent_status: "idle",
-    },
-  ];
-  const tabs = [
-    {
-      tab_id: "t1",
-      workspace_id: "w1",
-      number: 1,
-      label: "One",
-      focused: false,
-      pane_count: 1,
-      agent_status: "idle",
-    },
-    {
-      tab_id: "t2",
-      workspace_id: "w2",
-      number: 1,
-      label: "Two",
-      focused: true,
-      pane_count: 1,
-      agent_status: "idle",
-    },
-  ];
-  const panes: Pane[] = [
-    {
-      pane_id: "p1",
-      terminal_id: "term1",
-      workspace_id: "w1",
-      tab_id: "t1",
-      focused: false,
-      agent_status: "idle",
-      revision: 1,
-    },
-    {
-      pane_id: "p2",
-      terminal_id: "term2",
-      workspace_id: "w2",
-      tab_id: "t2",
-      focused: true,
-      agent_status: "idle",
-      revision: 1,
-    },
-  ];
-
-  test("keeps an established browser selection when server-global focus moves", () => {
-    const projected = projectClientView(workspaces, tabs, panes, {
-      viewWorkspaceId: "w1",
-      viewTabId: "t1",
-      selectedPaneId: "p1",
-    });
-
-    expect(projected.viewWorkspaceId).toBe("w1");
-    expect(projected.viewTabId).toBe("t1");
-    expect(projected.selectedPaneId).toBe("p1");
-    expect(
-      projected.workspaces.find((workspace) => workspace.focused)?.workspace_id,
-    ).toBe("w1");
-    expect(projected.tabs.find((tab) => tab.focused)?.tab_id).toBe("t1");
-    expect(projected.panes.find((entry) => entry.focused)?.pane_id).toBe("p1");
-  });
-
-  test("uses server focus only to initialize a browser without a local view", () => {
-    const projected = projectClientView(workspaces, tabs, panes, {
-      viewWorkspaceId: null,
-      viewTabId: null,
-      selectedPaneId: null,
-    });
-    expect(projected).toMatchObject({
-      viewWorkspaceId: "w2",
-      viewTabId: "t2",
-      selectedPaneId: "p2",
-    });
-  });
-
-  test("focuses and refreshes a tab without waiting for relay resize", async () => {
-    const previousState = store.get();
-    const originalConnection = bridge.connection;
-    let resolveRelay!: () => void;
-    let relaySettled = false;
-    const relay = new Promise<void>((resolve) => {
-      resolveRelay = () => {
-        relaySettled = true;
-        resolve();
-      };
-    });
-    const targetLayout: PaneLayout = {
-      workspace_id: "same-workspace",
-      tab_id: "t2",
-      zoomed: false,
-      area: { x: 0, y: 0, width: 100, height: 50 },
-      focused_pane_id: "p2",
-      panes: [
-        {
-          pane_id: "p2",
-          focused: true,
-          rect: { x: 0, y: 0, width: 100, height: 50 },
-        },
-      ],
-      splits: [],
-    };
-    const snapshot: State = {
-      ...partitionState(),
-      workspaces: [
-        {
-          ...partitionState().workspaces[0],
-          tab_count: 2,
-          active_tab_id: "t1",
-        },
-      ],
-      tabs: [
-        {
-          tab_id: "t1",
-          workspace_id: "same-workspace",
-          number: 1,
-          label: "One",
-          focused: true,
-          pane_count: 1,
-          agent_status: "idle",
-        },
-        {
-          tab_id: "t2",
-          workspace_id: "same-workspace",
-          number: 2,
-          label: "Two",
-          focused: false,
-          pane_count: 1,
-          agent_status: "idle",
-        },
-      ],
-      panes: [
-        { ...partitionState().panes[0], tab_id: "t1", focused: true },
-        {
-          ...partitionState().panes[0],
-          pane_id: "p2",
-          terminal_id: "terminal-2",
-          tab_id: "t2",
-          focused: false,
-        },
-      ],
-      viewWorkspaceId: "same-workspace",
-      viewTabId: "t1",
-      selectedPaneId: "same-pane",
-      layout: null,
-    };
-    const calls: string[] = [];
-    bridge.connection = (() => ({
-      connectionId: "alpha",
-      generation: 10,
-      isCurrent: () => true,
-      call: (async (method: string) => {
-        calls.push(method);
-        if (method === "terminal.relay_resize") return relay;
-        if (method === "workspace.list") {
-          return { workspaces: snapshot.workspaces };
-        }
-        if (method === "tab.list") return { tabs: snapshot.tabs };
-        if (method === "pane.list") return { panes: snapshot.panes };
-        if (method === "pane.layout") return { layout: targetLayout };
-        throw new Error(`unexpected method: ${method}`);
-      }) as ConnectionClient["call"],
-    })) as typeof bridge.connection;
-
-    let stopWatching: () => void = () => undefined;
-    const refreshed = new Promise<void>((resolve) => {
-      stopWatching = store.subscribe(() => {
-        if (store.get().layout?.tab_id === "t2") resolve();
-      });
-    });
-    try {
-      __storeTesting.replaceState(snapshot);
-      rememberTerminalRelayViewport("alpha", 10, "t2", {
-        cols: 120,
-        rows: 36,
-      });
-
-      const focused = await store.focusTab("t2");
-
-      expect(focused).toEqual({ tab_id: "t2" });
-      expect(store.get().viewTabId).toBe("t2");
-      expect(store.get().selectedPaneId).toBe("p2");
-      expect(relaySettled).toBe(false);
-      expect(calls).toContain("terminal.relay_resize");
-      expect(calls).toContain("workspace.list");
-      await refreshed;
-      expect(store.get().layout).toEqual(targetLayout);
-    } finally {
-      stopWatching();
-      resolveRelay();
-      await relay;
-      clearTerminalRelayViewports();
-      bridge.connection = originalConnection;
-      __storeTesting.replaceState(previousState);
-    }
-  });
-
-  test("finds directional neighbors without changing server focus", () => {
-    const layout: PaneLayout = {
-      workspace_id: "w1",
-      tab_id: "t1",
-      zoomed: false,
-      area: { x: 0, y: 0, width: 100, height: 100 },
-      focused_pane_id: "left",
-      panes: [
-        {
-          pane_id: "left",
-          focused: true,
-          rect: { x: 0, y: 0, width: 50, height: 100 },
-        },
-        {
-          pane_id: "right-top",
-          focused: false,
-          rect: { x: 50, y: 0, width: 50, height: 50 },
-        },
-        {
-          pane_id: "right-bottom",
-          focused: false,
-          rect: { x: 50, y: 50, width: 50, height: 50 },
-        },
-      ],
-      splits: [],
-    };
-    expect(adjacentPaneId(layout, "left", "right")).toBe("right-top");
-    expect(adjacentPaneId(layout, "right-bottom", "up")).toBe("right-top");
-    expect(adjacentPaneId(layout, "left", "left")).toBeNull();
-  });
-
-  test("extracts a local view from creation responses", () => {
-    expect(
-      responseViewTarget({
-        workspace: { workspace_id: "w3" },
-        tab: { tab_id: "t3" },
-        root_pane: { pane_id: "p3" },
-      }),
-    ).toEqual({ workspaceId: "w3", tabId: "t3", paneId: "p3" });
-  });
-});
 
 describe("connection-partitioned store state", () => {
   test("keeps the store generation aligned when pausing an already-disconnected bridge", () => {
@@ -1111,7 +847,11 @@ describe("connection-partitioned store state", () => {
       });
       await store.focusTaskNotificationTarget(target);
       expect(store.get().activeConnectionId).toBe("alpha");
-      expect(calls).toEqual(["alpha:pane.get"]);
+      expect(calls).toEqual([
+        "alpha:pane.get",
+        "alpha:workspace.focus",
+        "alpha:tab.focus",
+      ]);
 
       calls.length = 0;
       activeConnectionId = "beta";
@@ -1202,32 +942,7 @@ describe("stabilizeRefreshPatch", () => {
 
   test("keeps the store silent when an idle refresh changes nothing", async () => {
     const originalConnection = bridge.connection;
-    const base = partitionState();
-    const projected = projectClientView(
-      base.workspaces,
-      base.tabs,
-      base.panes,
-      {
-        viewWorkspaceId: "same-workspace",
-        viewTabId: "same-tab",
-        selectedPaneId: "same-pane",
-      },
-    );
-    const snapshot: State = {
-      ...base,
-      ...projected,
-      pendingFocusWorkspaceId: null,
-      recentPaneIds: ["same-pane"],
-      sessionsByConnectionId: {
-        ...base.sessionsByConnectionId,
-        alpha: {
-          ...base.sessionsByConnectionId.alpha,
-          ...projected,
-          pendingFocusWorkspaceId: null,
-          recentPaneIds: ["same-pane"],
-        },
-      },
-    };
+    const snapshot = partitionState();
     bridge.connection = (() => ({
       connectionId: "alpha",
       generation: 10,
@@ -1468,4 +1183,383 @@ describe("worktree removal notices", () => {
       detailTitle: "Worktree removal details",
     });
   });
+});
+
+describe("pending workspace focus settlement", () => {
+  function mockFocusConnection(workspacesFocused: () => unknown[]) {
+    const originalConnection = bridge.connection;
+    const focusDeferreds: Array<{
+      resolve: (value: unknown) => void;
+      promise: Promise<unknown>;
+    }> = [];
+    bridge.connection = ((connectionId = "alpha", generation = 10) => ({
+      connectionId,
+      generation,
+      isCurrent: () => true,
+      call: (async (method: string) => {
+        if (method === "workspace.focus") {
+          const deferred = Promise.withResolvers<unknown>();
+          focusDeferreds.push(deferred);
+          return deferred.promise;
+        }
+        if (method === "workspace.list") {
+          return { workspaces: workspacesFocused() };
+        }
+        if (method === "tab.list") return { tabs: [] };
+        if (method === "pane.list") return { panes: [] };
+        if (method === "pane.layout") return { layout: null };
+        return {};
+      }) as ConnectionClient["call"],
+    })) as typeof bridge.connection;
+    return {
+      focusDeferreds,
+      async resolveFocus(index: number, value: unknown = {}) {
+        while (!focusDeferreds[index]) {
+          await new Promise((resolve) => setTimeout(resolve, 0));
+        }
+        focusDeferreds[index].resolve(value);
+      },
+      restore() {
+        bridge.connection = originalConnection;
+      },
+    };
+  }
+
+  function unfocusedWorkspaces(): unknown[] {
+    return structuredClone(partitionState().workspaces);
+  }
+
+  test("releases a settled pending focus that a fresh observation still misses", async () => {
+    const mock = mockFocusConnection(unfocusedWorkspaces);
+    try {
+      __storeTesting.replaceState(partitionState());
+      const action = store.focusWorkspace("other-workspace");
+      await mock.resolveFocus(0);
+      await action;
+      await store.refresh();
+      await store.refresh();
+      expect(store.get().pendingFocusWorkspaceId).toBeNull();
+      expect(store.get().pendingFocusWorkspaceSettledAt).toBeNull();
+    } finally {
+      mock.restore();
+      __storeTesting.replaceState(partitionState());
+    }
+  });
+
+  test("keeps an unsettled pending focus across mid-flight refreshes", async () => {
+    const mock = mockFocusConnection(unfocusedWorkspaces);
+    try {
+      __storeTesting.replaceState(partitionState());
+      const action = store.focusWorkspace("other-workspace");
+      await store.refresh();
+      expect(store.get().pendingFocusWorkspaceId).toBe("other-workspace");
+      expect(store.get().pendingFocusWorkspaceSettledAt).toBeNull();
+      await mock.resolveFocus(0);
+      await action;
+      await store.refresh();
+      await store.refresh();
+      expect(store.get().pendingFocusWorkspaceId).toBeNull();
+    } finally {
+      mock.restore();
+      __storeTesting.replaceState(partitionState());
+    }
+  });
+
+  test("never lets a first same-id attempt settle or clear the second", async () => {
+    const mock = mockFocusConnection(unfocusedWorkspaces);
+    try {
+      __storeTesting.replaceState(partitionState());
+      const first = store.focusWorkspace("other-workspace");
+      const second = store.focusWorkspace("other-workspace");
+      await mock.resolveFocus(0);
+      await first;
+      expect(store.get().pendingFocusWorkspaceId).toBe("other-workspace");
+      expect(store.get().pendingFocusWorkspaceSettledAt).toBeNull();
+      await store.refresh();
+      expect(store.get().pendingFocusWorkspaceId).toBe("other-workspace");
+      await mock.resolveFocus(1);
+      await second;
+      await store.refresh();
+      await store.refresh();
+      expect(store.get().pendingFocusWorkspaceId).toBeNull();
+    } finally {
+      mock.restore();
+      __storeTesting.replaceState(partitionState());
+    }
+  });
+
+  test("clears the pending focus as soon as the workspace is observed focused", async () => {
+    const mock = mockFocusConnection(() => [
+      { ...partitionState().workspaces[0], focused: false },
+      {
+        ...partitionState().workspaces[0],
+        workspace_id: "other-workspace",
+        focused: true,
+      },
+    ]);
+    try {
+      __storeTesting.replaceState(partitionState());
+      const action = store.focusWorkspace("other-workspace");
+      await mock.resolveFocus(0);
+      await action;
+      await store.refresh();
+      await store.refresh();
+      expect(store.get().pendingFocusWorkspaceId).toBeNull();
+    } finally {
+      mock.restore();
+      __storeTesting.replaceState(partitionState());
+    }
+  });
+
+  for (const observedFocused of [false, true]) {
+    for (const sameWorkspace of [false, true]) {
+      test(`layout publication preserves a newer ${sameWorkspace ? "same-id" : "different-id"} focus after a ${observedFocused ? "positive" : "negative"} observation`, async () => {
+        const originalConnection = bridge.connection;
+        const layoutEntered = Promise.withResolvers<void>();
+        const layoutResult = Promise.withResolvers<unknown>();
+        const focusResult = Promise.withResolvers<unknown>();
+        const snapshot = partitionState();
+        const oldTarget = observedFocused ? "same-workspace" : "old-target";
+        const newTarget = sameWorkspace ? oldTarget : "new-target";
+        const workspaces = snapshot.workspaces.map((workspace) => ({
+          ...workspace,
+          label: "fresh observation",
+        }));
+        let focus: Promise<unknown> | undefined;
+        let refresh: Promise<unknown> | undefined;
+        bridge.connection = ((connectionId = "alpha", generation = 10) => ({
+          connectionId,
+          generation,
+          isCurrent: () => true,
+          call: (async (method: string) => {
+            if (method === "workspace.list") return { workspaces };
+            if (method === "tab.list") return { tabs: snapshot.tabs };
+            if (method === "pane.list") return { panes: snapshot.panes };
+            if (method === "pane.layout") {
+              layoutEntered.resolve();
+              return layoutResult.promise;
+            }
+            if (method === "workspace.focus") return focusResult.promise;
+            return {};
+          }) as ConnectionClient["call"],
+        })) as typeof bridge.connection;
+        try {
+          __storeTesting.replaceState({
+            ...snapshot,
+            pendingFocusWorkspaceId: oldTarget,
+            pendingFocusWorkspaceSeq: -1,
+            pendingFocusWorkspaceSettledAt: 1,
+          });
+          refresh = store.refresh();
+          await layoutEntered.promise;
+          focus = store.focusWorkspace(newTarget);
+          const newSeq = store.get().pendingFocusWorkspaceSeq;
+          expect(newSeq).not.toBe(-1);
+          layoutResult.resolve({ layout: null });
+          await refresh;
+          expect(store.get().pendingFocusWorkspaceId).toBe(newTarget);
+          expect(store.get().pendingFocusWorkspaceSeq).toBe(newSeq);
+          expect(store.get().pendingFocusWorkspaceSettledAt).toBeNull();
+          expect(store.get().workspaces).toEqual(workspaces);
+        } finally {
+          layoutResult.resolve({ layout: null });
+          focusResult.resolve({});
+          await refresh;
+          await focus;
+          await store.refresh();
+          bridge.connection = originalConnection;
+          __storeTesting.replaceState(partitionState());
+        }
+      });
+    }
+  }
+
+  test("restores pending focus deterministically and preserves settled tokens", () => {
+    for (const settledAt of [null, 0, 123]) {
+      const withPending: State = {
+        ...partitionState(),
+        lastRefresh: 42,
+        pendingFocusWorkspaceId: "alpha-pending",
+        pendingFocusWorkspaceSeq: 7,
+        pendingFocusWorkspaceSettledAt: settledAt,
+      };
+      const beta = activateConnectionState(withPending, "beta", 11);
+      const restored = activateConnectionState(beta, "alpha", 12);
+      expect(restored.pendingFocusWorkspaceId).toBe("alpha-pending");
+      expect(restored.pendingFocusWorkspaceSettledAt).toBe(settledAt ?? 42);
+      expect(activateConnectionState(beta, "alpha", 12)).toEqual(restored);
+    }
+  });
+
+  test("clears a failed focus attempt even when the lease is already dead", async () => {
+    const originalConnection = bridge.connection;
+    bridge.connection = ((connectionId = "alpha", generation = 10) => ({
+      connectionId,
+      generation,
+      isCurrent: () => false,
+      call: (async (method: string) => {
+        if (method === "workspace.focus") {
+          throw new Error("socket gone");
+        }
+        return {};
+      }) as ConnectionClient["call"],
+    })) as typeof bridge.connection;
+    try {
+      __storeTesting.replaceState(partitionState());
+      await store.focusWorkspace("other-workspace");
+      expect(store.get().pendingFocusWorkspaceId).toBeNull();
+      expect(store.get().pendingFocusWorkspaceSettledAt).toBeNull();
+    } finally {
+      bridge.connection = originalConnection;
+      __storeTesting.replaceState(partitionState());
+    }
+  });
+
+  test("releases a stamped marker when the connection is paused", async () => {
+    const originalConnection = bridge.connection;
+    bridge.connection = ((connectionId = "alpha", generation = 10) => ({
+      connectionId,
+      generation,
+      isCurrent: () => true,
+      call: (async () => ({})) as ConnectionClient["call"],
+    })) as typeof bridge.connection;
+    try {
+      __storeTesting.replaceState({
+        ...partitionState(),
+        connectionPaused: true,
+      });
+      await store.focusWorkspace("other-workspace");
+      expect(store.get().pendingFocusWorkspaceId).toBeNull();
+      expect(store.get().pendingFocusWorkspaceSettledAt).toBeNull();
+    } finally {
+      bridge.connection = originalConnection;
+      __storeTesting.replaceState(partitionState());
+    }
+  });
+
+  test("marks a completed focus attempt settled even when the lease is dead", async () => {
+    const originalConnection = bridge.connection;
+    bridge.connection = ((connectionId = "alpha", generation = 10) => ({
+      connectionId,
+      generation,
+      isCurrent: () => false,
+      call: (async () => ({})) as ConnectionClient["call"],
+    })) as typeof bridge.connection;
+    try {
+      __storeTesting.replaceState(partitionState());
+      await store.focusWorkspace("other-workspace");
+      expect(store.get().pendingFocusWorkspaceId).toBe("other-workspace");
+      expect(store.get().pendingFocusWorkspaceSettledAt).not.toBeNull();
+    } finally {
+      bridge.connection = originalConnection;
+      __storeTesting.replaceState(partitionState());
+    }
+  });
+});
+
+describe("basic Herdr 0.9 compatibility", () => {
+  test("safe workspace close reports grouped-close refusal without closing the group", async () => {
+    const previousState = store.get();
+    const originalConnection = bridge.connection;
+    const calls: unknown[] = [];
+    bridge.connection = (() => ({
+      connectionId: "alpha",
+      generation: 10,
+      isCurrent: () => true,
+      call: (async (method, params) => {
+        calls.push({ method, params });
+        throw new Error(
+          "workspace_group_close_required: workspace has linked worktrees",
+        );
+      }) as ConnectionClient["call"],
+    })) as typeof bridge.connection;
+    try {
+      __storeTesting.replaceState(partitionState());
+      await store.closeWorkspace("workspace_1");
+      expect(calls).toEqual([
+        { method: "workspace.close", params: { workspace_id: "workspace_1" } },
+      ]);
+      expect(store.get().notice).toMatchObject({
+        kind: "error",
+        message: "Workspace belongs to a group",
+        detail: expect.stringContaining("Herdr CLI with --group"),
+      });
+      expect(store.get().workspaces).toEqual(partitionState().workspaces);
+    } finally {
+      bridge.connection = originalConnection;
+      __storeTesting.replaceState(previousState);
+    }
+  });
+
+  for (const event of ["layout_updated", "session.resync_required"]) {
+    test(`${event} uses generic refresh and queues reconciliation during an in-flight snapshot`, async () => {
+      const previousState = store.get();
+      const originalConnection = bridge.connection;
+      const snapshot = partitionState();
+      const refreshedWorkspaces = snapshot.workspaces.map((workspace) => ({
+        ...workspace,
+        label: "after-layout-event",
+      }));
+      let lists = 0;
+      let published!: () => void;
+      let publicationTimer!: ReturnType<typeof setTimeout>;
+      const publication = new Promise<void>((resolve, reject) => {
+        published = resolve;
+        publicationTimer = setTimeout(
+          () => reject(new Error("follow-up snapshot was not published")),
+          2_000,
+        );
+      });
+      const unsubscribe = store.subscribe(() => {
+        if (store.get().workspaces[0]?.label === "after-layout-event") {
+          published();
+        }
+      });
+      let release!: () => void;
+      const gate = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+      bridge.connection = (() => ({
+        connectionId: "alpha",
+        generation: 10,
+        isCurrent: () => true,
+        call: (async (method) => {
+          if (method === "workspace.list") {
+            lists += 1;
+            if (lists === 1) await gate;
+            return {
+              workspaces:
+                lists === 1 ? snapshot.workspaces : refreshedWorkspaces,
+            };
+          }
+          if (method === "tab.list") return { tabs: snapshot.tabs };
+          if (method === "pane.list") return { panes: snapshot.panes };
+          if (method === "pane.layout") return { layout: null };
+          return {};
+        }) as ConnectionClient["call"],
+      })) as typeof bridge.connection;
+      try {
+        __storeTesting.replaceState(snapshot);
+        const refreshing = store.refresh();
+        __storeTesting.handleHerdrEvent({
+          event,
+          connection_id: "alpha",
+          connection_generation: 1,
+          data: {},
+        });
+        await Bun.sleep(100); // The production 80ms event debounce fires while busy.
+        expect(lists).toBe(1);
+        release();
+        await refreshing;
+        await publication;
+        expect(lists).toBe(2); // No five-second metadata poll needed.
+      } finally {
+        clearTimeout(publicationTimer);
+        unsubscribe();
+        release();
+        bridge.connection = originalConnection;
+        __storeTesting.replaceState(previousState);
+      }
+    });
+  }
 });

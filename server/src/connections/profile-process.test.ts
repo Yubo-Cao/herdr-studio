@@ -39,6 +39,12 @@ async function listen(server: net.Server, path: string): Promise<void> {
 async function fakeHerdr(
   root: string,
   id: string,
+  protocol: unknown = 14,
+  welcomeProtocol?: number,
+  respond?: (request: {
+    method: string;
+    params?: Record<string, unknown>;
+  }) => unknown,
 ): Promise<LocalConnectionProfile> {
   const controlPath = join(root, `${id}-control.sock`);
   const renderPath = join(root, `${id}-render.sock`);
@@ -47,7 +53,7 @@ async function fakeHerdr(
       sockets.add(socket);
       socket.on("close", () => sockets.delete(socket));
       let input = "";
-      socket.on("data", (chunk) => {
+      socket.on("data", async (chunk) => {
         input += chunk.toString();
         const newline = input.indexOf("\n");
         if (newline < 0) return;
@@ -56,8 +62,9 @@ async function fakeHerdr(
         calls.push(request.method);
         controlCalls.set(id, calls);
         const result =
-          request.method === "ping"
-            ? { version: `fake-${id}`, protocol: 14 }
+          (await respond?.(request)) ??
+          (request.method === "ping"
+            ? { version: `fake-${id}`, protocol }
             : request.method === "workspace.list"
               ? {
                   workspaces: [
@@ -67,7 +74,7 @@ async function fakeHerdr(
                     },
                   ],
                 }
-              : {};
+              : {});
         socket.write(`${JSON.stringify({ id: request.id, result })}\n`);
         if (request.method !== "events.subscribe") socket.end();
       });
@@ -89,7 +96,7 @@ async function fakeHerdr(
         const protocol = reader.varint();
         const writer = new BinWriter();
         writer.variant(0);
-        writer.varint(protocol);
+        writer.varint(welcomeProtocol ?? protocol);
         writer.varint(1);
         writer.option<string>(undefined, (value) => writer.string(value));
         socket.write(encodeFrame(writer.toBuffer()));
@@ -125,7 +132,7 @@ function bridgeListeningPort(stream: ReadableStream<Uint8Array>) {
         if (done) break;
         output += decoder.decode(value, { stream: true });
         const match = output.match(
-          /\[bridge\] listening on http:\/\/.*:(\d+)\s+\(ws \/ws\)/,
+          /\bINFO bridge listening\b[^\r\n]*\burl=http:\/\/[^\s]+:(\d+)\b/,
         );
         if (match && !settled) {
           settled = true;
@@ -366,9 +373,11 @@ test("production dispatcher isolates two local profiles and profile CRUD", async
 
     // Explicitly retain old-client compatibility for both RPC and HTTP while
     // proving generation-bound current requests reach only the replacement.
-    expect(
-      (await browserA.rpc("workspace.list", {}, "alpha")).workspaces[0].name,
-    ).toBe("from-beta");
+    const legacySnapshot = await browserA.rpc("workspace.list", {}, "alpha");
+    expect(legacySnapshot.workspaces[0].name).toBe("from-beta");
+    expect(legacySnapshot.navigation_mode).toBe("shared");
+    // The first snapshot also resolves the replacement terminal backend.
+    const beforeLegacyHttp = betaPingCalls();
     const legacyHttp = await fetch(
       `http://127.0.0.1:${port}/api/connections/alpha/herdr-info`,
     );
@@ -377,7 +386,7 @@ test("production dispatcher isolates two local profiles and profile CRUD", async
       String(newAlphaGeneration),
     );
     expect(await legacyHttp.json()).toMatchObject({ version: "fake-beta" });
-    expect(betaPingCalls()).toBe(beforeStaleHttp + 1);
+    expect(betaPingCalls()).toBe(beforeLegacyHttp + 1);
     const currentAlpha = await browserB.raw(
       "workspace.list",
       {},
@@ -416,3 +425,221 @@ test("production dispatcher isolates two local profiles and profile CRUD", async
     await child.exited;
   }
 }, 20_000);
+
+for (const { protocol, welcomeProtocol, accepted } of [
+  { protocol: 20, accepted: true },
+  { protocol: 22, accepted: true },
+  { protocol: 21, accepted: false },
+  { protocol: 23, accepted: false },
+  { protocol: "22", accepted: false },
+  { protocol: 22, welcomeProtocol: 23, accepted: false },
+]) {
+  test(`default local startup validates protocol ${JSON.stringify(protocol)} / Welcome ${welcomeProtocol ?? "same"} before background RPCs`, async () => {
+    if (process.platform === "win32") return;
+    const root = join(tmpdir(), `h090-default-${crypto.randomUUID()}`);
+    roots.push(root);
+    mkdirSync(root, { recursive: true, mode: 0o700 });
+    const profile = await fakeHerdr(root, "test", protocol, welcomeProtocol);
+    const env: Record<string, string | undefined> = {
+      ...process.env,
+      HOST: "127.0.0.1",
+      PORT: "0",
+      HERDR_GUI_CONNECTIONS_PATH: join(root, "connections.json"),
+      HERDR_SOCKET_PATH: profile.control_socket_path,
+      HERDR_CLIENT_SOCKET_PATH: profile.client_socket_path,
+    };
+    delete env.HERDR_SSH_HOST;
+    delete env.HERDR_SESSION;
+    const child = Bun.spawn(["bun", "server/src/index.ts"], {
+      cwd: join(import.meta.dir, "../../.."),
+      env,
+      stdout: "pipe",
+      stderr: "ignore",
+    });
+    let socket: WebSocket | undefined;
+    try {
+      const port = await bridgeListeningPort(child.stdout);
+      const browser = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+      socket = browser;
+      await new Promise<void>((resolve, reject) => {
+        browser.onopen = () => resolve();
+        browser.onerror = () => reject(new Error("websocket open failed"));
+      });
+      let timer!: ReturnType<typeof setTimeout>;
+      const reply = new Promise<any>((resolve, reject) => {
+        timer = setTimeout(
+          () => reject(new Error("connect RPC timed out")),
+          5_000,
+        );
+        browser.onmessage = (event) => {
+          const message = JSON.parse(String(event.data));
+          if (message.id === "connect-default") resolve(message);
+        };
+      });
+      socket.send(
+        JSON.stringify({
+          id: "connect-default",
+          method: "connections.connect",
+          params: { id: "legacy-default" },
+        }),
+      );
+      const response = await reply.finally(() => clearTimeout(timer));
+      const calls = controlCalls.get("test") ?? [];
+      expect(calls[0]).toBe("ping");
+      if (accepted) {
+        expect(response.error).toBeUndefined();
+        expect(response.result.state).toBe("ready");
+      } else {
+        expect(response.error?.message).toContain("protocol");
+        expect(calls.filter((method) => method !== "ping")).toEqual([]);
+      }
+    } finally {
+      socket?.close();
+      child.kill("SIGTERM");
+      await child.exited;
+    }
+  }, 10_000);
+}
+
+test("production routing bootstraps only a verified empty session and serializes competing browsers", async () => {
+  if (process.platform === "win32") return;
+  const root = join(tmpdir(), `h110-bootstrap-${crypto.randomUUID()}`);
+  roots.push(root);
+  mkdirSync(root, { recursive: true, mode: 0o700 });
+  let valid = false;
+  let workspaces: Array<{ workspace_id: string }> = [];
+  const mutations: Record<string, unknown>[] = [];
+  const profile = await fakeHerdr(
+    root,
+    "empty",
+    22,
+    undefined,
+    async (request) => {
+      if (request.method === "workspace.list")
+        return valid
+          ? { type: "workspace_list", workspaces }
+          : { workspaces: [] };
+      if (request.method === "workspace.create") {
+        mutations.push(request.params ?? {});
+        await Bun.sleep(20);
+        workspaces = [{ workspace_id: "w1" }];
+        return {
+          type: "workspace_created",
+          workspace: workspaces[0],
+          tab: { workspace_id: "w1", tab_id: "w1:t1" },
+          root_pane: { workspace_id: "w1", tab_id: "w1:t1", pane_id: "w1:p1" },
+        };
+      }
+    },
+  );
+  const registryPath = join(root, "connections.json");
+  writeFileSync(
+    registryPath,
+    JSON.stringify({
+      version: 1,
+      default_connection_id: "empty",
+      profiles: [profile],
+    }),
+    { mode: 0o600 },
+  );
+  const env: Record<string, string | undefined> = {
+    ...process.env,
+    HOST: "127.0.0.1",
+    PORT: "0",
+    HERDR_GUI_CONNECTIONS_PATH: registryPath,
+  };
+  for (const key of [
+    "HERDR_SOCKET_PATH",
+    "HERDR_CLIENT_SOCKET_PATH",
+    "HERDR_SSH_HOST",
+    "HERDR_SESSION",
+  ])
+    delete env[key];
+  const child = Bun.spawn([process.execPath, "server/src/index.ts"], {
+    cwd: join(import.meta.dir, "../../.."),
+    env,
+    stdout: "pipe",
+    stderr: "ignore",
+  });
+  const browsers: WebSocket[] = [];
+  try {
+    const port = await bridgeListeningPort(child.stdout);
+    await waitForHealth(port);
+    for (let i = 0; i < 2; i++) {
+      const ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+      browsers.push(ws);
+      await new Promise<void>((resolve, reject) => {
+        ws.onopen = () => resolve();
+        ws.onerror = () => reject(new Error("socket failed"));
+      });
+    }
+    let seq = 0;
+    const rpc = (
+      ws: WebSocket,
+      params: Record<string, unknown>,
+      generation?: number,
+    ) =>
+      new Promise<any>((resolve, reject) => {
+        const id = `bootstrap-${++seq}`;
+        const timer = setTimeout(() => {
+          ws.removeEventListener("message", receive);
+          reject(new Error("bootstrap RPC timed out"));
+        }, 4000);
+        const receive = (event: MessageEvent) => {
+          const result = JSON.parse(String(event.data));
+          if (result.id !== id) return;
+          clearTimeout(timer);
+          ws.removeEventListener("message", receive);
+          resolve(result);
+        };
+        ws.addEventListener("message", receive);
+        ws.send(
+          JSON.stringify({
+            id,
+            method: "workspace.create",
+            connection_id: "empty",
+            ...(generation === undefined
+              ? {}
+              : { connection_generation: generation }),
+            params,
+          }),
+        );
+      });
+    expect(
+      (await rpc(browsers[0], { browser_source: null })).error,
+    ).toBeDefined();
+    expect(mutations).toHaveLength(0);
+    valid = true;
+    const results = await Promise.all(
+      browsers.map((ws) => rpc(ws, { browser_source: null, focus: true })),
+    );
+    expect(
+      results.filter((result) => result.result?.type === "workspace_created"),
+    ).toHaveLength(1);
+    expect(results.filter((result) => result.error)).toHaveLength(1);
+    expect(mutations).toEqual([{ focus: false }]);
+    expect(
+      (await rpc(browsers[0], { browser_source: null, cwd: "/wrong" })).error,
+    ).toBeDefined();
+    workspaces = [];
+    expect(
+      (
+        await rpc(browsers[0], {
+          browser_source: null,
+          cwd: "/explicit",
+          focus: true,
+        })
+      ).result.type,
+    ).toBe("workspace_created");
+    expect(mutations[1]).toEqual({ cwd: "/explicit", focus: false });
+    workspaces = [];
+    expect(
+      (await rpc(browsers[0], { browser_source: null }, 99999)).error,
+    ).toBeDefined();
+    expect(mutations).toHaveLength(2);
+  } finally {
+    for (const ws of browsers) ws.close();
+    child.kill("SIGTERM");
+    await child.exited;
+  }
+}, 15000);

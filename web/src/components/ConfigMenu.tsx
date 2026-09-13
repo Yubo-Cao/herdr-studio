@@ -1,18 +1,21 @@
 import type { ReactNode } from "react";
 import { useEffect, useRef, useState } from "react";
 import {
+  ALargeSmall,
   Bell,
   ChevronDown,
   ChevronRight,
   Download,
   GitBranch,
   Keyboard,
+  Minus,
   Moon,
-  MonitorCog,
   Palette,
+  Plus,
   RefreshCw,
   ScrollText,
   Server,
+  SquareTerminal,
   Sun,
   SunMoon,
   Type as TypeIcon,
@@ -23,8 +26,13 @@ import type { Theme } from "../App";
 import {
   ACCENT_OPTIONS,
   type AccentColor,
+  clampUiScale,
   normalizeTerminalFontFamily,
   TERMINAL_FONT_OPTIONS,
+  UI_SCALE_DEFAULT,
+  UI_SCALE_MAX,
+  UI_SCALE_MIN,
+  UI_SCALE_STEP,
 } from "../appearance";
 import { connectionHttpPath } from "../connectionHttp";
 import { shallowEqual, store, useStoreSelector } from "../store";
@@ -34,10 +42,16 @@ import {
   type MobileTerminalShortcutRows,
   type MobileTerminalSideShortcuts,
 } from "../mobileTerminalShortcuts";
+import {
+  type CustomTerminalTheme,
+  resolveTerminalThemeDefinition,
+  type TerminalThemeSelection,
+} from "../terminalThemes";
 import { AutoSyncRepositoriesDialog } from "./AutoSyncRepositoriesDialog";
 import { ChangelogDialog } from "./ChangelogDialog";
 import { ShortcutLookupDialog } from "./ShortcutLookupDialog";
 import { MobileTerminalShortcutsDialog } from "./MobileTerminalShortcutsDialog";
+import { TerminalThemeDialog } from "./TerminalThemeDialog";
 
 const APP_VERSION = packageJson.version;
 export const CONFIG_MENU_ID = "herdr-config-menu";
@@ -60,32 +74,36 @@ type HerdrInfo = {
 type ConfigMenuProps = {
   theme: Theme;
   accentColor: AccentColor;
+  uiScale: number;
   terminalFontFamily: string;
   mobileTerminalShortcuts: MobileTerminalShortcutRows;
   mobileTerminalSideShortcuts: MobileTerminalSideShortcuts;
+  terminalThemeSelection: TerminalThemeSelection;
+  customTerminalThemes: CustomTerminalTheme[];
   onThemeChange: (theme: Theme) => void;
   onAccentColorChange: (accentColor: AccentColor) => void;
+  onUiScaleChange: (scale: number) => void;
   onTerminalFontFamilyChange: (fontFamily: string) => void;
   onMobileTerminalShortcutsChange: (rows: MobileTerminalShortcutRows) => void;
   onMobileTerminalSideShortcutsChange: (
     shortcuts: MobileTerminalSideShortcuts,
   ) => void;
-};
-
-type TerminalFontSelectProps = {
-  value: string;
-  onChange: (value: string) => void;
+  onTerminalThemeSelectionChange: (selection: TerminalThemeSelection) => void;
+  onCustomTerminalThemesChange: (themes: CustomTerminalTheme[]) => void;
 };
 
 export function TerminalFontSelect({
   value,
   onChange,
-}: TerminalFontSelectProps) {
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
   return (
     <select
       id="terminal-font-family"
-      value={normalizeTerminalFontFamily(value)}
       aria-label="Terminal font"
+      value={normalizeTerminalFontFamily(value)}
       onChange={(event) => onChange(event.target.value)}
     >
       {TERMINAL_FONT_OPTIONS.map((option) => (
@@ -100,14 +118,20 @@ export function TerminalFontSelect({
 export function ConfigMenu({
   theme,
   accentColor,
+  uiScale,
   terminalFontFamily,
   mobileTerminalShortcuts,
   mobileTerminalSideShortcuts,
+  terminalThemeSelection,
+  customTerminalThemes,
   onThemeChange,
   onAccentColorChange,
+  onUiScaleChange,
   onTerminalFontFamilyChange,
   onMobileTerminalShortcutsChange,
   onMobileTerminalSideShortcutsChange,
+  onTerminalThemeSelectionChange,
+  onCustomTerminalThemesChange,
 }: ConfigMenuProps) {
   const s = useStoreSelector(
     (state) => ({
@@ -138,6 +162,7 @@ export function ConfigMenu({
   const [changelogOpen, setChangelogOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [mobileShortcutsOpen, setMobileShortcutsOpen] = useState(false);
+  const [terminalThemesOpen, setTerminalThemesOpen] = useState(false);
   const [autoSyncOpen, setAutoSyncOpen] = useState(false);
   const [connectionDetailsOpen, setConnectionDetailsOpen] = useState(false);
   const [health, setHealth] = useState<HealthInfo | null>(null);
@@ -244,9 +269,7 @@ export function ConfigMenu({
               <div className="config-title">Appearance</div>
               <div className="config-preference-row">
                 <span className="config-item-icon">
-                  {theme === "session" ? (
-                    <MonitorCog size={15} />
-                  ) : theme === "system" ? (
+                  {theme === "system" ? (
                     <SunMoon size={15} />
                   ) : theme === "light" ? (
                     <Sun size={15} />
@@ -256,18 +279,9 @@ export function ConfigMenu({
                 </span>
                 <div className="config-item-copy">
                   <strong>Theme</strong>
-                  <span>Primary UI and terminal appearance</span>
+                  <span>Application appearance</span>
                 </div>
                 <div className="config-theme-control" aria-label="Theme">
-                  <button
-                    type="button"
-                    aria-label="Follow Herdr session theme"
-                    aria-pressed={theme === "session"}
-                    className={theme === "session" ? "is-active" : ""}
-                    onClick={() => onThemeChange("session")}
-                  >
-                    <MonitorCog size={14} />
-                  </button>
                   <button
                     type="button"
                     aria-label="Use light theme"
@@ -358,6 +372,27 @@ export function ConfigMenu({
                   ))}
                 </div>
               </div>
+              <ConfigMenuItem
+                icon={<SquareTerminal size={15} />}
+                label="Terminal theme"
+                description={`Dark: ${
+                  resolveTerminalThemeDefinition(
+                    "dark",
+                    terminalThemeSelection,
+                    customTerminalThemes,
+                  ).name
+                } · Light: ${
+                  resolveTerminalThemeDefinition(
+                    "light",
+                    terminalThemeSelection,
+                    customTerminalThemes,
+                  ).name
+                }`}
+                onClick={() => {
+                  setOpen(false);
+                  setTerminalThemesOpen(true);
+                }}
+              />
               <div className="config-preference-row config-font-row">
                 <span className="config-item-icon">
                   <TypeIcon size={15} />
@@ -367,15 +402,58 @@ export function ConfigMenu({
                   htmlFor="terminal-font-family"
                 >
                   <strong>Terminal font</strong>
-                  <span>
-                    Choose a preset; unavailable fonts use the default
-                  </span>
+                  <span>Uses locally installed fonts</span>
                 </label>
                 <div className="config-font-control">
                   <TerminalFontSelect
                     value={terminalFontFamily}
                     onChange={onTerminalFontFamilyChange}
                   />
+                </div>
+              </div>
+              <div className="config-preference-row">
+                <span className="config-item-icon">
+                  <ALargeSmall size={15} />
+                </span>
+                <div className="config-item-copy">
+                  <strong>Text size</strong>
+                  <span>Scale the interface, handy on mobile</span>
+                </div>
+                <div
+                  className="config-scale-control"
+                  role="group"
+                  aria-label="Text size"
+                >
+                  <button
+                    type="button"
+                    aria-label="Decrease text size"
+                    disabled={uiScale <= UI_SCALE_MIN}
+                    onClick={() =>
+                      onUiScaleChange(clampUiScale(uiScale - UI_SCALE_STEP))
+                    }
+                  >
+                    <Minus size={14} />
+                  </button>
+                  <button
+                    type="button"
+                    className="config-scale-value"
+                    aria-label={`Reset text size, currently ${uiScale}%`}
+                    title="Reset to 100%"
+                    disabled={uiScale === UI_SCALE_DEFAULT}
+                    onClick={() => onUiScaleChange(UI_SCALE_DEFAULT)}
+                  >
+                    {uiScale}%
+                  </button>
+                  <button
+                    type="button"
+                    aria-label="Increase text size"
+                    disabled={uiScale >= UI_SCALE_MAX}
+                    onClick={() =>
+                      onUiScaleChange(clampUiScale(uiScale + UI_SCALE_STEP))
+                    }
+                  >
+                    <Plus size={14} />
+                  </button>
                 </div>
               </div>
             </div>
@@ -458,7 +536,7 @@ export function ConfigMenu({
               />
             </div>
 
-            <div className="config-section">
+            <div className="config-section config-section-tiles-3">
               <div className="config-title">Help & updates</div>
               <ConfigMenuItem
                 icon={<ScrollText size={15} />}
@@ -473,6 +551,7 @@ export function ConfigMenu({
                 icon={<Keyboard size={15} />}
                 label="Keyboard shortcuts"
                 description="View shortcut lookup"
+                className="config-menu-item-desktop-only"
                 onClick={() => {
                   setOpen(false);
                   setShortcutsOpen(true);
@@ -576,6 +655,14 @@ export function ConfigMenu({
         onSideChange={onMobileTerminalSideShortcutsChange}
         onClose={() => setMobileShortcutsOpen(false)}
       />
+      <TerminalThemeDialog
+        open={terminalThemesOpen}
+        selection={terminalThemeSelection}
+        customThemes={customTerminalThemes}
+        onSelectionChange={onTerminalThemeSelectionChange}
+        onCustomThemesChange={onCustomTerminalThemesChange}
+        onClose={() => setTerminalThemesOpen(false)}
+      />
       <AutoSyncRepositoriesDialog
         open={autoSyncOpen}
         onClose={() => setAutoSyncOpen(false)}
@@ -591,6 +678,7 @@ function ConfigMenuItem({
   onClick,
   disabled = false,
   primary = false,
+  className,
 }: {
   icon: ReactNode;
   label: string;
@@ -598,11 +686,12 @@ function ConfigMenuItem({
   onClick: () => void;
   disabled?: boolean;
   primary?: boolean;
+  className?: string;
 }) {
   return (
     <button
       type="button"
-      className={`config-menu-item ${primary ? "is-primary" : ""}`}
+      className={`config-menu-item${primary ? " is-primary" : ""}${className ? ` ${className}` : ""}`}
       onClick={onClick}
       disabled={disabled}
     >

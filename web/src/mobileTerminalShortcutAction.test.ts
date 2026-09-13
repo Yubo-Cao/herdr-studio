@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { mobileTerminalShortcutExecution } from "./mobileTerminalShortcutAction";
+import { terminalPageScroll } from "./terminalScroll";
 
 describe("mobile terminal shortcut execution", () => {
   test("sends ordinary configured keys as terminal input", () => {
@@ -13,10 +14,18 @@ describe("mobile terminal shortcut execution", () => {
     });
   });
 
-  test("routes the paste action to the browser clipboard", () => {
-    expect(mobileTerminalShortcutExecution("paste")).toEqual({
-      type: "paste",
-    });
+  test("mobile half-page actions carry explicit history intent like keyboard shortcuts", () => {
+    for (const action of ["alt-page-up", "alt-page-down"] as const) {
+      const execution = mobileTerminalShortcutExecution(action);
+      if (execution?.type !== "scroll") throw new Error("expected scroll");
+      expect(
+        terminalPageScroll(execution.direction, 30, execution.amount),
+      ).toEqual({
+        direction: execution.direction,
+        lines: 14,
+        source: "history",
+      });
+    }
   });
 
   test("routes page actions to full or half scrollback", () => {

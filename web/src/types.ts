@@ -149,6 +149,7 @@ export interface FileExplorerEntry {
   size: number;
   mtime_ms: number;
   hidden: boolean;
+  ignored?: boolean;
 }
 
 export interface FileExplorerList {
@@ -193,6 +194,8 @@ export interface GitDiffEntry {
   additions?: number;
   deletions?: number;
   generated?: boolean;
+  mtime_ms?: number;
+  size?: number;
 }
 
 export interface GitDiffSummary {
@@ -219,6 +222,8 @@ export interface GitDiffFile {
 // Raw list responses
 export interface WorkspaceList {
   type: "workspace_list";
+  /** Studio bridge metadata, absent on older bridges (shared navigation). */
+  navigation_mode?: "browser-local" | "shared";
   workspaces: Workspace[];
 }
 export interface TabList {

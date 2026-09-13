@@ -508,6 +508,7 @@ describe("worktree removal checkout inspection", () => {
     }
   });
 
+  // Shutdown performs several process scans, each allowed up to 10 seconds.
   test("stops a stable process whose cwd is inside the checkout", async () => {
     const root = await mkdtemp(join(tmpdir(), "herdr-gui-process-"));
     const sleeper = Bun.spawn(["sleep", "30"], {
@@ -529,5 +530,5 @@ describe("worktree removal checkout inspection", () => {
       } catch {}
       await rm(root, { recursive: true, force: true });
     }
-  });
+  }, 60_000);
 });

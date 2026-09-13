@@ -32,7 +32,9 @@ import {
 import { MessageDialog } from "./ModalDialogs";
 
 const TERMINAL_COMPOSER_HELP =
-  "Input Composer uses your phone’s native editor for reliable IME, dictation, multiline text, and cursor editing before anything is sent to the terminal. Adding an image opens the system file picker, which takes focus from the composer and may dismiss the keyboard. After you choose an image, its uploaded path is inserted into the draft; tap the text area to reopen the keyboard if needed.";
+  "Draft multiline text with your phone’s native editor before sending it. Adding an image inserts its uploaded path and may dismiss the keyboard; tap the editor to reopen it.";
+const TERMINAL_COMPOSER_SHORTCUTS_OPEN_STORAGE_KEY =
+  "terminalComposerShortcutsOpen";
 
 /**
  * Bottom-docked mobile terminal composer. A plain textarea owns all editing
@@ -43,10 +45,9 @@ const TERMINAL_COMPOSER_HELP =
  * virtual-keyboard resizes never lose text.
  *
  * The configurable mobile shortcut keys live at the top of the dock so the
- * composer is the single mobile control surface. Opening the composer focuses
- * the textarea (caret at the end of any restored draft) so the virtual
- * keyboard is ready immediately; the standalone shortcut panel remains for
- * keys-only interactions.
+ * composer is the single mobile control surface. The textarea only receives
+ * focus when the user taps it, so opening the composer does not unexpectedly
+ * summon the virtual keyboard or hide other mobile controls.
  *
  * Images arrive through clipboard paste or the file picker, upload once, and
  * land in the draft as plain paths at the caret; they reach the terminal only
@@ -56,17 +57,17 @@ export function TerminalComposer({
   draftKey,
   shortcutRows,
   onRunShortcut,
+  shortcutDisabledReason,
   onClose,
-  onTyping,
   onSubmit,
   onUploadImage,
   onError,
 }: {
   draftKey: string;
-  shortcutRows: MobileTerminalShortcut[][];
+  shortcutRows: (MobileTerminalShortcut | null)[][];
   onRunShortcut: (shortcut: MobileTerminalShortcut) => void;
+  shortcutDisabledReason?: (shortcut: MobileTerminalShortcut) => string | null;
   onClose: () => void;
-  onTyping: () => void;
   onSubmit: (text: string, submit: boolean) => Promise<void>;
   onUploadImage: (file: File) => Promise<string>;
   onError: (message: string) => void;
@@ -80,10 +81,15 @@ export function TerminalComposer({
   );
   const [composing, setComposing] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
-  const [shortcutsOpen, setShortcutsOpen] = useState(true);
+  const [shortcutsOpen, setShortcutsOpen] = useState(
+    () =>
+      localStorage.getItem(TERMINAL_COMPOSER_SHORTCUTS_OPEN_STORAGE_KEY) !==
+      "false",
+  );
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const composingRef = useRef(false);
+  const focusSelectionAfterInsertRef = useRef(false);
   const activeDraftKeyRef = useRef(draftKey);
   activeDraftKeyRef.current = draftKey;
 
@@ -105,18 +111,6 @@ export function TerminalComposer({
     return subscribeTerminalComposerUpload(draftKey, setUploadCount);
   }, [draftKey]);
 
-  // Focus on open so the virtual keyboard appears, with the caret parked at
-  // the end of any restored draft. Mount-only: pane switches must not yank
-  // the caret out of an in-progress edit.
-  useEffect(() => {
-    const textarea = textareaRef.current;
-    if (!textarea) return;
-    textarea.focus({ preventScroll: true });
-    const end = textarea.value.length;
-    textarea.setSelectionRange(end, end);
-    writeTerminalComposerSelection(draftKey, end, end);
-  }, []);
-
   // Autosize within the CSS max-height.
   useEffect(() => {
     const textarea = textareaRef.current;
@@ -131,18 +125,16 @@ export function TerminalComposer({
   useEffect(() => {
     const textarea = textareaRef.current;
     const selection = readTerminalComposerSelection(draftKey);
+    const shouldFocus = focusSelectionAfterInsertRef.current;
+    focusSelectionAfterInsertRef.current = false;
     if (!textarea || !selection) return;
-    if (!helpOpen) textarea.focus({ preventScroll: true });
+    if (shouldFocus && !helpOpen) textarea.focus({ preventScroll: true });
     textarea.setSelectionRange(selection.start, selection.end);
   }, [draftKey, helpOpen, text]);
 
-  // No visualViewport lift here: the app shell already lifts its content
-  // above the keyboard with --keyboard-inset-content padding (App.tsx
-  // useVisualViewportCssVars), and the CSS bottom calc adds the small iOS
-  // trim back so the floating form accessory bar clears the action row. A
-  // full second lift would push the composer a keyboard height too high.
+  // No visualViewport lift here: App.tsx owns keyboard geometry and exposes
+  // the measured inset through shared CSS variables.
   const updateText = (textarea: HTMLTextAreaElement) => {
-    onTyping();
     setText(textarea.value);
     writeTerminalComposerDraft(draftKey, textarea.value);
     writeTerminalComposerSelection(
@@ -155,6 +147,7 @@ export function TerminalComposer({
   const insertAtCaret = (targetDraftKey: string, insertion: string) => {
     const textarea =
       activeDraftKeyRef.current === targetDraftKey ? textareaRef.current : null;
+    focusSelectionAfterInsertRef.current = textarea !== null;
     insertIntoTerminalComposerDraft(
       targetDraftKey,
       insertion,
@@ -227,7 +220,9 @@ export function TerminalComposer({
 
   const busy = submissionPending || uploadCount > 0;
   const submitDisabled = !text || busy || composing;
-  const hasShortcuts = shortcutRows.some((row) => row.length > 0);
+  const hasShortcuts = shortcutRows.some((row) =>
+    row.some((shortcut) => shortcut !== null),
+  );
   const shortcutColumns = Math.max(1, ...shortcutRows.map((row) => row.length));
 
   return (
@@ -252,14 +247,28 @@ export function TerminalComposer({
                 className="terminal-composer-shortcut-row"
                 key={`composer-shortcut-row-${rowIndex}`}
               >
-                {row.map((shortcut) => {
+                {row.map((shortcut, slotIndex) => {
+                  if (!shortcut) {
+                    return (
+                      <span
+                        className="terminal-composer-shortcut-spacer"
+                        aria-hidden="true"
+                        key={`composer-shortcut-${rowIndex}-${slotIndex}`}
+                      />
+                    );
+                  }
                   const option = mobileTerminalShortcutOption(shortcut.action);
                   return (
                     <button
                       type="button"
-                      title={option?.label ?? shortcut.label}
                       aria-label={`Send ${option?.label ?? shortcut.label}`}
                       onPointerDown={keepTextareaFocus}
+                      disabled={!!shortcutDisabledReason?.(shortcut)}
+                      title={
+                        shortcutDisabledReason?.(shortcut) ??
+                        option?.label ??
+                        shortcut.label
+                      }
                       onClick={() => onRunShortcut(shortcut)}
                       key={shortcut.id}
                     >
@@ -358,7 +367,14 @@ export function TerminalComposer({
               }
               aria-expanded={shortcutsOpen}
               onPointerDown={keepTextareaFocus}
-              onClick={() => setShortcutsOpen((open) => !open)}
+              onClick={() => {
+                const open = !shortcutsOpen;
+                localStorage.setItem(
+                  TERMINAL_COMPOSER_SHORTCUTS_OPEN_STORAGE_KEY,
+                  String(open),
+                );
+                setShortcutsOpen(open);
+              }}
             >
               <Keyboard size={15} />
             </button>

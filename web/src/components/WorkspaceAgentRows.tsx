@@ -4,7 +4,7 @@ import {
   keyboardContextMenuPoint,
   treeKeyboardAction,
 } from "./treeKeyboard";
-import { store } from "../store";
+import { store, useStoreSelector } from "../store";
 import type { Pane } from "../types";
 import { agentClass, basename, formatMemoryLimit, shortId } from "../utils";
 import { shouldShowAgentStatusLabel } from "./agentSession";
@@ -47,6 +47,7 @@ export function AgentRow({
   workspaceLabel,
   onSelect,
   onOpenMenu,
+  drag,
 }: {
   pane: Pane;
   selected: boolean;
@@ -56,7 +57,24 @@ export function AgentRow({
   workspaceLabel?: string;
   onSelect?: (pane: Pane) => void;
   onOpenMenu: (x: number, y: number) => void;
+  drag?: {
+    isDragging: boolean;
+    dropPosition: "before" | "after" | null;
+    onDragStart: (event: React.DragEvent<HTMLDivElement>) => void;
+    onDragOver: (event: React.DragEvent<HTMLDivElement>) => void;
+    onDrop: (event: React.DragEvent<HTMLDivElement>) => void;
+    onDragEnd: () => void;
+  };
 }) {
+  const tabLabel = useStoreSelector((state) => {
+    const label = state.tabs
+      .find(
+        (tab) =>
+          tab.tab_id === pane.tab_id && tab.workspace_id === pane.workspace_id,
+      )
+      ?.label.trim();
+    return label && !/^(?:Tab )?\d+$/.test(label) ? label : "";
+  });
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressStart = useRef<{ x: number; y: number } | null>(null);
   const longPressTriggered = useRef(false);
@@ -80,13 +98,20 @@ export function AgentRow({
     <div
       className={`agent-row ${nested ? "is-nested" : "is-standalone"} ${
         selected ? "is-selected" : ""
-      } ${pane.focused ? "is-focused" : ""}`}
+      } ${pane.focused ? "is-focused" : ""} ${
+        drag?.isDragging ? "is-dragging" : ""
+      } ${drag?.dropPosition ? `drop-${drag.dropPosition}` : ""}`}
       style={
         nested
           ? { marginLeft: TREE_DEPTH_INDENT + depth * TREE_DEPTH_INDENT }
           : undefined
       }
       role={nested ? "treeitem" : "button"}
+      draggable={!!drag}
+      onDragStart={drag?.onDragStart}
+      onDragOver={drag?.onDragOver}
+      onDrop={drag?.onDrop}
+      onDragEnd={drag?.onDragEnd}
       tabIndex={nested ? (selected ? 0 : -1) : 0}
       aria-level={nested ? depth + 1 : undefined}
       aria-selected={nested ? selected : undefined}
@@ -171,8 +196,8 @@ export function AgentRow({
         e.preventDefault();
         openMenu(e.clientX, e.clientY);
       }}
-      title={[pane.pane_id, pane.cwd].filter(Boolean).join(" · ")}
-      aria-label={`${pane.agent ?? "Agent"} pane, status ${pane.agent_status}`}
+      title={[pane.pane_id, tabLabel, pane.cwd].filter(Boolean).join(" · ")}
+      aria-label={`${pane.agent ?? "Agent"} pane${tabLabel ? `, tab ${tabLabel}` : ""}, status ${pane.agent_status}`}
     >
       <AgentStatusIcon agent={pane.agent} status={pane.agent_status} />
       <div className="agent-info">
@@ -181,6 +206,7 @@ export function AgentRow({
             {nested
               ? (pane.agent ?? "Agent")
               : (workspaceLabel ?? pane.workspace_id)}
+            {tabLabel ? <span className="muted"> · {tabLabel}</span> : null}
             {showPaneId ? (
               <span className="muted"> · {shortId(pane.pane_id)}</span>
             ) : null}

@@ -15,48 +15,22 @@ export const TERMINAL_FONT_STORAGE_KEY = "terminalFontFamily";
 export const DEFAULT_TERMINAL_FONT_FAMILY =
   'SFMono-Regular, Menlo, Monaco, "0xProto Nerd Font Mono", "JetBrainsMonoNL Nerd Font", "MesloLGS NF", "Hack Nerd Font", "FiraCode Nerd Font", Consolas, "Liberation Mono", "Courier New", "Noto Sans Mono CJK SC", "Source Han Mono SC", "Sarasa Mono SC", "Herdr Nerd Symbols", monospace';
 
-export const TERMINAL_FONT_OPTIONS = [
-  { value: "", label: "Default (system)", fontFamily: "" },
-  {
-    value: "jetbrains-mono",
-    label: "JetBrains Mono",
-    fontFamily:
-      '"JetBrains Mono", "JetBrainsMono Nerd Font", "JetBrainsMonoNL Nerd Font"',
-  },
-  {
-    value: "fira-code",
-    label: "Fira Code",
-    fontFamily: '"Fira Code", "FiraCode Nerd Font"',
-  },
-  {
-    value: "cascadia-mono",
-    label: "Cascadia Mono",
-    fontFamily: '"Cascadia Mono", "CaskaydiaMono Nerd Font"',
-  },
-  {
-    value: "iosevka",
-    label: "Iosevka",
-    fontFamily: '"Iosevka Term", Iosevka',
-  },
-  {
-    value: "source-code-pro",
-    label: "Source Code Pro",
-    fontFamily: '"Source Code Pro", "SauceCodePro Nerd Font"',
-  },
-  {
-    value: "ibm-plex-mono",
-    label: "IBM Plex Mono",
-    fontFamily: '"IBM Plex Mono"',
-  },
-  {
-    value: "noto-sans-mono",
-    label: "Noto Sans Mono",
-    fontFamily: '"Noto Sans Mono", "Noto Sans Mono CJK SC"',
-  },
+const TERMINAL_FONT_PRESETS = [
+  ["", "Default (system)", ""],
+  ["jetbrains-mono", "JetBrains Mono", '"JetBrains Mono"'],
+  ["fira-code", "Fira Code", '"Fira Code"'],
+  ["cascadia-mono", "Cascadia Mono", '"Cascadia Mono"'],
+  ["iosevka", "Iosevka", '"Iosevka Term"'],
+  ["source-code-pro", "Source Code Pro", '"Source Code Pro"'],
+  ["ibm-plex-mono", "IBM Plex Mono", '"IBM Plex Mono"'],
+  ["noto-sans-mono", "Noto Sans Mono", '"Noto Sans Mono"'],
 ] as const;
 
-export type TerminalFontPreset =
-  (typeof TERMINAL_FONT_OPTIONS)[number]["value"];
+export const TERMINAL_FONT_OPTIONS = TERMINAL_FONT_PRESETS.map(
+  ([value, label, fontFamily]) => ({ value, label, fontFamily }),
+);
+
+export type TerminalFontPreset = (typeof TERMINAL_FONT_PRESETS)[number][0];
 
 function sanitizeLegacyTerminalFontFamily(value: string | null): string {
   return (value ?? "")
@@ -129,3 +103,27 @@ export function resolveSystemTheme(
 }
 
 export const SYSTEM_THEME_QUERY = "(prefers-color-scheme: light)";
+
+export const UI_SCALE_DEFAULT = 100;
+export const UI_SCALE_MIN = 80;
+export const UI_SCALE_MAX = 150;
+export const UI_SCALE_STEP = 5;
+
+export function clampUiScale(value: number): number {
+  if (!Number.isFinite(value)) return UI_SCALE_DEFAULT;
+  const stepped = Math.round(value / UI_SCALE_STEP) * UI_SCALE_STEP;
+  return Math.min(UI_SCALE_MAX, Math.max(UI_SCALE_MIN, stepped));
+}
+
+export function normalizeUiScale(value: string | null): number {
+  return value === null ? UI_SCALE_DEFAULT : clampUiScale(Number(value));
+}
+
+// The terminal surface cancels page zoom so xterm's mouse coordinates, cell
+// measurements, and IME overlay share CSS pixels. Scale its font explicitly.
+export function terminalFontOptions(compact: boolean, uiScale: number) {
+  return {
+    fontSize: ((compact ? 12 : 13) * uiScale) / 100,
+    lineHeight: compact ? 1.12 : 1.18,
+  };
+}

@@ -1,8 +1,13 @@
+import {
+  assertEndpointCreationSource,
+  createEmptyWorkspaceCreator,
+} from "../bridge/endpoint-creation";
 import type { ServerWebSocket } from "bun";
 import { createAgentSessionHandlers } from "../agent/agent-sessions";
 import { createAgentSessionFileAccess } from "../agent/session-file-access";
 import { HerdrClient } from "../bridge/herdr-client";
 import { createCollaborationService } from "../bridge/collaboration";
+import { assertSupportedHerdrProtocol } from "../bridge/protocol-compat";
 import { createSettingsRpcHandler } from "../bridge/settings-rpc";
 import {
   createSshTunnelManager,
@@ -12,6 +17,11 @@ import {
 import { createTerminalBridge } from "../bridge/terminal-bridge";
 import { createHerdrInfoHandler } from "../http/herdr-info";
 import { createImageUploadHandler } from "../http/image-upload";
+import {
+  createRecoveryReporter,
+  type Logger,
+  silentLogger,
+} from "../utils/logger";
 import {
   runProcess,
   runProcessWithCode,
@@ -44,6 +54,8 @@ const DEFAULT_EVENTS = [
   "workspace.renamed",
   "workspace.closed",
   "workspace.focused",
+  "workspace.moved",
+  "workspace.reordered",
   "tab.created",
   "tab.closed",
   "tab.renamed",
@@ -54,6 +66,7 @@ const DEFAULT_EVENTS = [
   "pane.moved",
   "pane.exited",
   "pane.agent_detected",
+  "layout.updated",
   "worktree.created",
   "worktree.opened",
   "worktree.removed",
@@ -76,6 +89,7 @@ export function createLegacyConnectionRuntime(args: {
   identity?: ConnectionIdentity;
   connectionGeneration?: number;
   config: SshTunnelConfig;
+  logger?: Logger;
   safeSend: SafeSend;
   clientLabel: (ws: ServerWebSocket<unknown>) => string;
   markRpcError: MarkRpcError;
@@ -88,6 +102,7 @@ export function createLegacyConnectionRuntime(args: {
   lastStepTransitionDebounceMs?: number;
 }) {
   const { config } = args;
+  const logger = args.logger ?? silentLogger;
   const identity = { ...(args.identity ?? LEGACY_DEFAULT_CONNECTION) };
   const socketPath = config.socketPath;
   const clientSocketPath = config.clientSocketPath;
@@ -143,6 +158,7 @@ export function createLegacyConnectionRuntime(args: {
   });
   const workspaceAutoSync = createWorkspaceAutoSync({
     connectionId: identity.id,
+    logger: logger.child("auto-sync"),
     formatError: sanitizeConnectionError,
     herdr,
     sshHost,
@@ -169,6 +185,7 @@ export function createLegacyConnectionRuntime(args: {
   const handleImageUpload = createImageUploadHandler({ sshHost });
   const sshTunnel = createSshTunnelManager({
     connectionId: identity.id,
+    logger: logger.child("ssh"),
     formatError: sanitizeConnectionError,
     config,
     runProcess,
@@ -189,14 +206,51 @@ export function createLegacyConnectionRuntime(args: {
   });
   const terminalBridge = createTerminalBridge({
     connectionId: identity.id,
+    logger: logger.child("terminal"),
     connectionGeneration: args.connectionGeneration,
     formatError: sanitizeConnectionError,
     clientSocketPath,
-    herdrProtocol: async () => Number((await herdr.ping()).protocol),
+    herdrProtocol: async () => {
+      const protocol: unknown = (await herdr.ping()).protocol;
+      assertSupportedHerdrProtocol(protocol);
+      return protocol;
+    },
+    createEmptyWorkspace: createEmptyWorkspaceCreator(
+      (method, params, timeoutMs) => herdr.call(method, params, timeoutMs),
+    ),
+    validateCreationSource: async (source) => {
+      const result = await herdr.call(
+        "pane.get",
+        { pane_id: source.pane_id },
+        5000,
+      );
+      assertEndpointCreationSource(source, result?.pane);
+    },
+    lookupPaneId: async (terminalId) => {
+      try {
+        const result = await herdr.call("pane.list", {}, 5000);
+        const panes = (result as { panes?: unknown } | null)?.panes;
+        if (!Array.isArray(panes)) return null;
+        for (const pane of panes) {
+          if (!pane || typeof pane !== "object" || Array.isArray(pane))
+            continue;
+          const record = pane as { pane_id?: unknown; terminal_id?: unknown };
+          if (
+            record.terminal_id === terminalId &&
+            typeof record.pane_id === "string" &&
+            record.pane_id.length > 0
+          ) {
+            return record.pane_id;
+          }
+        }
+        return null;
+      } catch {
+        return null;
+      }
+    },
     safeSend: args.safeSend,
     clientLabel: args.clientLabel,
     markRpcError: args.markRpcError,
-    herdrCall: (method, params) => collaboration.call(method, params),
     confirmRelayResize: async ({ cols, rows, paneId }) => {
       if (!paneId) return false;
       for (let attempt = 0; attempt < 6; attempt += 1) {
@@ -246,34 +300,42 @@ export function createLegacyConnectionRuntime(args: {
       );
     },
     onCaptureError: (error, workspaceId) =>
-      console.error(
-        `[bridge] last-step baseline failed connection=${identity.id} workspace=${workspaceId}:`,
-        sanitizeConnectionError(error),
-      ),
+      logger.warn("last-step baseline failed", {
+        connection: identity.id,
+        workspace: workspaceId,
+        error: sanitizeConnectionError(error),
+      }),
     onCompleteError: (error, workspaceId) =>
-      console.error(
-        `[bridge] last-step completion failed connection=${identity.id} workspace=${workspaceId}:`,
-        sanitizeConnectionError(error),
-      ),
+      logger.warn("last-step completion failed", {
+        connection: identity.id,
+        workspace: workspaceId,
+        error: sanitizeConnectionError(error),
+      }),
     transitionDebounceMs: args.lastStepTransitionDebounceMs ?? 150,
+  });
+  const agentStatusRecovery = createRecoveryReporter({
+    logger: logger.child("agent-status"),
+    failureMessage: "agent status subscription failed",
+    recoveryMessage: "agent status subscription recovered",
   });
   const agentStatusSubscriptions = createAgentStatusSubscriptionLoop({
     herdr,
     connectionId: identity.id,
     onSubscribeError: (error) =>
-      console.error(
-        `[bridge] agent status subscribe failed connection=${identity.id}:`,
-        sanitizeConnectionError(error),
-        "- retrying",
-      ),
+      agentStatusRecovery.failure(sanitizeConnectionError(error), {
+        connection: identity.id,
+      }),
     onListError: (error) =>
-      console.error(
-        `[bridge] agent status pane list failed connection=${identity.id}:`,
-        sanitizeConnectionError(error),
-      ),
+      agentStatusRecovery.failure(sanitizeConnectionError(error), {
+        connection: identity.id,
+        operation: "pane list",
+      }),
     onPaneListStart: lastStepTurns.beginPaneList,
     onPaneList: lastStepTurns.reconcilePaneList,
-    log: (message) => console.log(`[bridge] ${message}`),
+    log: (message) => {
+      agentStatusRecovery.recovered({ connection: identity.id });
+      logger.debug(message, { connection: identity.id });
+    },
   });
 
   const onHerdrEvent = (event: unknown) => {
@@ -285,22 +347,32 @@ export function createLegacyConnectionRuntime(args: {
   herdr.on("event", onHerdrEvent);
   herdr.on("error", onHerdrError);
 
+  const eventSubscriptionRecovery = createRecoveryReporter({
+    logger: logger.child("events"),
+    failureMessage: "event subscription failed",
+    recoveryMessage: "event subscription recovered",
+  });
   const subscriptionLoop = createEventSubscriptionLoop({
     subscribe: () => herdr.subscribe(DEFAULT_EVENTS),
-    onReady: () =>
-      console.log(
-        `[bridge] subscribed to herdr events connection=${identity.id}`,
-      ),
+    onReady: () => {
+      // Browser snapshots may start before the subscription ACK. Reconcile
+      // after every ACK (including reconnect) to close that missed-event gap.
+      // The browser's generic refresh path queues another snapshot if busy.
+      args.onEvent({ event: "session.resync_required", data: {} }, identity);
+      if (!eventSubscriptionRecovery.recovered({ connection: identity.id })) {
+        logger.info("subscribed to Herdr events", { connection: identity.id });
+      }
+    },
     onSubscribeError: (error) =>
-      console.error(
-        `[bridge] subscribe failed connection=${identity.id}:`,
-        sanitizeConnectionError(error),
-        "- retrying in 2s",
-      ),
+      eventSubscriptionRecovery.failure(sanitizeConnectionError(error), {
+        connection: identity.id,
+        retry_ms: 2_000,
+      }),
     onSubscriptionClosed: () =>
-      console.log(
-        `[bridge] subscription closed connection=${identity.id}, reconnecting in 2s...`,
-      ),
+      eventSubscriptionRecovery.failure("subscription closed", {
+        connection: identity.id,
+        retry_ms: 2_000,
+      }),
   });
   const collaborationSubscriptionLoop = createEventSubscriptionLoop({
     subscribe: () => herdr.subscribe(COLLABORATION_EVENTS),

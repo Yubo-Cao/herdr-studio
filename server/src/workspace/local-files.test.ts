@@ -21,39 +21,6 @@ async function withTempDir<T>(fn: (dir: string) => Promise<T>) {
 }
 
 describe("local workspace file operations", () => {
-  test("uses Git ignore semantics without hiding tracked or negated files", async () => {
-    await withTempDir(async (root) => {
-      await Bun.spawn(["git", "init", "-q", root]).exited;
-      await mkdir(join(root, "cache"));
-      await mkdir(join(root, "nested"));
-      await writeFile(
-        join(root, ".gitignore"),
-        ["*.log", "!keep.log", "cache/", ""].join("\n"),
-      );
-      await writeFile(join(root, "ignored.log"), "ignored");
-      await writeFile(join(root, "keep.log"), "kept by negation");
-      await writeFile(join(root, "tracked.log"), "tracked");
-      await writeFile(
-        join(root, "nested", ".gitignore"),
-        ["*.tmp", "!keep.tmp", ""].join("\n"),
-      );
-      await writeFile(join(root, "nested", "ignored.tmp"), "ignored");
-      await writeFile(join(root, "nested", "keep.tmp"), "kept");
-      expect(
-        await Bun.spawn(["git", "-C", root, "add", "-f", "tracked.log"]).exited,
-      ).toBe(0);
-
-      const top = await listLocalFiles(root, "", false);
-      expect(top.entries.map((entry) => entry.name)).toEqual([
-        "nested",
-        "keep.log",
-        "tracked.log",
-      ]);
-      const nested = await listLocalFiles(root, "nested", false);
-      expect(nested.entries.map((entry) => entry.name)).toEqual(["keep.tmp"]);
-    });
-  });
-
   test("follows explicit symlinks while rejecting lexical traversal", async () => {
     await withTempDir(async (root) => {
       const outside = await mkdtemp(join(tmpdir(), "herdr-gui-outside-"));

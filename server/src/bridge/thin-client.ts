@@ -3,11 +3,11 @@ import * as net from "node:net";
 import { BinReader, BinWriter, encodeFrame } from "./bincode";
 import {
   assertSupportedHerdrProtocol,
+  isTerminalHelloProtocol,
   terminalAttachLaunchModeWireValue,
 } from "./protocol-compat";
 
 const HANDSHAKE_TIMEOUT_MS = 8_000;
-const DIRECT_TERMINAL_ROLES_PROTOCOL = 15;
 
 // ClientMessage variant indices (must match wire.rs enum order).
 const CM = {
@@ -16,19 +16,44 @@ const CM = {
   Resize: 3,
   AttachTerminal: 5,
   AttachScroll: 6,
-  ObserveTerminal: 8,
-  ControlTerminal: 9,
 } as const;
 
-// ServerMessage variant indices.
-const SM = {
+// ServerMessage variant indices. Tagged v0.9.0 (protocol 22) removed Frame,
+// KittyKeyboardReportAll, and PrefixInputSource, shifting every variant the
+// GUI decodes down; Frame gets -1 so it can never match on newer protocols.
+interface ServerMessageIndices {
+  Welcome: number;
+  Frame: number;
+  Terminal: number;
+  ServerShutdown: number;
+  Clipboard: number;
+  MouseCapture: number;
+  DirectTerminalKeyboardProtocol: number;
+}
+
+const SM_LEGACY: ServerMessageIndices = {
   Welcome: 0,
   Frame: 1,
   Terminal: 2,
   ServerShutdown: 4,
   Clipboard: 6,
   MouseCapture: 9,
-} as const;
+  DirectTerminalKeyboardProtocol: -1,
+};
+
+const SM_V22: ServerMessageIndices = {
+  Welcome: 0,
+  Frame: -1,
+  Terminal: 1,
+  ServerShutdown: 3,
+  Clipboard: 5,
+  MouseCapture: 8,
+  DirectTerminalKeyboardProtocol: 16,
+};
+
+function serverMessageIndices(protocol: number): ServerMessageIndices {
+  return isTerminalHelloProtocol(protocol) ? SM_V22 : SM_LEGACY;
+}
 
 /**
  * Semantic launch mode requested in the Hello handshake. The wire value is
@@ -64,15 +89,15 @@ export interface FrameData {
 /**
  * One thin-client connection to herdr-client.sock. After `connect` (which sends
  * the Hello handshake), call `attach(terminalId)` to render a single pane
- * terminal at the requested cols×rows; rendered frames arrive as `terminal`
- * events. Current servers expose explicit observe/control roles; protocol 14
- * falls back to its compatible legacy attach message.
+ * terminal at the requested cols×rows; rendered frames arrive as `frame`
+ * events. Call `resize` whenever the display size changes.
  */
 export class ThinClient extends EventEmitter {
   private sock: net.Socket | null = null;
   private buf = Buffer.alloc(0);
   private closed = false;
   private protocolVersion: number | null = null;
+  private sm: ServerMessageIndices = SM_LEGACY;
   private attachedTerminalId: string | null = null;
   private pendingWelcome:
     | {
@@ -106,6 +131,7 @@ export class ThinClient extends EventEmitter {
     if (this.closed) throw new Error("thin client is closed");
     assertSupportedHerdrProtocol(protocolVersion);
     this.protocolVersion = protocolVersion;
+    this.sm = serverMessageIndices(protocolVersion);
     await new Promise<void>((resolve, reject) => {
       const sock = net.createConnection({ path: this.socketPath });
       this.sock = sock;
@@ -165,14 +191,18 @@ export class ThinClient extends EventEmitter {
     while (this.buf.length >= 4) {
       const len = this.buf.readUInt32LE(0);
       if (len > 32 * 1024 * 1024) {
-        this.emit("error", new Error(`oversized frame: ${len}`));
+        const error = new Error(`oversized frame: ${len}`);
         this.buf = Buffer.alloc(0);
+        this.rejectWelcome(error);
+        this.close();
+        this.emit("error", error);
         return;
       }
       if (this.buf.length < 4 + len) return;
       const payload = this.buf.subarray(4, 4 + len);
       this.buf = this.buf.subarray(4 + len);
       this.handlePayload(payload);
+      if (this.closed) return;
     }
   }
 
@@ -180,10 +210,12 @@ export class ThinClient extends EventEmitter {
     try {
       const r = new BinReader(payload);
       const variant = r.variant();
-      if (variant === SM.Welcome) {
+      const sm = this.sm;
+      if (variant === sm.Welcome) {
         const version = r.varint();
         const encoding = r.varint();
         const error = r.option(() => r.string());
+        assertSupportedHerdrProtocol(version);
         this.emit("welcome", { version, encoding, error });
         if (error) {
           this.rejectWelcome(
@@ -199,33 +231,56 @@ export class ThinClient extends EventEmitter {
             ),
           );
           this.close();
+        } else if (
+          (isTerminalHelloProtocol(version) && encoding !== 1) ||
+          (encoding !== 0 && encoding !== 1)
+        ) {
+          this.rejectWelcome(
+            new Error(`Herdr welcomed unsupported encoding ${encoding}`),
+          );
+          this.close();
         } else {
           this.resolveWelcome();
         }
-      } else if (variant === SM.Frame) {
+      } else if (variant === sm.Frame) {
         this.emit("frame", readFrameData(r));
-      } else if (variant === SM.Terminal) {
+      } else if (variant === sm.Terminal) {
         const seq = r.varint();
         const width = r.varint();
         const height = r.varint();
         const full = r.bool();
         const bytes = r.bytes();
         this.emit("terminal", { seq, width, height, full, bytes });
-      } else if (variant === SM.ServerShutdown) {
+      } else if (variant === sm.ServerShutdown) {
         const reason = r.option(() => r.string());
         this.emit(
           "error",
           new Error(reason || "Herdr closed the thin-client connection"),
         );
         this.close();
-      } else if (variant === SM.Clipboard) {
+      } else if (variant === sm.Clipboard) {
         this.emit("clipboard", { data: r.string() });
-      } else if (variant === SM.MouseCapture) {
-        this.emit("mouse_capture", r.bool());
+      } else if (variant === sm.MouseCapture) {
+        const enabled = r.bool();
+        const sgrPixels = isTerminalHelloProtocol(this.protocolVersion!)
+          ? r.bool()
+          : false;
+        // Keep the legacy enabled argument; protocol 22 carries both fields.
+        this.emit("mouse_capture", enabled, sgrPixels);
+      } else if (variant === sm.DirectTerminalKeyboardProtocol) {
+        // Decode the tagged contract, but do not enable browser keyboard modes:
+        // basic input remains legacy; enhanced keyboard parity is unsupported.
+        this.emit("keyboard_protocol", {
+          flags: r.varint(),
+          modifyOtherKeysLevel: r.u8(),
+        });
       }
       // Graphics / Notify / WindowTitle are ignored for now.
     } catch (e) {
-      this.emit("error", new Error(`decode: ${(e as Error).message}`));
+      const error = e instanceof Error ? e : new Error(String(e));
+      this.rejectWelcome(error);
+      this.close();
+      this.emit("error", error);
     }
   }
 
@@ -247,6 +302,14 @@ export class ThinClient extends EventEmitter {
     w.varint(rows);
     w.varint(0); // cell_width_px (no client-side kitty graphics)
     w.varint(0); // cell_height_px
+    if (isTerminalHelloProtocol(protocolVersion)) {
+      // Protocol 22 (Herdr 0.9.0) replaced Hello with TerminalHello:
+      // requested_encoding, keybindings, and launch_mode are gone (direct
+      // terminal connections always get TerminalAnsi), leaving pixel_mouse.
+      w.bool(false); // pixel_mouse
+      this.write(w.toBuffer());
+      return;
+    }
     w.varint(encoding); // requested_encoding: 0=SemanticFrame, 1=TerminalAnsi
     w.varint(0); // keybindings = Server
     // launch_mode: App is always 0; TerminalAttach moved from 1 to 2 in
@@ -277,43 +340,6 @@ export class ThinClient extends EventEmitter {
     this.attachedTerminalId = terminalId;
   }
 
-  observe(target: string) {
-    if ((this.protocolVersion ?? 0) < DIRECT_TERMINAL_ROLES_PROTOCOL) {
-      this.attach(target, false);
-      return;
-    }
-    if (this.attachedTerminalId === target) return;
-    if (this.attachedTerminalId) {
-      throw new Error(
-        `thin client is already attached to ${this.attachedTerminalId}`,
-      );
-    }
-    const w = new BinWriter();
-    w.variant(CM.ObserveTerminal);
-    w.string(target);
-    this.write(w.toBuffer());
-    this.attachedTerminalId = target;
-  }
-
-  control(target: string, takeover = false) {
-    if ((this.protocolVersion ?? 0) < DIRECT_TERMINAL_ROLES_PROTOCOL) {
-      this.attach(target, takeover);
-      return;
-    }
-    if (this.attachedTerminalId === target) return;
-    if (this.attachedTerminalId) {
-      throw new Error(
-        `thin client is already attached to ${this.attachedTerminalId}`,
-      );
-    }
-    const w = new BinWriter();
-    w.variant(CM.ControlTerminal);
-    w.string(target);
-    w.bool(takeover);
-    this.write(w.toBuffer());
-    this.attachedTerminalId = target;
-  }
-
   resize(cols: number, rows: number) {
     const w = new BinWriter();
     w.variant(CM.Resize);
@@ -321,6 +347,13 @@ export class ThinClient extends EventEmitter {
     w.varint(rows);
     w.varint(0);
     w.varint(0);
+    // Protocol 22 (Herdr 0.9.0) added pixel_mouse to Resize.
+    if (
+      this.protocolVersion !== null &&
+      isTerminalHelloProtocol(this.protocolVersion)
+    ) {
+      w.bool(false); // pixel_mouse
+    }
     this.write(w.toBuffer());
   }
 
@@ -365,18 +398,24 @@ export class ThinClient extends EventEmitter {
   }
 }
 
-function readFrameData(r: BinReader): FrameData {
+// Exported for the stable endpoint client (PaneSurface frames share the wire
+// FrameData layout).
+export function readCellData(r: BinReader): CellData {
+  return {
+    symbol: r.string(),
+    fg: r.varint(),
+    bg: r.varint(),
+    modifier: r.varint(),
+    skip: r.bool(),
+    hyperlink: r.option(() => r.varint()),
+  };
+}
+
+export function readFrameData(r: BinReader): FrameData {
   const cellCount = r.varint();
   const cells: CellData[] = new Array(cellCount);
   for (let i = 0; i < cellCount; i++) {
-    cells[i] = {
-      symbol: r.string(),
-      fg: r.varint(),
-      bg: r.varint(),
-      modifier: r.varint(),
-      skip: r.bool(),
-      hyperlink: r.option(() => r.varint()),
-    };
+    cells[i] = readCellData(r);
   }
   const width = r.varint();
   const height = r.varint();

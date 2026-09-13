@@ -1,4 +1,9 @@
-import { shallowEqual, store, useStoreSelector } from "../store";
+import {
+  shallowEqual,
+  store,
+  useStoreSelector,
+  useEndpointCreationReason,
+} from "../store";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { PanelRight } from "lucide-react";
@@ -15,6 +20,7 @@ import { summarizeTabAgents } from "./agentSession";
 const LONG_PRESS_MS = 550;
 const LONG_PRESS_MOVE_PX = 10;
 const REQUEST_CLOSE_TAB_EVENT = "herdr-gui:request-close-tab";
+const REQUEST_CLOSE_PANE_EVENT = "herdr-gui:request-close-pane";
 
 interface TabMenuState {
   tab: Tab;
@@ -36,6 +42,13 @@ export function tabName(tab?: Tab) {
 export function requestCloseTab(tabId: string) {
   window.dispatchEvent(
     new CustomEvent(REQUEST_CLOSE_TAB_EVENT, { detail: { tabId } }),
+  );
+}
+
+/** Routes pane shortcuts through confirmation even when terminals are hidden. */
+export function requestClosePane(paneId: string) {
+  window.dispatchEvent(
+    new CustomEvent(REQUEST_CLOSE_PANE_EVENT, { detail: { paneId } }),
   );
 }
 
@@ -66,9 +79,16 @@ export function TabBar({
   const [pendingCloseTabId, setPendingCloseTabId] = useState<string | null>(
     null,
   );
+  const [pendingClosePaneId, setPendingClosePaneId] = useState<string | null>(
+    null,
+  );
   const [pendingRenameTab, setPendingRenameTab] = useState<Tab | null>(null);
   const [menu, setMenu] = useState<TabMenuState | null>(null);
   const focusedWs = s.workspaces.find((w) => w.focused);
+  const createReason = useEndpointCreationReason(
+    "tab.create",
+    focusedWs?.workspace_id,
+  );
   const tabs = s.tabs
     .filter((t) => t.workspace_id === focusedWs?.workspace_id)
     .sort((a, b) => a.number - b.number);
@@ -82,6 +102,16 @@ export function TabBar({
       s.activeConnectionId,
       s.connectionGeneration,
       pendingCloseTabPaneIds,
+    ).length,
+  );
+  const pendingClosePane = s.panes.find(
+    (pane) => pane.pane_id === pendingClosePaneId,
+  );
+  const pendingClosePaneDraftWarning = terminalComposerCloseWarning(
+    terminalComposerDraftPaneIds(
+      s.activeConnectionId,
+      s.connectionGeneration,
+      pendingClosePane ? [pendingClosePane.pane_id] : [],
     ).length,
   );
   const showTabStrip = !!focusedWs && (!mobile || tabs.length > 1);
@@ -98,9 +128,17 @@ export function TabBar({
       const tabId = (event as CustomEvent<{ tabId?: unknown }>).detail?.tabId;
       if (typeof tabId === "string" && tabId) setPendingCloseTabId(tabId);
     };
+    const onRequestClosePane = (event: Event) => {
+      const paneId = (event as CustomEvent<{ paneId?: unknown }>).detail
+        ?.paneId;
+      if (typeof paneId === "string" && paneId) setPendingClosePaneId(paneId);
+    };
     window.addEventListener(REQUEST_CLOSE_TAB_EVENT, onRequestClose);
-    return () =>
+    window.addEventListener(REQUEST_CLOSE_PANE_EVENT, onRequestClosePane);
+    return () => {
       window.removeEventListener(REQUEST_CLOSE_TAB_EVENT, onRequestClose);
+      window.removeEventListener(REQUEST_CLOSE_PANE_EVENT, onRequestClosePane);
+    };
   }, []);
 
   if (!focusedWs) return null;
@@ -115,6 +153,7 @@ export function TabBar({
         }}
         onRename={(tab) => setPendingRenameTab(tab)}
         onCloseTab={(tab) => setPendingCloseTabId(tab.tab_id)}
+        createReason={createReason}
         onCreateTab={() => {
           store.createTab(focusedWs.workspace_id);
         }}
@@ -139,6 +178,23 @@ export function TabBar({
             );
             store.closeTab(pendingCloseTabId);
           }
+        }}
+      />
+      <ConfirmDialog
+        open={!!pendingClosePane}
+        title="Close Pane"
+        message={`Close this terminal pane?${pendingClosePaneDraftWarning}`}
+        confirmLabel="Close"
+        danger
+        onClose={() => setPendingClosePaneId(null)}
+        onConfirm={() => {
+          if (!pendingClosePane) return;
+          clearTerminalComposerDrafts(
+            s.activeConnectionId,
+            s.connectionGeneration,
+            [pendingClosePane.pane_id],
+          );
+          store.closePane(pendingClosePane.pane_id);
         }}
       />
       <TextInputDialog
@@ -229,7 +285,8 @@ export function TabBar({
             onClick={() => {
               store.createTab(focusedWs.workspace_id);
             }}
-            title="New tab"
+            disabled={!!createReason}
+            title={createReason ?? "New tab"}
           >
             +
           </button>
@@ -328,6 +385,7 @@ function TabContextMenu({
   onRename,
   onCloseTab,
   onCreateTab,
+  createReason,
 }: {
   state: TabMenuState | null;
   onClose: () => void;
@@ -335,6 +393,7 @@ function TabContextMenu({
   onRename: (tab: Tab) => void;
   onCloseTab: (tab: Tab) => void;
   onCreateTab: () => void;
+  createReason: string | null;
 }) {
   const ref = useRef<HTMLDivElement>(null);
 
@@ -365,7 +424,7 @@ function TabContextMenu({
   const items = [
     { label: "Focus tab", action: () => onFocus(state.tab) },
     { label: "Rename tab...", action: () => onRename(state.tab) },
-    { label: "Create tab", action: onCreateTab },
+    { label: "Create tab", action: onCreateTab, reason: createReason },
     {
       label: "Close tab",
       danger: true,
@@ -392,6 +451,8 @@ function TabContextMenu({
       {items.map((item) => (
         <button
           key={item.label}
+          disabled={!!item.reason}
+          title={item.reason ?? undefined}
           className={`context-menu-item ${item.danger ? "is-danger" : ""}`}
           onClick={() => {
             onClose();

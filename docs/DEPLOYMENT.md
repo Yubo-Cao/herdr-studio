@@ -1,7 +1,9 @@
 # Installation and Deployment
 
 This guide covers installation, runtime configuration, remote connections,
-user services, and standalone builds.
+user services, and standalone builds. For a guided private-access walkthrough
+with Tailscale Serve, SSH forwarding, or experimental Tailcat port forwarding,
+see the [hands-on tutorial](./TUTORIAL.md#networking).
 
 ## Requirements
 
@@ -12,11 +14,66 @@ user services, and standalone builds.
 - [Bun](https://bun.sh) 1.4 or newer for source builds. Standalone binaries do
   not require Bun on the target machine.
 
+### Herdr compatibility
+
+This source build supports verified legacy protocols 14-20, from standalone
+Herdr 0.7.0 / protocol 14 through Herdr 0.8.2 / protocol 20, and **tagged Herdr
+0.9.0 / protocol 22**. The [plugin installer](#herdr-plugin) separately requires
+Herdr 0.7.2 or newer. Protocol 21 and unknown versions are rejected at the control
+probe and binary handshake. Use a Studio build explicitly supporting your
+server, or a separate compatible server; do not downgrade a live server.
+Published binaries retain the behavior documented for their release in the
+[Changelog](../CHANGELOG.md).
+
+Herdr 0.9.0 terminals use **stable endpoint generation 1** (distinct from
+terminal protocol 22). Set `HERDR_GUI_DISABLE_ENDPOINT=1` to use the legacy
+direct-terminal fallback:
+
+- Endpoint rendering crops the server-rendered tab to each pane. Unknown endpoint
+  generations/codecs are rejected. Missing required `pane.focus` fails attachment
+  without silent fallback; optional advertised methods gate creation and history
+  scrolling with a reason when unavailable. Input, mouse, paste, resize, and
+  rendering can remain usable without optional history support. The explicitly
+  enabled legacy fallback uses takeover and can disconnect another owner.
+- Terminal-program OSC 52 writes follow Herdr's **foreground-recipient**
+  behavior: Studio sends only to the browser with input in the last 30 seconds
+  matching the receiving endpoint session, never to passive viewers. Herdr
+  sends no producing-pane or input identity: a delayed/background write from
+  pane A after B becomes foreground can reach B's recent input owner. This is
+  not source-PTY isolation or a guarantee of the original initiating browser.
+  Detach, session replacement, and connection disposal invalidate ownership.
+  Clipboard reads remain disabled; browser permission failures retain the
+  existing copy-retry UI. Ordinary browser selection copy and paste are unchanged.
+  OSC 52 remains unavailable on the **0.9.0 legacy fallback** because only shell
+  endpoints receive it. Legacy servers retain their existing clipboard relay.
+- Workspace/tab navigation is browser-local per connection, surviving reconnect
+  but not reload or runtime replacement. Same-tab pane focus, topology changes,
+  and terminal sizes remain shared; sizing follows Herdr's last-interacting
+  client. See [navigation behavior](../FEATURES.md#workspace-tab-and-pane-navigation).
+  Tab/workspace creation preserves `terminal.new_cwd` (`follow`, `home`, `current`,
+  or a fixed path), with explicit cwd taking precedence. Because same-tab focus
+  is shared, `follow` does not isolate the browser's source pane. Open the source
+  terminal tab before creating; unavailable sources fail explicitly. See
+  [creation contracts](./ARCHITECTURE.md#browser-navigation-and-creation) for
+  bootstrap and timeout handling.
+- Legacy servers and `HERDR_GUI_DISABLE_ENDPOINT=1` retain **Shared navigation**:
+  public JSON focus can move other clients. The connection menu shows the mode,
+  using the bridge's actual backend selection, not browser version guesses.
+  Enhanced Kitty keyboard / modifyOtherKeys parity and pixel mouse are not
+  supported. Legacy keyboard-mode messages are decoded, not applied in-browser.
+- Closing a workspace does not implicitly close its linked group. If Herdr
+  requires group closure, Studio leaves it intact and directs you to the CLI:
+  `herdr --session <name> workspace close <workspace_id> --group`. Review all
+  linked workspaces first; this explicitly closes the entire group.
+
+For endpoint negotiation, input, and reconnect contracts, see
+[Architecture](./ARCHITECTURE.md#terminal-endpoints).
+
 ## Install a release
 
-The installer supports Linux and macOS on x86-64 and arm64. It verifies the
-release checksum and installs the standalone binary to
-`~/.local/bin/herdr-gui`:
+Prebuilt standalone binaries are available for Linux, macOS, and Windows on
+x86-64 and arm64. On Linux and macOS, the installer verifies the release
+checksum and installs the standalone binary to `~/.local/bin/herdr-gui`:
 
 ```bash
 curl -fsSL \
@@ -61,6 +118,41 @@ must use HTTPS, except for loopback testing, and their URLs cannot contain
 credentials, query strings, or fragments. The installer and in-app updater
 preserve a replaced executable as `herdr-gui.previous` for manual recovery.
 
+## Herdr plugin
+
+Herdr 0.7.2 or newer can install Herdr Studio as a plugin. The plugin
+downloads the checksum-verified prebuilt release binary matching the plugin
+version, so no source toolchain is needed; the plugin shim itself runs on
+[Bun](https://bun.sh):
+
+```bash
+herdr plugin install powerfooI/herdr-studio
+```
+
+Plugin actions manage the same user service described in
+[Run as a user service](#run-as-a-user-service):
+
+```bash
+herdr plugin action invoke herdr.studio.start      # install and start the service
+herdr plugin action invoke herdr.studio.url        # print the login URL
+herdr plugin action invoke herdr.studio.status
+herdr plugin action invoke herdr.studio.restart
+herdr plugin action invoke herdr.studio.uninstall  # remove the service
+```
+
+Plugin actions run asynchronously; their output is recorded in the plugin
+command log (`herdr plugin log list --plugin herdr.studio`). For an
+interactive view, open the plugin's popup pane in the Herdr TUI:
+
+```bash
+herdr plugin pane open --plugin herdr.studio --entrypoint panel
+```
+
+The panel shows service status, the login URL, and the version, with
+single-key start, restart, and uninstall controls. It opens as a
+session-modal popup by default; pass `--placement split` (or `tab`, `zoomed`,
+`overlay`) to open it as a regular pane that other Herdr clients can see.
+
 ## Basic runtime configuration
 
 Flags override environment variables, which override defaults. Run
@@ -76,6 +168,7 @@ Flags override environment variables, which override defaults. Run
 | `--ssh-host <user@host>` | `HERDR_SSH_HOST` | Disabled; supported on Linux and macOS |
 | `--session <name>` | `HERDR_SESSION` | Named Herdr session, if set |
 | `--public-dir <path>` | `PUBLIC_DIR` | Embedded assets |
+| `--log-level <level>` | `HERDR_GUI_LOG_LEVEL` | `info` |
 | `--open` | `OPEN_BROWSER=1` | Disabled |
 
 Additional runtime settings:
@@ -85,6 +178,7 @@ Additional runtime settings:
 | `HERDR_GUI_UPDATE_BASE_URL` | Override the latest-release asset directory |
 | `HERDR_GUI_DISABLE_UPDATE_CHECK=1` | Disable update checks |
 | `HERDR_GUI_RESTART_SUPERVISOR=0\|1` | Declare or override external supervisor detection |
+| `HERDR_GUI_DISABLE_ENDPOINT=1` | Use the legacy terminal fallback; see compatibility limits above |
 
 A custom update mirror must use the same flat asset layout as GitHub Releases
 and provide each platform archive, its `.sha256` file, and the corresponding
@@ -106,6 +200,27 @@ herdr-gui --host 0.0.0.0 --port 8787 --password 's3cr3t'
 ```
 
 Read [SECURITY.md](../SECURITY.md) before using a non-loopback bind.
+
+## Logging
+
+Runtime logs use one line per event with an ISO timestamp, severity, scope, and
+bounded key/value context. The default `info` level records startup, connection
+readiness and recovery, degraded states, and fatal failures without routine RPC,
+Herdr event, terminal frame, or successful auto-sync traffic.
+
+Use `debug` temporarily when diagnosing request or lifecycle behavior:
+
+```bash
+herdr-gui --log-level debug
+# or in herdr-gui.env
+HERDR_GUI_LOG_LEVEL=debug
+```
+
+For a managed service, restart after changing `herdr-gui.env`. Debug context can
+include workspace paths and connection or terminal identifiers, so return to
+`info` after collecting the required diagnostics. Runtime logs print browser
+and LAN URLs without authentication tokens; generated tokens remain in the
+protected token file described below.
 
 ## Multiple and remote Herdr connections
 
@@ -139,12 +254,28 @@ SSH profiles and `--ssh-host` currently require Herdr Studio to run on Linux or
 macOS because the stream-local transport cannot expose a forwarded Unix socket
 as a local Windows named pipe. Windows supports native local Herdr profiles.
 
-Profiles are stored atomically in `~/.config/herdr-gui/connections.json` with
-private directory and file modes. The bridge supervises each SSH tunnel
-independently and retries transient transport failures. See
-[Architecture](./ARCHITECTURE.md#connection-isolation) for the isolation model
-and [Multi-Herdr Connections](./multi-herdr-connections-implementation.md) for
-the detailed implementation contract.
+Profiles are stored atomically in `~/.config/herdr-gui/connections.json`
+(overridable with `HERDR_GUI_CONNECTIONS_PATH`), with directory mode `0700` and
+file mode `0600` on Unix. Registry/direct-parent symlinks are rejected. Version-1
+local registries migrate to version 2 on the first successful mutation. Invalid
+registries are preserved with mutations disabled: repair the durable file before
+retrying. A failed durable rollback retires routing and disables further profile
+changes rather than allowing disk and memory to disagree.
+
+`auto_connect` controls profile startup; browser selection is independent.
+Disconnecting or removing a profile stops only its bridge runtime/tunnel, not
+Herdr or its workspaces. SSH profiles retry transient transport failures, but
+not authentication, host-key, or permanent protocol errors. Confirm host keys
+and authentication as the service user before connecting; service SSH cannot
+prompt interactively. There is no automatic idle cleanup or aggregate runtime
+resource budget, so disconnect unused profiles when conserving resources.
+See [connection isolation](./ARCHITECTURE.md#connection-isolation) and
+[SSH transport](./ARCHITECTURE.md#ssh-transport).
+
+Explicit CLI/environment socket or SSH settings remain authoritative as a
+read-only `legacy-default` process profile; edit those settings to change that
+connection. Browser preferences from the old single-connection setup migrate
+once into the first real profile without overwriting existing values.
 
 The legacy command-line connection is also available:
 

@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import {
-  DEFAULT_TERMINAL_FONT_FAMILY,
-  TERMINAL_FONT_OPTIONS,
+  clampUiScale,
   normalizeAccentColor,
-  normalizeTerminalFontFamily,
   normalizeThemePreference,
-  resolveTerminalFontFamily,
+  normalizeUiScale,
   resolveSystemTheme,
+  UI_SCALE_DEFAULT,
+  UI_SCALE_MAX,
+  UI_SCALE_MIN,
 } from "./appearance";
 
 const matches = (value: boolean) => ({ matches: value });
@@ -25,14 +26,14 @@ describe("appearance preferences", () => {
     expect(normalizeAccentColor("orange")).toBe("neutral");
   });
 
-  test("accepts supported theme preferences, including system", () => {
+  test("accepts supported theme preferences, including session and system", () => {
     expect(normalizeThemePreference("session")).toBe("session");
     expect(normalizeThemePreference("dark")).toBe("dark");
     expect(normalizeThemePreference("light")).toBe("light");
     expect(normalizeThemePreference("system")).toBe("system");
   });
 
-  test("falls back to the synchronized session theme for missing or unknown values", () => {
+  test("falls back to the session theme for missing or unknown values", () => {
     expect(normalizeThemePreference(null)).toBe("session");
     expect(normalizeThemePreference("")).toBe("session");
     expect(normalizeThemePreference("auto")).toBe("session");
@@ -42,40 +43,41 @@ describe("appearance preferences", () => {
     expect(resolveSystemTheme(matches(true))).toBe("light");
     expect(resolveSystemTheme(matches(false))).toBe("dark");
   });
+});
 
-  test("accepts supported terminal font preset values", () => {
-    expect(normalizeTerminalFontFamily("jetbrains-mono")).toBe(
-      "jetbrains-mono",
-    );
-    expect(normalizeTerminalFontFamily("fira-code")).toBe("fira-code");
-    expect(normalizeTerminalFontFamily(null)).toBe("");
+describe("clampUiScale", () => {
+  test("keeps in-range values on the step grid", () => {
+    expect(clampUiScale(100)).toBe(100);
+    expect(clampUiScale(125)).toBe(125);
   });
 
-  test("migrates matching legacy font names and stacks to presets", () => {
-    expect(normalizeTerminalFontFamily('  "JetBrains Mono"  ')).toBe(
-      "jetbrains-mono",
-    );
-    expect(normalizeTerminalFontFamily("Fira Code")).toBe("fira-code");
-    expect(
-      normalizeTerminalFontFamily(
-        TERMINAL_FONT_OPTIONS.find((option) => option.value === "cascadia-mono")
-          ?.fontFamily ?? null,
-      ),
-    ).toBe("cascadia-mono");
+  test("rounds values to the nearest step", () => {
+    expect(clampUiScale(103)).toBe(105);
+    expect(clampUiScale(102)).toBe(100);
   });
 
-  test("falls back safely for unsupported legacy custom values", () => {
-    expect(normalizeTerminalFontFamily('"Custom Corporate Mono"')).toBe("");
-    expect(normalizeTerminalFontFamily("Fira\nCode\u0000")).toBe("fira-code");
+  test("clamps to the supported range", () => {
+    expect(clampUiScale(10)).toBe(UI_SCALE_MIN);
+    expect(clampUiScale(500)).toBe(UI_SCALE_MAX);
   });
 
-  test("resolves presets with the built-in terminal stack as fallback", () => {
-    expect(resolveTerminalFontFamily("")).toBe(DEFAULT_TERMINAL_FONT_FAMILY);
-    expect(resolveTerminalFontFamily("iosevka")).toBe(
-      `"Iosevka Term", Iosevka, ${DEFAULT_TERMINAL_FONT_FAMILY}`,
-    );
-    expect(resolveTerminalFontFamily("not-a-preset")).toBe(
-      DEFAULT_TERMINAL_FONT_FAMILY,
-    );
+  test("falls back to the default for non-finite values", () => {
+    expect(clampUiScale(Number.NaN)).toBe(UI_SCALE_DEFAULT);
+    expect(clampUiScale(Number.POSITIVE_INFINITY)).toBe(UI_SCALE_DEFAULT);
+  });
+});
+
+describe("normalizeUiScale", () => {
+  test("defaults when nothing is stored", () => {
+    expect(normalizeUiScale(null)).toBe(UI_SCALE_DEFAULT);
+  });
+
+  test("defaults for unparsable stored values", () => {
+    expect(normalizeUiScale("large")).toBe(UI_SCALE_DEFAULT);
+  });
+
+  test("parses and clamps stored values", () => {
+    expect(normalizeUiScale("110")).toBe(110);
+    expect(normalizeUiScale("999")).toBe(UI_SCALE_MAX);
   });
 });

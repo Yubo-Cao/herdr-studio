@@ -16,7 +16,6 @@ import {
   X,
 } from "lucide-react";
 import {
-  lazy,
   Suspense,
   useCallback,
   useEffect,
@@ -25,25 +24,27 @@ import {
   useRef,
   useState,
 } from "react";
+import type { ITheme } from "@xterm/xterm";
 import packageJson from "../package.json";
 import {
   type AccentColor,
   normalizeAccentColor,
-  normalizeTerminalFontFamily,
   normalizeThemePreference,
+  normalizeUiScale,
+  UI_SCALE_DEFAULT,
   type ResolvedTheme,
   resolveSystemTheme,
   SYSTEM_THEME_QUERY,
-  TERMINAL_FONT_STORAGE_KEY,
   type ThemePreference,
+  TERMINAL_FONT_STORAGE_KEY,
 } from "./appearance";
 import { AgentIcon } from "./components/AgentIcon";
 import { paneHasAgentHistory } from "./components/agentSession";
 import { CloseButton } from "./components/CloseButton";
+import { focusIfUnchanged } from "./components/dialogFocus";
 import { CommandCombobox } from "./components/CommandCombobox";
 import { CONFIG_MENU_ID, ConfigMenu } from "./components/ConfigMenu";
 import { ConnectionSwitcher } from "./components/ConnectionSwitcher";
-import { CollaborationBar } from "./components/CollaborationBar";
 import {
   type ActiveDiffSelection,
   clearDiffViewerResourceCache,
@@ -58,11 +59,11 @@ import {
 import { type ActiveFilePreviewSelection } from "./components/FilePreviewContent";
 import { GlobalTooltip } from "./components/GlobalTooltip";
 import { MobileTabSheet } from "./components/MobileTabSheet";
-import { requestCloseTab, TabBar } from "./components/TabBar";
+import { requestClosePane, requestCloseTab, TabBar } from "./components/TabBar";
 import type { TerminalWorkspaceFileRequest } from "./components/TerminalView";
-import { WorkspaceInspectorHost } from "./components/WorkspaceInspectorHost";
 import { WorkspaceTree } from "./components/WorkspaceTree";
 import { isIosDevice } from "./downloadFile";
+import { lazyWithReload } from "./lazyWithReload";
 import {
   LEGACY_MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY,
   MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY,
@@ -74,6 +75,17 @@ import {
   serializeMobileTerminalShortcutRows,
   serializeMobileTerminalSideShortcuts,
 } from "./mobileTerminalShortcuts";
+import {
+  CUSTOM_TERMINAL_THEMES_STORAGE_KEY,
+  type CustomTerminalTheme,
+  parseCustomTerminalThemes,
+  parseTerminalThemeSelection,
+  resolveTerminalTheme,
+  serializeCustomTerminalThemes,
+  serializeTerminalThemeSelection,
+  TERMINAL_THEME_SELECTION_STORAGE_KEY,
+  type TerminalThemeSelection,
+} from "./terminalThemes";
 import {
   activePaneIdForSnapshot,
   type PaneJumpEntry,
@@ -94,7 +106,12 @@ import {
   WORKTREE_REMOVED_EVENT,
   type WorktreeRemovedTarget,
 } from "./store";
-import { adjacentTabId, tabShortcutAction } from "./tabShortcuts";
+import { paneShortcutAction } from "./paneShortcuts";
+import {
+  adjacentTabId,
+  closeShortcutTarget,
+  tabShortcutAction,
+} from "./tabShortcuts";
 import { copyTextFromUserGesture } from "./terminalClipboard";
 import {
   activateTerminalComposerDraftScope,
@@ -102,11 +119,8 @@ import {
   subscribeTerminalComposerDraft,
   terminalComposerDraftKey,
 } from "./terminalComposer";
-import type { FileExplorerEntry, Pane, PaneLayout } from "./types";
-import {
-  TerminalTabLayoutCache,
-  terminalSlotMountKey,
-} from "./terminalTabLayoutCache";
+import { terminalMountKey } from "./terminalConnection";
+import type { FileExplorerEntry, Pane } from "./types";
 import {
   connectionClientScopeKey,
   useConnectionClient,
@@ -134,20 +148,33 @@ import {
   writeResourceFileSelection,
 } from "./workspaceResource";
 
+const WorkspaceInspectorHost = lazyWithReload("workspace-inspector", () =>
+  import("./components/WorkspaceInspectorHost").then((module) => ({
+    default: module.WorkspaceInspectorHost,
+  })),
+);
+
 const MIN_SIDEBAR = 180;
 const MAX_SIDEBAR = 560;
 const DEFAULT_SIDEBAR = 284;
 const THEME_KEY = "theme";
 const ACCENT_COLOR_KEY = "accentColor";
-const LazyTerminalView = lazy(() =>
+const UI_SCALE_KEY = "uiScale";
+const LazyTerminalView = lazyWithReload("terminal-view", () =>
   import("./components/TerminalView").then((module) => ({
     default: module.TerminalView,
+  })),
+);
+const LazyCollaborationBar = lazyWithReload("collaboration-bar", () =>
+  import("./components/CollaborationBar").then((module) => ({
+    default: module.CollaborationBar,
   })),
 );
 
 type TerminalViewProps = {
   paneId?: string;
-  paneLayout?: PaneLayout | null;
+  terminalTheme: ITheme;
+  uiScale: number;
   fontFamily?: string;
   showMobileKeys?: boolean;
   mobileShortcuts?: MobileTerminalShortcutRows;
@@ -246,8 +273,22 @@ function loadAccentColor(): AccentColor {
 }
 
 function loadTerminalFontFamily(): string {
-  return normalizeTerminalFontFamily(
-    localStorage.getItem(TERMINAL_FONT_STORAGE_KEY),
+  return localStorage.getItem(TERMINAL_FONT_STORAGE_KEY) ?? "";
+}
+
+function loadUiScale(): number {
+  return normalizeUiScale(localStorage.getItem(UI_SCALE_KEY));
+}
+
+function loadTerminalThemeSelection(): TerminalThemeSelection {
+  return parseTerminalThemeSelection(
+    localStorage.getItem(TERMINAL_THEME_SELECTION_STORAGE_KEY),
+  );
+}
+
+function loadCustomTerminalThemes(): CustomTerminalTheme[] {
+  return parseCustomTerminalThemes(
+    localStorage.getItem(CUSTOM_TERMINAL_THEMES_STORAGE_KEY),
   );
 }
 
@@ -317,12 +358,13 @@ const viewportDebugEnabled =
   typeof window !== "undefined" &&
   new URLSearchParams(window.location.search).has("debugViewport");
 
-// iOS counts the floating keyboard accessory bar (form assistant) as covered
-// area, over-reporting the keyboard inset. Lift content past that overshoot
-// by default on iOS; Android reports exact insets, so trim stays 0 there.
-// ?kbdTrim=<px> overrides the default for experiments.
-const defaultKeyboardInsetTrim =
-  typeof navigator !== "undefined" && isIosDevice(navigator) ? 30 : 0;
+// Mobile browsers can over-report keyboard occlusion by including an input
+// accessory or browser-control strip. Keep enough visual viewport lift to
+// expose the composer, but trim the platform-specific overshoot.
+const usesIosKeyboardViewportLift =
+  typeof navigator !== "undefined" && isIosDevice(navigator);
+// ?kbdTrim=<px> overrides the default for device-specific experiments.
+const defaultKeyboardInsetTrim = usesIosKeyboardViewportLift ? 30 : 0;
 const keyboardInsetTrim =
   typeof window !== "undefined"
     ? Math.max(
@@ -377,9 +419,12 @@ function ViewportDebugOverlay() {
   );
 }
 
-function useVisualViewportCssVars() {
+function useVisualViewportCssVars(uiScale: number) {
   useEffect(() => {
     const root = document.documentElement;
+    // CSS zoom scales every computed px length, so emit viewport geometry in
+    // pre-zoom units to keep the rendered shell matching the real viewport.
+    const geometryScale = uiScale / 100;
     let pollTimer: number | undefined;
     let settleTimers: number[] = [];
 
@@ -395,7 +440,7 @@ function useVisualViewportCssVars() {
       root.classList.toggle("keyboard-open", keyboardOpen);
       root.style.setProperty(
         "--app-viewport-height",
-        `${Math.round(height)}px`,
+        `${Math.round(height / geometryScale)}px`,
       );
       // Keep the app surface at the full layout height, even while the
       // keyboard is open. iOS can over-report the keyboard occlusion (the
@@ -405,21 +450,30 @@ function useVisualViewportCssVars() {
       // with padding-bottom in the mobile styles.
       root.style.setProperty(
         "--app-height",
-        `calc(${Math.round(window.innerHeight)}px + env(safe-area-inset-bottom, 0px))`,
+        `calc(${Math.round(window.innerHeight / geometryScale)}px + env(safe-area-inset-bottom, 0px))`,
       );
       root.style.setProperty(
         "--app-viewport-offset-top",
-        `${Math.round(offsetTop)}px`,
+        `${Math.round(offsetTop / geometryScale)}px`,
       );
       root.style.setProperty(
         "--keyboard-inset-bottom",
-        `${Math.round(keyboardInset)}px`,
+        `${Math.round(keyboardInset / geometryScale)}px`,
       );
-      // Content lift used for the app padding. kbdTrim lets us test how far
-      // the terminal surface can extend toward the keyboard accessory bar.
+      // Both platforms need the visual viewport lift here; without it some
+      // Android browsers place the composer behind the software keyboard.
+      const contentInset = Math.max(0, keyboardInset - keyboardInsetTrim);
       root.style.setProperty(
         "--keyboard-inset-content",
-        `${Math.round(Math.max(0, keyboardInset - keyboardInsetTrim))}px`,
+        `${Math.round(contentInset / geometryScale)}px`,
+      );
+      root.style.setProperty(
+        "--keyboard-inset-composer-gap",
+        `${Math.round(
+          (usesIosKeyboardViewportLift
+            ? Math.max(0, keyboardInset - contentInset)
+            : 0) / geometryScale,
+        )}px`,
       );
       return keyboardOpen;
     };
@@ -481,8 +535,9 @@ function useVisualViewportCssVars() {
       root.style.removeProperty("--app-viewport-offset-top");
       root.style.removeProperty("--keyboard-inset-bottom");
       root.style.removeProperty("--keyboard-inset-content");
+      root.style.removeProperty("--keyboard-inset-composer-gap");
     };
-  }, []);
+  }, [uiScale]);
 }
 
 function isEditableElement(target: EventTarget | null) {
@@ -753,7 +808,9 @@ function resizeTargetForSplit(
 // Render the active tab's Herdr pane layout; single-pane and zoomed tabs keep
 // the old full terminal view.
 function TerminalPaneLayout({
-  fontFamily,
+  terminalTheme,
+  uiScale,
+  terminalFontFamily,
   mobileShortcuts,
   mobileSideShortcuts,
   composerOpen,
@@ -762,7 +819,9 @@ function TerminalPaneLayout({
   onAgentHistoryOpenChange,
   onOpenWorkspaceFile,
 }: {
-  fontFamily: string;
+  terminalTheme: ITheme;
+  uiScale: number;
+  terminalFontFamily: string;
   mobileShortcuts: MobileTerminalShortcutRows;
   mobileSideShortcuts: MobileTerminalSideShortcuts;
   composerOpen: boolean;
@@ -778,7 +837,6 @@ function TerminalPaneLayout({
       layout: state.layout,
       panes: state.panes,
       selectedPaneId: state.selectedPaneId,
-      viewTabId: state.viewTabId,
     }),
     shallowEqual,
   );
@@ -788,68 +846,40 @@ function TerminalPaneLayout({
     null,
   );
   const [responsivePaneSwitcher, setResponsivePaneSwitcher] = useState(false);
-  const selectedPane = s.panes.find(
-    (pane) => pane.pane_id === s.selectedPaneId,
-  );
-  const activeTabId =
-    s.viewTabId ?? selectedPane?.tab_id ?? s.layout?.tab_id ?? null;
-  const terminalIdentity = {
-    connectionId: s.activeConnectionId,
-    generation: s.connectionGeneration,
-  };
-  const layoutCacheRef = useRef<TerminalTabLayoutCache | null>(null);
-  if (layoutCacheRef.current === null) {
-    layoutCacheRef.current = new TerminalTabLayoutCache();
-  }
-  const layout = layoutCacheRef.current.resolve(
-    terminalIdentity,
-    activeTabId,
-    s.layout,
-  );
+  const layout = s.layout;
   const visiblePanes =
     layout?.panes.filter((lp) =>
       s.panes.some((pane) => pane.pane_id === lp.pane_id),
     ) ?? [];
-  const selectedTabPane =
-    selectedPane?.tab_id === activeTabId ? selectedPane : null;
-  const fallbackPaneId =
-    visiblePanes[0]?.pane_id ??
-    selectedTabPane?.pane_id ??
-    s.panes.find((pane) => pane.tab_id === activeTabId && pane.focused)
-      ?.pane_id ??
-    s.panes.find((pane) => pane.tab_id === activeTabId)?.pane_id ??
-    null;
+  const fallbackPaneId = visiblePanes[0]?.pane_id ?? null;
   const activePaneId =
     visiblePanes.find((lp) => lp.pane_id === s.selectedPaneId)?.pane_id ??
     visiblePanes.find((lp) => lp.pane_id === layout?.focused_pane_id)
       ?.pane_id ??
     fallbackPaneId;
-  const mountKeyForSlot = (slot: number) =>
-    terminalSlotMountKey(terminalIdentity, slot);
-
+  const mountKeyForPane = (paneId: string | null) => {
+    const terminalId =
+      s.panes.find((pane) => pane.pane_id === paneId)?.terminal_id ?? null;
+    return terminalMountKey(
+      {
+        connectionId: s.activeConnectionId,
+        generation: s.connectionGeneration,
+      },
+      paneId,
+      terminalId,
+    );
+  };
   const setLayoutContainer = useCallback((element: HTMLDivElement | null) => {
     layoutRef.current = element;
     setLayoutElement(element);
   }, []);
-
   useLayoutEffect(() => {
-    if (!layoutElement || !layout) {
-      setResponsivePaneSwitcher(false);
-      return;
-    }
-
-    const update = () => {
+    if (!layoutElement || !layout) return setResponsivePaneSwitcher(false);
+    const update = () =>
       setResponsivePaneSwitcher(
         paneLayoutNeedsSwitcher(layout, layoutElement.clientWidth),
       );
-    };
     update();
-
-    if (typeof ResizeObserver === "undefined") {
-      window.addEventListener("resize", update);
-      return () => window.removeEventListener("resize", update);
-    }
-
     const observer = new ResizeObserver(update);
     observer.observe(layoutElement);
     return () => observer.disconnect();
@@ -858,10 +888,10 @@ function TerminalPaneLayout({
   if (!layout || layout.zoomed || visiblePanes.length <= 1) {
     return (
       <TerminalView
-        key={mountKeyForSlot(0)}
-        paneId={activePaneId ?? undefined}
-        paneLayout={layout}
-        fontFamily={fontFamily}
+        key={mountKeyForPane(activePaneId)}
+        terminalTheme={terminalTheme}
+        uiScale={uiScale}
+        fontFamily={terminalFontFamily}
         mobileShortcuts={mobileShortcuts}
         mobileSideShortcuts={mobileSideShortcuts}
         composerOpen={composerOpen}
@@ -886,7 +916,7 @@ function TerminalPaneLayout({
     return (
       <div
         ref={setLayoutContainer}
-        className="pane-switcher-layout is-compact"
+        className="pane-switcher-layout"
         aria-label="Terminal pane switcher"
       >
         <div className="pane-switcher">
@@ -918,10 +948,11 @@ function TerminalPaneLayout({
           </button>
         </div>
         <TerminalView
-          key={mountKeyForSlot(0)}
+          key={mountKeyForPane(activePaneId)}
           paneId={activePaneId}
-          paneLayout={layout}
-          fontFamily={fontFamily}
+          terminalTheme={terminalTheme}
+          uiScale={uiScale}
+          fontFamily={terminalFontFamily}
           mobileShortcuts={mobileShortcuts}
           mobileSideShortcuts={mobileSideShortcuts}
           composerOpen={composerOpen}
@@ -1009,12 +1040,12 @@ function TerminalPaneLayout({
       className="pane-layout"
       aria-label="Terminal panes"
     >
-      {visiblePanes.map((layoutPane, slot) => {
+      {visiblePanes.map((layoutPane) => {
         const rect = layoutPane.rect;
         const isActive = layoutPane.pane_id === activePaneId;
         return (
           <div
-            key={mountKeyForSlot(slot)}
+            key={mountKeyForPane(layoutPane.pane_id)}
             className={`pane-layout-cell ${isActive ? "is-active" : ""}`}
             style={{
               left: `${rectPercent(rect.x, area.x, areaWidth)}%`,
@@ -1027,9 +1058,11 @@ function TerminalPaneLayout({
             }}
           >
             <TerminalView
+              key={mountKeyForPane(layoutPane.pane_id)}
               paneId={layoutPane.pane_id}
-              paneLayout={layout}
-              fontFamily={fontFamily}
+              terminalTheme={terminalTheme}
+              uiScale={uiScale}
+              fontFamily={terminalFontFamily}
               showMobileKeys={isActive}
               mobileShortcuts={mobileShortcuts}
               mobileSideShortcuts={mobileSideShortcuts}
@@ -1093,7 +1126,6 @@ export default function App() {
     shallowEqual,
   );
   const connectionClient = useConnectionClient();
-  useVisualViewportCssVars();
   const mobile = useMobileLayout();
   useEffect(() => {
     activateTerminalComposerDraftScope(
@@ -1110,20 +1142,46 @@ export default function App() {
   const [sessionTheme, setSessionTheme] = useState<ResolvedTheme>(() =>
     loadSystemTheme(),
   );
+  const resolvedTheme: ResolvedTheme =
+    theme === "session"
+      ? sessionTheme
+      : theme === "system"
+        ? systemTheme
+        : theme;
   const [accentColor, setAccentColor] = useState<AccentColor>(() =>
     loadAccentColor(),
   );
+  const [uiScale, setUiScale] = useState<number>(() => loadUiScale());
   const [terminalFontFamily, setTerminalFontFamily] = useState(
     loadTerminalFontFamily,
   );
+  useVisualViewportCssVars(uiScale);
   const [mobileTerminalShortcuts, setMobileTerminalShortcuts] =
     useState<MobileTerminalShortcutRows>(loadMobileTerminalShortcuts);
   const [mobileTerminalSideShortcuts, setMobileTerminalSideShortcuts] =
     useState<MobileTerminalSideShortcuts>(loadMobileTerminalSideShortcuts);
+  const [terminalThemeSelection, setTerminalThemeSelection] =
+    useState<TerminalThemeSelection>(loadTerminalThemeSelection);
+  const [customTerminalThemes, setCustomTerminalThemes] = useState<
+    CustomTerminalTheme[]
+  >(loadCustomTerminalThemes);
+  const terminalTheme = useMemo(
+    () =>
+      resolveTerminalTheme(
+        resolvedTheme,
+        terminalThemeSelection,
+        customTerminalThemes,
+      ),
+    [resolvedTheme, terminalThemeSelection, customTerminalThemes],
+  );
   const [sidebarHidden, setSidebarHidden] = useState(false);
   const [mobileControlsCollapsed, setMobileControlsCollapsed] = useState(false);
   const [mobileTabSheetOpen, setMobileTabSheetOpen] = useState(false);
-  const [openTerminalComposerDraftKey, setOpenTerminalComposerDraftKey] =
+  const terminalComposerScopeKey = JSON.stringify([
+    s.activeConnectionId,
+    s.connectionGeneration,
+  ]);
+  const [openTerminalComposerScopeKey, setOpenTerminalComposerScopeKey] =
     useState<string | null>(null);
   const [terminalComposerHasDraft, setTerminalComposerHasDraft] =
     useState(false);
@@ -1134,6 +1192,24 @@ export default function App() {
   const [inspectorState, setInspectorState] =
     useState<WorkspaceInspectorState | null>(null);
   const inspectorStateRef = useRef<WorkspaceInspectorState | null>(null);
+  const inspectorFocusRequestRef = useRef<{
+    state: WorkspaceInspectorState;
+    source: Element | null;
+  } | null>(null);
+  const finishInspectorFocus = useCallback(() => {
+    const request = inspectorFocusRequestRef.current;
+    if (!request) return;
+    if (inspectorStateRef.current !== request.state || !request.state.open) {
+      inspectorFocusRequestRef.current = null;
+      return;
+    }
+    const target = document.querySelector<HTMLElement>(
+      '.workspace-inspector-tabs [role="tab"][aria-selected="true"]',
+    );
+    if (focusIfUnchanged(target, request.source)) {
+      inspectorFocusRequestRef.current = null;
+    }
+  }, []);
   const inspectorReturnFocusRef = useRef<HTMLElement | null>(null);
   const pendingInspectorRequestRef = useRef<WorkspaceInspectorRequest | null>(
     null,
@@ -1157,11 +1233,17 @@ export default function App() {
         .length
     : 0;
   useEffect(() => {
+    localStorage.setItem(TERMINAL_FONT_STORAGE_KEY, terminalFontFamily);
+  }, [terminalFontFamily]);
+  useEffect(() => {
     // Drop mobile-only controls when their context disappears so they cannot
     // stay active invisibly or resurface when the mobile layout returns.
     if (!mobile || !focusedWorkspace) setMobileTabSheetOpen(false);
-    if (!mobile) setOpenTerminalComposerDraftKey(null);
+    if (!mobile) setOpenTerminalComposerScopeKey(null);
   }, [mobile, focusedWorkspace]);
+  useEffect(() => {
+    setOpenTerminalComposerScopeKey(null);
+  }, [terminalComposerScopeKey]);
   const activePaneId = activePaneIdForSnapshot(s);
   const activePane = activePaneId
     ? s.panes.find((pane) => pane.pane_id === activePaneId)
@@ -1176,15 +1258,14 @@ export default function App() {
       : null;
   const terminalComposerOpen =
     mobile &&
-    activeTerminalComposerDraftKey !== null &&
-    openTerminalComposerDraftKey === activeTerminalComposerDraftKey;
+    !mobileTabSheetOpen &&
+    openTerminalComposerScopeKey === terminalComposerScopeKey &&
+    activeTerminalComposerDraftKey !== null;
   const setTerminalComposerOpen = useCallback(
     (open: boolean) => {
-      setOpenTerminalComposerDraftKey(
-        open ? activeTerminalComposerDraftKey : null,
-      );
+      setOpenTerminalComposerScopeKey(open ? terminalComposerScopeKey : null);
     },
-    [activeTerminalComposerDraftKey],
+    [terminalComposerScopeKey],
   );
   useEffect(() => {
     if (!activeTerminalComposerDraftKey) {
@@ -1267,7 +1348,7 @@ export default function App() {
       requestAnimationFrame(() => {
         document
           .querySelector<HTMLElement>(
-            ".pane-layout-cell.is-active .xterm-helper-textarea, .pane-switcher-layout .xterm-helper-textarea, .workspace-terminal-surface > .terminal-shell .xterm-helper-textarea",
+            ":is(.pane-layout-cell.is-active,.pane-switcher-layout,.workspace-terminal-surface>.terminal-shell) .xterm-helper-textarea",
           )
           ?.focus();
       });
@@ -1416,19 +1497,14 @@ export default function App() {
         setActiveDiff(emptyActiveDiffSelection());
         setActiveFilePreview(emptyActiveFilePreviewSelection());
       }
+      inspectorFocusRequestRef.current = focusInspector
+        ? { state: nextState, source: document.activeElement }
+        : null;
       commitInspectorState(nextState);
       writeInspectorPreferences(localStorage, nextState);
       setSidebarHidden(false);
       if (mobile) setMobileView(view);
-      if (focusInspector) {
-        requestAnimationFrame(() => {
-          document
-            .querySelector<HTMLElement>(
-              '.workspace-inspector-tabs [role="tab"][aria-selected="true"]',
-            )
-            ?.focus();
-        });
-      }
+      if (focusInspector) requestAnimationFrame(finishInspectorFocus);
 
       const selectedPath =
         options.path ??
@@ -1456,6 +1532,7 @@ export default function App() {
     [
       commitInspectorState,
       connectionClient.connectionId,
+      finishInspectorFocus,
       loadInspectorFilePreview,
       mobile,
     ],
@@ -1964,6 +2041,42 @@ export default function App() {
     s.pendingFocusWorkspaceId,
     s.workspaces,
   ]);
+  // Follow tab switches while History is open: the view pins its session to
+  // originPaneId, which tab changes never update on their own. Pane focus
+  // changes within the same tab keep the current pin.
+  const inspectorHistoryTabRef = useRef<string | null>(null);
+  useLayoutEffect(() => {
+    const current = inspectorStateRef.current;
+    const workspace =
+      current?.open && current.view === "history"
+        ? resolveWorkspaceForScope(current.scope, s.workspaces)
+        : undefined;
+    const activeTabId = workspace?.active_tab_id ?? null;
+    const previousTabId = inspectorHistoryTabRef.current;
+    inspectorHistoryTabRef.current = activeTabId;
+    if (!current?.open || current.view !== "history" || !workspace) return;
+    if (s.pendingFocusWorkspaceId) return;
+    const originMissing =
+      !!current.originPaneId &&
+      !s.panes.some((pane) => pane.pane_id === current.originPaneId);
+    const tabSwitched =
+      previousTabId !== null &&
+      activeTabId !== null &&
+      previousTabId !== activeTabId;
+    if (!originMissing && !tabSwitched) return;
+    const workspacePanes = s.panes.filter(
+      (pane) => pane.workspace_id === workspace.workspace_id,
+    );
+    const activePaneId = activePaneIdForSnapshot(s);
+    const routedPane =
+      workspacePanes.find((pane) => pane.pane_id === activePaneId) ??
+      workspacePanes.find((pane) => pane.focused);
+    const historyPane = paneHasAgentHistory(routedPane)
+      ? routedPane
+      : workspacePanes.find(paneHasAgentHistory);
+    if (!historyPane || historyPane.pane_id === current.originPaneId) return;
+    commitInspectorState({ ...current, originPaneId: historyPane.pane_id });
+  }, [commitInspectorState, s]);
   useEffect(() => {
     if (paneJumpOpen && paneJumpOptions.length === 0) closePaneJump();
     if (paneJumpIndexRef.current >= paneJumpOptions.length) {
@@ -2107,20 +2220,6 @@ export default function App() {
           if (canDismissUpdate) store.dismissUpdate();
           return;
         }
-        const inspector = inspectorStateRef.current;
-        if (inspector?.expanded) {
-          e.preventDefault();
-          e.stopPropagation();
-          const next = { ...inspector, expanded: false };
-          commitInspectorState(next);
-          writeInspectorPreferences(localStorage, next);
-          return;
-        }
-        if (inspector?.open) {
-          e.preventDefault();
-          e.stopPropagation();
-          closeInspector();
-        }
         return;
       }
       const tabAction = tabShortcutAction(e);
@@ -2161,13 +2260,59 @@ export default function App() {
           tabs.find((tab) => tab.focused)?.tab_id,
         ].find((tabId): tabId is string => !!tabId && tabIds.has(tabId));
         if (tabAction === "close") {
-          if (activeTabId) requestCloseTab(activeTabId);
+          const target = closeShortcutTarget(
+            activeTabId,
+            current.panes,
+            activePaneIdForSnapshot(current),
+          );
+          if (target?.type === "pane") requestClosePane(target.id);
+          else if (target?.type === "tab") requestCloseTab(target.id);
           return;
         }
 
         const targetTabId = adjacentTabId(tabs, activeTabId, tabAction);
         if (!targetTabId || targetTabId === activeTabId) return;
         store.focusTab(targetTabId);
+        return;
+      }
+      const paneAction = paneShortcutAction(e);
+      if (paneAction) {
+        // Browser-level Cmd+D may still be reserved by the host browser, but
+        // standalone/webview clients can route it through this handler.
+        e.preventDefault();
+        e.stopPropagation();
+        if (
+          isEditableElement(e.target) ||
+          document.querySelector(".modal-backdrop")
+        ) {
+          return;
+        }
+        if (e.repeat && paneAction.type === "split") return;
+
+        const current = store.get();
+        const focusedWorkspace = current.workspaces.find((w) => w.focused);
+        const activeTab =
+          current.tabs.find(
+            (tab) => tab.tab_id === focusedWorkspace?.active_tab_id,
+          ) ?? current.tabs.find((tab) => tab.focused);
+        // Resolve the selection only while it belongs to the visible layout,
+        // then fall back to tab-local panes like the command menu does.
+        const layoutActivePaneId = activePaneIdForSnapshot(current);
+        const activePane =
+          current.panes.find((pane) => pane.pane_id === layoutActivePaneId) ??
+          current.panes.find(
+            (pane) => pane.tab_id === activeTab?.tab_id && pane.focused,
+          ) ??
+          current.panes.find((pane) => pane.tab_id === activeTab?.tab_id);
+        if (!activePane) return;
+        if (paneAction.type === "split") {
+          void store.splitPane(activePane.pane_id, paneAction.direction);
+        } else {
+          void store.focusPaneDirection(
+            activePane.pane_id,
+            paneAction.direction,
+          );
+        }
         return;
       }
       const tabIndex = tabShortcutIndex(e);
@@ -2258,10 +2403,7 @@ export default function App() {
       window.removeEventListener("blur", onBlur);
     };
   }, [
-    activateTerminalSurface,
-    closeInspector,
     closePaneJump,
-    commitInspectorState,
     commitPaneJump,
     defaultPaneJumpIndex,
     movePaneJumpSelection,
@@ -2285,78 +2427,45 @@ export default function App() {
     if (theme !== "session" || s.status !== "connected") return;
     let cancelled = false;
     let supported = true;
-    let timer: number | null = null;
     const refresh = () => {
       if (!supported) return;
       void connectionClient
         .call("session.appearance")
         .then((result) => {
           const appearance = result?.appearance;
-          if (!cancelled && (appearance === "light" || appearance === "dark")) {
+          if (!cancelled && (appearance === "light" || appearance === "dark"))
             setSessionTheme(appearance);
-          }
         })
         .catch(() => {
           supported = false;
-          if (timer !== null) window.clearInterval(timer);
           if (!cancelled) setSessionTheme(systemTheme);
         });
     };
-    const onVisibility = () => {
-      if (document.visibilityState === "visible") refresh();
-    };
     refresh();
-    timer = window.setInterval(refresh, 5_000);
-    document.addEventListener("visibilitychange", onVisibility);
+    const timer = window.setInterval(refresh, 5_000);
     return () => {
       cancelled = true;
-      if (timer !== null) window.clearInterval(timer);
-      document.removeEventListener("visibilitychange", onVisibility);
+      window.clearInterval(timer);
     };
   }, [connectionClient, s.status, systemTheme, theme]);
   useLayoutEffect(() => {
-    const resolvedTheme =
-      theme === "session"
-        ? sessionTheme
-        : theme === "system"
-          ? systemTheme
-          : theme;
     document.documentElement.dataset.theme = resolvedTheme;
     document.documentElement.style.colorScheme = resolvedTheme;
     localStorage.setItem(THEME_KEY, theme);
     document.documentElement.dataset.accent = accentColor;
     localStorage.setItem(ACCENT_COLOR_KEY, accentColor);
-    const styles = getComputedStyle(document.documentElement);
-    const foreground = styles.getPropertyValue("--terminal-fg").trim();
-    const background = styles.getPropertyValue("--terminal-bg").trim();
-    window.dispatchEvent(new CustomEvent("herdr:appearance-change"));
-    if (
-      s.status === "connected" &&
-      /^#[0-9a-f]{6}$/i.test(foreground) &&
-      /^#[0-9a-f]{6}$/i.test(background)
-    ) {
-      void connectionClient
-        .call("terminal.appearance", {
-          appearance: resolvedTheme,
-          foreground,
-          background,
-        })
-        .catch(() => {});
+    document.documentElement.style.zoom =
+      uiScale === UI_SCALE_DEFAULT ? "" : String(uiScale / 100);
+    if (uiScale === UI_SCALE_DEFAULT) {
+      document.documentElement.style.removeProperty("--ui-scale");
+    } else {
+      document.documentElement.style.setProperty(
+        "--ui-scale",
+        String(uiScale / 100),
+      );
     }
-  }, [
-    accentColor,
-    connectionClient,
-    s.status,
-    sessionTheme,
-    systemTheme,
-    theme,
-  ]);
-  useEffect(() => {
-    localStorage.setItem(
-      TERMINAL_FONT_STORAGE_KEY,
-      normalizeTerminalFontFamily(terminalFontFamily),
-    );
-  }, [terminalFontFamily]);
+    localStorage.setItem(UI_SCALE_KEY, String(uiScale));
+  }, [accentColor, resolvedTheme, theme, uiScale]);
   useEffect(() => {
     localStorage.setItem(
       MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY,
@@ -2370,17 +2479,33 @@ export default function App() {
     );
   }, [mobileTerminalSideShortcuts]);
   useEffect(() => {
+    localStorage.setItem(
+      TERMINAL_THEME_SELECTION_STORAGE_KEY,
+      serializeTerminalThemeSelection(terminalThemeSelection),
+    );
+  }, [terminalThemeSelection]);
+  useEffect(() => {
+    localStorage.setItem(
+      CUSTOM_TERMINAL_THEMES_STORAGE_KEY,
+      serializeCustomTerminalThemes(customTerminalThemes),
+    );
+  }, [customTerminalThemes]);
+  useEffect(() => {
     const onStorage = (event: StorageEvent) => {
       if (event.key === MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY) {
         setMobileTerminalShortcuts(
           parseMobileTerminalShortcutRows(event.newValue),
         );
+      } else if (event.key === TERMINAL_FONT_STORAGE_KEY) {
+        setTerminalFontFamily(event.newValue ?? "");
       } else if (event.key === MOBILE_TERMINAL_SIDE_SHORTCUTS_STORAGE_KEY) {
         setMobileTerminalSideShortcuts(
           parseMobileTerminalSideShortcuts(event.newValue),
         );
-      } else if (event.key === TERMINAL_FONT_STORAGE_KEY) {
-        setTerminalFontFamily(normalizeTerminalFontFamily(event.newValue));
+      } else if (event.key === TERMINAL_THEME_SELECTION_STORAGE_KEY) {
+        setTerminalThemeSelection(parseTerminalThemeSelection(event.newValue));
+      } else if (event.key === CUSTOM_TERMINAL_THEMES_STORAGE_KEY) {
+        setCustomTerminalThemes(parseCustomTerminalThemes(event.newValue));
       }
     };
     window.addEventListener("storage", onStorage);
@@ -2564,7 +2689,9 @@ export default function App() {
             <span className="brand-version">v{packageJson.version}</span>
           </div>
           <ConnectionSwitcher />
-          <CollaborationBar />
+          <Suspense fallback={null}>
+            <LazyCollaborationBar />
+          </Suspense>
         </div>
         <div className="topbar-actions">
           <div className="topbar-command-group">
@@ -2581,13 +2708,19 @@ export default function App() {
               terminalFontFamily={terminalFontFamily}
               mobileTerminalShortcuts={mobileTerminalShortcuts}
               mobileTerminalSideShortcuts={mobileTerminalSideShortcuts}
+              terminalThemeSelection={terminalThemeSelection}
+              customTerminalThemes={customTerminalThemes}
               onThemeChange={setTheme}
               onAccentColorChange={setAccentColor}
               onTerminalFontFamilyChange={setTerminalFontFamily}
+              uiScale={uiScale}
+              onUiScaleChange={setUiScale}
               onMobileTerminalShortcutsChange={setMobileTerminalShortcuts}
               onMobileTerminalSideShortcutsChange={
                 setMobileTerminalSideShortcuts
               }
+              onTerminalThemeSelectionChange={setTerminalThemeSelection}
+              onCustomTerminalThemesChange={setCustomTerminalThemes}
             />
           </div>
         </div>
@@ -2662,12 +2795,16 @@ export default function App() {
           mobileView === "workspaces" ? "is-active" : ""
         }`}
         title="Workspaces"
-        aria-label="Show workspaces"
+        aria-label={
+          mobileView === "workspaces" ? "Hide workspaces" : "Show workspaces"
+        }
         aria-pressed={mobileView === "workspaces"}
         aria-hidden={mobileControlsCollapsed}
         tabIndex={mobileControlsCollapsed ? -1 : 0}
         onPointerDown={blurActiveInput}
-        onClick={openWorkspaces}
+        onClick={
+          mobileView === "workspaces" ? activateTerminalSurface : openWorkspaces
+        }
       >
         <PanelTop size={17} />
       </button>
@@ -2690,11 +2827,7 @@ export default function App() {
             tabIndex={mobileControlsCollapsed ? -1 : 0}
             disabled={!focusedWorkspace}
             onPointerDown={blurActiveInput}
-            onClick={() => {
-              const open = !mobileTabSheetOpen;
-              setMobileTabSheetOpen(open);
-              if (open) setTerminalComposerOpen(false);
-            }}
+            onClick={() => setMobileTabSheetOpen((open) => !open)}
           >
             <SquareStack size={16} />
             {focusedWorkspaceTabCount > 0 ? (
@@ -2903,7 +3036,9 @@ export default function App() {
           >
             <div className="workspace-terminal-surface">
               <TerminalPaneLayout
-                fontFamily={terminalFontFamily}
+                terminalTheme={terminalTheme}
+                uiScale={uiScale}
+                terminalFontFamily={terminalFontFamily}
                 mobileShortcuts={mobileTerminalShortcuts}
                 mobileSideShortcuts={mobileTerminalSideShortcuts}
                 composerOpen={terminalComposerOpen}
@@ -2939,33 +3074,39 @@ export default function App() {
                       : { height: inspectorState.size }
                 }
               >
-                <WorkspaceInspectorHost
-                  key={`${resourceUiKey}:${resourceOwnerKey(inspectorState.scope)}`}
-                  state={inspectorState}
-                  workspace={inspectorWorkspace}
-                  historyPane={inspectorHistoryPane}
-                  fileSelection={activeFilePreview}
-                  diffSelection={activeDiff}
-                  connectionClient={connectionClient}
-                  onFileSelectionChange={(selection) =>
-                    handleFilePreviewChange(
-                      resourceStateKey(inspectorState.scope),
-                      selection,
-                    )
-                  }
-                  onDiffSelectionChange={(selection) =>
-                    handleDiffSelectionChange(
-                      resourceStateKey(inspectorState.scope),
-                      selection,
-                    )
-                  }
-                  onOpenDiffFile={openDiffFileInExplorer}
-                  onViewChange={setInspectorView}
-                  onDockChange={setInspectorDock}
-                  onExpandedChange={setInspectorExpanded}
-                  onClose={closeInspector}
-                  onBack={clearInspectorDetail}
-                />
+                <Suspense
+                  fallback={<div role="status">Loading Inspector...</div>}
+                >
+                  <WorkspaceInspectorHost
+                    key={`${resourceUiKey}:${resourceOwnerKey(inspectorState.scope)}`}
+                    state={inspectorState}
+                    onReady={finishInspectorFocus}
+                    visible={!mobile || mobileView !== "workspaces"}
+                    workspace={inspectorWorkspace}
+                    historyPane={inspectorHistoryPane}
+                    fileSelection={activeFilePreview}
+                    diffSelection={activeDiff}
+                    connectionClient={connectionClient}
+                    onFileSelectionChange={(selection) =>
+                      handleFilePreviewChange(
+                        resourceStateKey(inspectorState.scope),
+                        selection,
+                      )
+                    }
+                    onDiffSelectionChange={(selection) =>
+                      handleDiffSelectionChange(
+                        resourceStateKey(inspectorState.scope),
+                        selection,
+                      )
+                    }
+                    onOpenDiffFile={openDiffFileInExplorer}
+                    onViewChange={setInspectorView}
+                    onDockChange={setInspectorDock}
+                    onExpandedChange={setInspectorExpanded}
+                    onClose={closeInspector}
+                    onBack={clearInspectorDetail}
+                  />
+                </Suspense>
               </div>
             ) : null}
           </div>

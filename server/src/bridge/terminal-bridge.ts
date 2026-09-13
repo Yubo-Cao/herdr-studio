@@ -1,9 +1,20 @@
+import {
+  EndpointCreationDeadline,
+  parseEndpointCreationSource,
+  type EndpointCreationSource,
+} from "./endpoint-creation";
 import type { ServerWebSocket } from "bun";
 import {
   CONNECTION_CHANGED_DURING_REQUEST,
   serializeConnectionEnvelope,
 } from "../connections/protocol";
+import { type Logger, silentLogger } from "../utils/logger";
+import { NO_TERMINAL_ATTACHED_MESSAGE } from "../utils/rpc-logging";
 import { ThinClient } from "./thin-client";
+import { isTerminalHelloProtocol } from "./protocol-compat";
+import { EndpointTerminalSession } from "./endpoint-terminal-session";
+import { frameToAnsi } from "./frame-to-ansi";
+import { isTerminalClipboardPayload } from "./terminal-clipboard";
 
 type TerminalSession = {
   terminalId: string | null;
@@ -12,7 +23,7 @@ type TerminalSession = {
 };
 
 type SharedTerminalSession = {
-  thin: ThinClient;
+  thin: ThinClient | EndpointTerminalSession;
   connecting: Promise<void> | null;
   firstFrame: Promise<boolean>;
   resolveFirstFrame: ((seen: boolean) => void) | null;
@@ -26,45 +37,36 @@ type SharedTerminalSession = {
   lastFrameLogAt: number;
   /** Last error Herdr reported on the stream, e.g. a takeover notice. */
   lastError: string | null;
-  mode: "control" | "observe";
-  takeoverRequested: boolean;
-  suppressCloseNotification: boolean;
-};
-
-type TerminalAccess = {
-  participantId: string | null;
-  paneId: string;
-  ownsLayout: boolean;
-  hasClaim: boolean;
-};
-
-type AppearanceReport = {
-  appearance: "light" | "dark";
-  foreground: string;
-  background: string;
 };
 
 type ClipboardTarget = {
   ws: ServerWebSocket<unknown>;
   terminalId: string;
   inputAt: number;
+  session: SharedTerminalSession;
 };
 
 const CLIPBOARD_INPUT_WINDOW_MS = 30_000;
 const CLIPBOARD_RELAY_READY_WAIT_MS = 500;
 const TERMINAL_FIRST_FRAME_WAIT_MS = 20_000;
-const TERMINAL_CONTROL_DECISION_WAIT_MS = 750;
-// Herdr rejects OSC 52 bodies above 256 KiB before emitting Clipboard.
-const MAX_TERMINAL_CLIPBOARD_BASE64_CHARS = 256 * 1024;
 const STANDARD_BASE64_RE =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 export function createTerminalBridge(args: {
   connectionId?: string;
   connectionGeneration?: number;
+  logger?: Logger;
   formatError?: (error: unknown) => string;
   clientSocketPath: string;
   herdrProtocol: () => Promise<number>;
+  /** Resolve a terminal id to its owning pane id (control-socket pane.list). */
+  lookupPaneId?: (terminalId: string) => Promise<string | null>;
+  validateCreationSource?: (source: EndpointCreationSource) => Promise<void>;
+  createEmptyWorkspace?: (
+    params: Record<string, unknown>,
+    isCurrent: () => boolean,
+    deadline: EndpointCreationDeadline,
+  ) => Promise<unknown>;
   safeSend: (
     ws: ServerWebSocket<unknown>,
     payload: string,
@@ -81,26 +83,50 @@ export function createTerminalBridge(args: {
     rows: number;
     paneId: string | null;
   }) => Promise<boolean>;
-  herdrCall?: (
-    method: string,
-    params?: Record<string, unknown>,
-  ) => Promise<any>;
 }) {
+  const logger = args.logger ?? silentLogger;
   const terminals = new Map<ServerWebSocket<unknown>, TerminalSession>();
-  const terminalViewers = new Map<ServerWebSocket<unknown>, Set<string>>();
-  const sharedTerminals = new Map<string, SharedTerminalSession>();
-  const terminalAccess = new Map<
+  const terminalViewers = new Map<
     ServerWebSocket<unknown>,
-    Map<string, TerminalAccess>
+    Map<string, { cols: number; rows: number }>
   >();
+  const sharedTerminals = new Map<string, SharedTerminalSession>();
+  const attachmentTokens = new Map<
+    ServerWebSocket<unknown>,
+    Map<string, object>
+  >();
+  // Different panes have different endpoint lanes. Preserve each browser's
+  // selection order across them, and discard superseded queued selections.
+  const focusIntents = new Map<ServerWebSocket<unknown>, object>();
+  const focusChains = new Map<ServerWebSocket<unknown>, Promise<void>>();
   let clipboardRelay: ThinClient | null = null;
   let clipboardRelayConnecting: Promise<void> | null = null;
   let clipboardTarget: ClipboardTarget | null = null;
   let clipboardRelaySize: { cols: number; rows: number } | null = null;
-  let latestAppearance: AppearanceReport | null = null;
   let clipboardRelayRevision = 0;
+  // Set when the server speaks protocol 22+ and the relay is known to be
+  // undeliverable, so repeated checks neither reconnect nor re-log.
+  let clipboardRelaySkipped = false;
   let lifecycleRevision = 0;
   let disposed = false;
+  // Resolved once per bridge: the protocol is fixed for the server process,
+  // and a restart recreates this bridge.
+  let resolvedProtocol: number | null = null;
+  async function bridgeProtocol(): Promise<number> {
+    if (resolvedProtocol === null) {
+      resolvedProtocol = await args.herdrProtocol();
+    }
+    return resolvedProtocol;
+  }
+
+  // Use the same verified backend decision for browser navigation and rendering.
+  async function navigationMode(): Promise<"browser-local" | "shared"> {
+    return isTerminalHelloProtocol(await bridgeProtocol()) &&
+      args.lookupPaneId &&
+      process.env.HERDR_GUI_DISABLE_ENDPOINT !== "1"
+      ? "browser-local"
+      : "shared";
+  }
 
   const serialize = (message: Record<string, unknown>) =>
     args.connectionId
@@ -110,7 +136,6 @@ export function createTerminalBridge(args: {
           args.connectionGeneration,
         )
       : JSON.stringify(message);
-  const connectionDetail = `connection=${args.connectionId ?? "legacy-default"}`;
   const formatError =
     args.formatError ??
     ((error: unknown) =>
@@ -131,15 +156,10 @@ export function createTerminalBridge(args: {
 
   function forwardClipboard(data: string, terminalId?: string) {
     if (disposed) return;
-    if (
-      !data ||
-      data.length > MAX_TERMINAL_CLIPBOARD_BASE64_CHARS ||
-      !STANDARD_BASE64_RE.test(data)
-    ) {
-      console.warn(
-        "[bridge] dropped invalid terminal clipboard payload",
-        connectionDetail,
-      );
+    if (!isTerminalClipboardPayload(data)) {
+      logger.warn("dropped invalid terminal clipboard payload", {
+        connection: args.connectionId ?? "legacy-default",
+      });
       return;
     }
 
@@ -147,6 +167,9 @@ export function createTerminalBridge(args: {
     const recentTarget =
       clipboardTarget &&
       now - clipboardTarget.inputAt <= CLIPBOARD_INPUT_WINDOW_MS &&
+      !clipboardTarget.session.thin.isClosed &&
+      sharedTerminals.get(clipboardTarget.terminalId) ===
+        clipboardTarget.session &&
       terminalViewers
         .get(clipboardTarget.ws)
         ?.has(clipboardTarget.terminalId) &&
@@ -154,11 +177,10 @@ export function createTerminalBridge(args: {
         ? clipboardTarget
         : null;
     if (!recentTarget) {
-      console.warn(
-        "[bridge] dropped terminal clipboard without matching recent input",
-        connectionDetail,
-        ...(terminalId ? [`terminal=${terminalId}`] : []),
-      );
+      logger.warn("dropped terminal clipboard without recent input", {
+        connection: args.connectionId ?? "legacy-default",
+        terminal: terminalId,
+      });
       return;
     }
     const targetTerminalId = recentTarget.terminalId;
@@ -170,13 +192,12 @@ export function createTerminalBridge(args: {
         data,
       },
     });
-    console.log(
-      "[bridge] terminal clipboard",
-      connectionDetail,
-      `terminal=${targetTerminalId}`,
-      `payload=${formatBytes(data.length)}`,
-      `target=${args.clientLabel(target)}`,
-    );
+    logger.debug("terminal clipboard", {
+      connection: args.connectionId ?? "legacy-default",
+      terminal: targetTerminalId,
+      payload: formatBytes(data.length),
+      target: args.clientLabel(target),
+    });
     args.safeSend(target, payload, "terminal-clipboard");
   }
 
@@ -187,22 +208,6 @@ export function createTerminalBridge(args: {
     clipboardRelayConnecting = null;
     clipboardRelaySize = null;
     clipboardRelayRevision += 1;
-  }
-
-  function sendLatestAppearance() {
-    if (!latestAppearance || !clipboardRelay || clipboardRelay.isClosed) {
-      return false;
-    }
-    const rgb = (value: string) =>
-      `${value.slice(1, 3)}/${value.slice(3, 5)}/${value.slice(5, 7)}`;
-    const report =
-      `\u001b]10;rgb:${rgb(latestAppearance.foreground)}\u001b\\` +
-      `\u001b]11;rgb:${rgb(latestAppearance.background)}\u001b\\` +
-      (latestAppearance.appearance === "light"
-        ? "\u001b[?997;2n"
-        : "\u001b[?997;1n");
-    clipboardRelay.input(Buffer.from(report, "utf8"));
-    return true;
   }
 
   // The clipboard relay doubles as the server's foreground app client, whose
@@ -269,54 +274,86 @@ export function createTerminalBridge(args: {
 
   function ensureClipboardRelay(cols: number, rows: number) {
     if (disposed) throw new Error("terminal bridge disposed");
+    if (clipboardRelaySkipped) return Promise.resolve();
     if (clipboardRelay && !clipboardRelay.isClosed) {
       return clipboardRelayConnecting ?? Promise.resolve();
     }
 
-    const relay = new ThinClient(args.clientSocketPath, args.herdrProtocol);
-    clipboardRelay = relay;
-    clipboardRelaySize = { cols, rows };
-    relay.on("clipboard", ({ data }) => forwardClipboard(data));
-    relay.on("error", (error) =>
-      console.error("[clipboard-relay]", connectionDetail, formatError(error)),
-    );
-    relay.on("close", () => {
-      if (clipboardRelay !== relay) return;
-      clipboardRelay = null;
-      clipboardRelayConnecting = null;
-      clipboardRelaySize = null;
-    });
-
-    // Herdr routes client-local side effects such as OSC 52 only to its
-    // foreground app client. Direct terminal attachments intentionally cannot
-    // receive them, so keep one lightweight app connection while terminals are
-    // being viewed and route its clipboard messages back to the input owner.
-    const connecting = relay
-      .connect(cols, rows, { launchMode: "app", encoding: 1 })
-      .then(() => {
-        if (disposed) {
-          relay.close();
-          return;
-        }
-        sendLatestAppearance();
-        console.log("[bridge] clipboard relay connected", connectionDetail);
-      })
-      .catch((error) => {
-        if (clipboardRelay === relay) {
-          clipboardRelay = null;
-          clipboardRelaySize = null;
-        }
-        if (!disposed && sharedTerminals.size > 0) {
-          console.error(
-            "[clipboard-relay] connect failed:",
-            connectionDetail,
-            formatError(error),
+    const connecting = (async () => {
+      // Tagged Herdr 0.9.0 (protocol 22) routes client-local side effects such as
+      // OSC 52 only to the foreground *shell* (endpoint-protocol) client;
+      // direct terminal connections like this relay are never foreground and
+      // can never receive ServerMessage::Clipboard there. Skip the relay and
+      // use the endpoint session's clipboard events instead. Only the explicit
+      // legacy fallback still lacks OSC 52; browser copy/paste is unaffected.
+      const protocol = await args.herdrProtocol();
+      if (disposed) return;
+      if (isTerminalHelloProtocol(protocol)) {
+        clipboardRelaySkipped = true;
+        if (
+          !args.lookupPaneId ||
+          process.env.HERDR_GUI_DISABLE_ENDPOINT === "1"
+        ) {
+          logger.warn(
+            "terminal-program OSC 52 unavailable on the legacy fallback: Herdr protocol 22 routes clipboard only to endpoint shell clients; browser copy/paste is unaffected",
+            { connection: args.connectionId ?? "legacy-default" },
           );
         }
-      })
-      .finally(() => {
-        if (clipboardRelay === relay) clipboardRelayConnecting = null;
+        return;
+      }
+
+      const relay = new ThinClient(args.clientSocketPath, args.herdrProtocol);
+      clipboardRelay = relay;
+      clipboardRelaySize = { cols, rows };
+      relay.on("clipboard", ({ data }) => {
+        if (clipboardRelay === relay && !relay.isClosed) forwardClipboard(data);
       });
+      relay.on("error", (error) =>
+        logger.warn("clipboard relay error", {
+          connection: args.connectionId ?? "legacy-default",
+          error: formatError(error),
+        }),
+      );
+      relay.on("close", () => {
+        if (clipboardRelay !== relay) return;
+        clipboardRelay = null;
+        clipboardRelayConnecting = null;
+        clipboardRelaySize = null;
+      });
+
+      // Herdr before protocol 22 routes client-local side effects such as
+      // OSC 52 only to its foreground app client. Direct terminal attachments
+      // intentionally cannot receive them, so keep one lightweight app
+      // connection while terminals are being viewed and route its clipboard
+      // messages back to the input owner.
+      await relay
+        .connect(cols, rows, { launchMode: "app", encoding: 1 })
+        .then(() => {
+          if (disposed) {
+            relay.close();
+            return;
+          }
+          logger.debug("clipboard relay connected", {
+            connection: args.connectionId ?? "legacy-default",
+          });
+        })
+        .catch((error) => {
+          if (clipboardRelay === relay) {
+            clipboardRelay = null;
+            clipboardRelaySize = null;
+          }
+          if (!disposed && sharedTerminals.size > 0) {
+            logger.warn("clipboard relay connection failed", {
+              connection: args.connectionId ?? "legacy-default",
+              error: formatError(error),
+            });
+          }
+        });
+    })().finally(() => {
+      if (clipboardRelayConnecting === connecting) {
+        clipboardRelayConnecting = null;
+      }
+    });
     clipboardRelayConnecting = connecting;
     return connecting;
   }
@@ -341,10 +378,9 @@ export function createTerminalBridge(args: {
     if (timer) clearTimeout(timer);
     if (disposed) return false;
     if (timedOut) {
-      console.warn(
-        "[clipboard-relay] still connecting; terminal attach will continue",
-        connectionDetail,
-      );
+      logger.debug("clipboard relay still connecting", {
+        connection: args.connectionId ?? "legacy-default",
+      });
       return false;
     }
     if (!clipboardRelay || clipboardRelay.isClosed) return false;
@@ -373,38 +409,13 @@ export function createTerminalBridge(args: {
     ]);
     if (timer) clearTimeout(timer);
     if (timedOut) {
-      console.warn(
-        "[bridge] terminal first frame still pending; clipboard relay deferred",
-        connectionDetail,
-        `terminal=${shared.terminalId}`,
-      );
+      logger.warn("terminal first frame still pending", {
+        connection: args.connectionId ?? "legacy-default",
+        terminal: shared.terminalId,
+        clipboard_relay: "deferred",
+      });
     }
     return seen;
-  }
-
-  async function waitForTerminalControlDecision(
-    shared: SharedTerminalSession,
-  ): Promise<boolean | null> {
-    let timer: ReturnType<typeof setTimeout> | null = null;
-    const decision = await Promise.race([
-      shared.firstFrame,
-      new Promise<null>((resolve) => {
-        timer = setTimeout(
-          () => resolve(null),
-          TERMINAL_CONTROL_DECISION_WAIT_MS,
-        );
-      }),
-    ]);
-    if (timer) clearTimeout(timer);
-    return decision;
-  }
-
-  function isOccupiedTerminalControl(error: string | null): boolean {
-    const normalized = error?.toLowerCase() ?? "";
-    return (
-      normalized.includes("already has an attached client") &&
-      normalized.includes("takeover")
-    );
   }
 
   async function syncClipboardRelayAfterAttach(
@@ -434,8 +445,14 @@ export function createTerminalBridge(args: {
     const viewed = terminalViewers.get(ws);
     const terminalIds = terminalId
       ? [terminalId]
-      : Array.from(viewed ?? (current?.terminalId ? [current.terminalId] : []));
+      : Array.from(
+          viewed?.keys() ?? (current?.terminalId ? [current.terminalId] : []),
+        );
     for (const id of terminalIds) {
+      attachmentTokens.get(ws)?.delete(id);
+      if (clipboardTarget?.ws === ws && clipboardTarget.terminalId === id) {
+        clipboardTarget = null;
+      }
       const shared = sharedTerminals.get(id);
       shared?.viewers.delete(ws);
       if (shared && shared.viewers.size === 0) {
@@ -443,80 +460,50 @@ export function createTerminalBridge(args: {
         sharedTerminals.delete(id);
       }
       viewed?.delete(id);
-      const accessByTerminal = terminalAccess.get(ws);
-      const access = accessByTerminal?.get(id);
-      accessByTerminal?.delete(id);
-      if (access?.hasClaim && access.participantId && args.herdrCall) {
-        const stillControlled = Array.from(terminalAccess.values()).some(
-          (entries) =>
-            Array.from(entries.values()).some(
-              (entry) =>
-                entry.hasClaim &&
-                entry.participantId === access.participantId &&
-                entry.paneId === access.paneId,
-            ),
-        );
-        if (!stillControlled) {
-          void args
-            .herdrCall("collaboration.release", {
-              participant_id: access.participantId,
-              pane_id: access.paneId,
-            })
-            .catch((error) =>
-              console.warn(
-                "[bridge] collaboration claim release failed",
-                connectionDetail,
-                formatError(error),
-              ),
-            );
-        }
-      }
     }
     if (!viewed || viewed.size === 0) {
       terminalViewers.delete(ws);
-      terminalAccess.delete(ws);
+      attachmentTokens.delete(ws);
       terminals.delete(ws);
       if (clipboardTarget?.ws === ws) clipboardTarget = null;
       return;
     }
     if (current?.terminalId && !viewed.has(current.terminalId)) {
       terminals.set(ws, {
-        terminalId: Array.from(viewed)[viewed.size - 1] ?? null,
+        terminalId: Array.from(viewed.keys())[viewed.size - 1] ?? null,
         cols: current.cols,
         rows: current.rows,
       });
     }
   }
 
-  function getSharedTerminal(
+  async function getSharedTerminal(
     terminalId: string,
     cols: number,
     rows: number,
-    mode: "control" | "observe",
-    takeover = false,
-  ): SharedTerminalSession {
+    surfaceSize?: { cols: number; rows: number },
+  ): Promise<SharedTerminalSession> {
     if (disposed) throw new Error("terminal bridge disposed");
     const creationRevision = lifecycleRevision;
+    // Resolve before checking the map so concurrent attaches for the same
+    // terminal cannot double-create while the first resolution is in flight.
+    const mode = await navigationMode();
     const existing = sharedTerminals.get(terminalId);
-    if (
-      existing &&
-      !existing.thin.isClosed &&
-      !(existing.mode === "observe" && mode === "control")
-    ) {
-      return existing;
-    }
-    const inheritedViewers = new Set(existing?.viewers ?? []);
+    if (existing && !existing.thin.isClosed) return existing;
     if (existing) {
-      // An observe -> control transition needs a fresh Herdr connection, but
-      // every browser watching the old stream must stay subscribed. Clear the
-      // retired stream's set first so its expected close cannot publish a
-      // misleading terminal_closed event to those viewers.
-      existing.viewers.clear();
       existing.thin.close();
       sharedTerminals.delete(terminalId);
     }
 
-    const thin = new ThinClient(args.clientSocketPath, args.herdrProtocol);
+    const thin =
+      mode === "browser-local" && args.lookupPaneId
+        ? new EndpointTerminalSession(
+            args.clientSocketPath,
+            terminalId,
+            args.lookupPaneId,
+            logger,
+          )
+        : new ThinClient(args.clientSocketPath, args.herdrProtocol);
     let resolveFirstFrame!: (seen: boolean) => void;
     const firstFrame = new Promise<boolean>((resolve) => {
       resolveFirstFrame = resolve;
@@ -529,25 +516,20 @@ export function createTerminalBridge(args: {
       terminalId,
       cols,
       rows,
-      viewers: inheritedViewers,
+      viewers: new Set(),
       frames: 0,
       bytes: 0,
       firstFrameLogged: false,
       lastFrameLogAt: 0,
       lastError: null,
-      mode,
-      takeoverRequested: takeover,
-      suppressCloseNotification: false,
     };
     sharedTerminals.set(terminalId, shared);
-    console.log(
-      "[bridge] thin connecting",
-      connectionDetail,
-      `terminal=${terminalId}`,
-      `size=${cols}x${rows}`,
-      `mode=${mode}`,
-      `socket=${args.clientSocketPath}`,
-    );
+    logger.debug("terminal stream connecting", {
+      connection: args.connectionId ?? "legacy-default",
+      terminal: terminalId,
+      size: `${cols}x${rows}`,
+      socket: args.clientSocketPath,
+    });
 
     thin.on("terminal", (t) => {
       const resolve = shared.resolveFirstFrame;
@@ -560,81 +542,98 @@ export function createTerminalBridge(args: {
       shared.bytes += t.bytes.length;
       const now = Date.now();
       if (!shared.firstFrameLogged || now - shared.lastFrameLogAt >= 30_000) {
-        console.log(
-          "[bridge] thin frame",
-          connectionDetail,
-          `terminal=${terminalId}`,
-          `size=${t.width}x${t.height}`,
-          `full=${t.full}`,
-          `frames=${shared.frames}`,
-          `bytes=${formatBytes(shared.bytes)}`,
-          `viewers=${shared.viewers.size}`,
-        );
+        logger.debug("terminal frame", {
+          connection: args.connectionId ?? "legacy-default",
+          terminal: terminalId,
+          size: `${t.width}x${t.height}`,
+          full: t.full,
+          frames: shared.frames,
+          bytes: formatBytes(shared.bytes),
+          viewers: shared.viewers.size,
+        });
         shared.firstFrameLogged = true;
         shared.lastFrameLogAt = now;
       }
-      const payload = serialize({
-        terminal: {
-          terminal_id: terminalId,
-          width: t.width,
-          height: t.height,
-          full: t.full,
-          bytes: Buffer.from(t.bytes).toString("base64"),
-        },
-      });
+      const payloads = new Map<string, string>();
       for (const viewer of Array.from(shared.viewers)) {
-        if (!terminalViewers.get(viewer)?.has(terminalId)) {
+        const viewport = terminalViewers.get(viewer)?.get(terminalId);
+        if (!viewport) {
           shared.viewers.delete(viewer);
           continue;
+        }
+        const width = t.frame ? Math.min(t.width, viewport.cols) : t.width;
+        const height = t.frame ? Math.min(t.height, viewport.rows) : t.height;
+        const key = `${width}x${height}`;
+        let payload = payloads.get(key);
+        if (!payload) {
+          const bytes =
+            t.frame && (width !== t.width || height !== t.height)
+              ? frameToAnsi(t.frame, viewport)
+              : t.bytes;
+          payload = serialize({
+            terminal: {
+              terminal_id: terminalId,
+              width,
+              height,
+              full: t.full,
+              ...(typeof t.mouseReporting === "boolean"
+                ? { mouse_reporting: t.mouseReporting }
+                : {}),
+              ...(t.history &&
+              width === t.history.cols &&
+              height === t.history.rows
+                ? { history: t.history }
+                : {}),
+              bytes: Buffer.from(bytes).toString("base64"),
+            },
+          });
+          payloads.set(key, payload);
         }
         args.safeSend(viewer, payload, "terminal-frame");
       }
     });
-    // Keep compatibility with a future Herdr version that may route clipboard
-    // side effects directly to the terminal attachment.
-    thin.on("clipboard", ({ data }) => forwardClipboard(data, terminalId));
+    // Bind to the receiving session, NOT the producing PTY: Herdr 0.9.0 sends
+    // clipboard to its foreground shell without source attribution. The global
+    // recent input owner must still match this session; never broadcast.
+    thin.on("clipboard", ({ data }) => {
+      if (
+        isCurrent(creationRevision) &&
+        !thin.isClosed &&
+        sharedTerminals.get(terminalId) === shared
+      ) {
+        forwardClipboard(data, terminalId);
+      }
+    });
     thin.on("welcome", (w) => {
-      const parts = [
-        "[bridge] thin welcome",
-        connectionDetail,
-        `terminal=${terminalId}`,
-        `version=${w.version}`,
-        `encoding=${w.encoding}`,
-      ];
-      if (w.error) parts.push(`error=${formatError(w.error)}`);
-      console.log(...parts);
+      logger.debug("terminal stream welcome", {
+        connection: args.connectionId ?? "legacy-default",
+        terminal: terminalId,
+        version: w.version,
+        encoding: w.encoding,
+        error: w.error ? formatError(w.error) : undefined,
+      });
     });
     thin.on("error", (error) => {
       shared.lastError = formatError(error);
-      if (
-        shared.mode === "control" &&
-        !shared.takeoverRequested &&
-        isOccupiedTerminalControl(shared.lastError)
-      ) {
-        // The bridge will transparently reconnect as an observer. Do not flash
-        // a terminal-closed error while that compatibility transition occurs.
-        shared.suppressCloseNotification = true;
-      }
-      console.error(
-        "[thin]",
-        connectionDetail,
-        formatError(terminalId),
-        formatError(error),
-      );
+      logger.warn("terminal stream error", {
+        connection: args.connectionId ?? "legacy-default",
+        terminal: formatError(terminalId),
+        error: formatError(error),
+      });
     });
     thin.on("close", () => {
+      if (clipboardTarget?.session === shared) clipboardTarget = null;
       const resolve = shared.resolveFirstFrame;
       if (resolve) {
         shared.resolveFirstFrame = null;
         resolve(false);
       }
-      console.log(
-        "[bridge] thin closed",
-        connectionDetail,
-        `terminal=${terminalId}`,
-        `frames=${shared.frames}`,
-        `bytes=${formatBytes(shared.bytes)}`,
-      );
+      logger.debug("terminal stream closed", {
+        connection: args.connectionId ?? "legacy-default",
+        terminal: terminalId,
+        frames: shared.frames,
+        bytes: formatBytes(shared.bytes),
+      });
       if (sharedTerminals.get(terminalId)?.thin === thin) {
         sharedTerminals.delete(terminalId);
       }
@@ -642,17 +641,12 @@ export function createTerminalBridge(args: {
       // over, and the stream can also die with the server. Viewers only see
       // silence otherwise, so tell them to re-attach instead of leaving a
       // blank terminal behind.
-      if (
-        isCurrent(creationRevision) &&
-        !shared.suppressCloseNotification &&
-        shared.viewers.size > 0
-      ) {
-        console.log(
-          "[bridge] terminal stream closed with live viewers",
-          connectionDetail,
-          `terminal=${terminalId}`,
-          `viewers=${shared.viewers.size}`,
-        );
+      if (isCurrent(creationRevision) && shared.viewers.size > 0) {
+        logger.warn("terminal stream closed with live viewers", {
+          connection: args.connectionId ?? "legacy-default",
+          terminal: terminalId,
+          viewers: shared.viewers.size,
+        });
         const closedPayload = serialize({
           terminal_closed: {
             terminal_id: terminalId,
@@ -664,19 +658,24 @@ export function createTerminalBridge(args: {
         }
       }
     });
-    const terminalReady = thin
-      .connect(cols, rows, { launchMode: "terminal-attach", encoding: 1 })
-      .then(() => {
-        if (!isCurrent(creationRevision)) {
-          thin.close();
-          throw new Error("terminal bridge disposed");
-        }
-        if (mode === "observe") {
-          thin.observe(terminalId);
-        } else {
-          thin.control(terminalId, takeover);
-        }
-      });
+    const terminalReady = (
+      thin instanceof ThinClient
+        ? thin
+            .connect(cols, rows, { launchMode: "terminal-attach", encoding: 1 })
+            .then(() => {
+              if (!isCurrent(creationRevision)) {
+                thin.close();
+                throw new Error("terminal bridge disposed");
+              }
+              thin.attach(terminalId, true);
+            })
+        : thin.connect(cols, rows, surfaceSize)
+    ).then(() => {
+      if (!isCurrent(creationRevision)) {
+        thin.close();
+        throw new Error("terminal bridge disposed");
+      }
+    });
     shared.connecting = terminalReady
       .then(() => undefined)
       .catch((e) => {
@@ -692,6 +691,123 @@ export function createTerminalBridge(args: {
         }
       });
     return shared;
+  }
+
+  async function waitForOwnedTerminal(
+    ws: ServerWebSocket<unknown>,
+    terminalId: string,
+    shared: SharedTerminalSession,
+    requestIsCurrent: () => boolean,
+  ): Promise<() => void> {
+    const token = attachmentTokens.get(ws)?.get(terminalId);
+    const revision = lifecycleRevision;
+    const validate = () => {
+      if (
+        !requestIsCurrent() ||
+        !isCurrent(revision) ||
+        !token ||
+        attachmentTokens.get(ws)?.get(terminalId) !== token ||
+        !terminalViewers.get(ws)?.has(terminalId) ||
+        sharedTerminals.get(terminalId) !== shared ||
+        shared.thin.isClosed
+      ) {
+        throw new Error(
+          "Source terminal attachment changed; retry after it reconnects.",
+        );
+      }
+    };
+    validate();
+    if (shared.connecting) {
+      let timer: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await Promise.race([
+          shared.connecting,
+          new Promise<never>((_, reject) => {
+            timer = setTimeout(
+              () =>
+                reject(
+                  new Error(
+                    "Source terminal is still connecting; retry when ready.",
+                  ),
+                ),
+              20_000,
+            );
+          }),
+        ]);
+      } finally {
+        if (timer) clearTimeout(timer);
+      }
+    }
+    validate();
+    return validate;
+  }
+
+  async function createFromTerminal(
+    ws: ServerWebSocket<unknown>,
+    method: "tab.create" | "workspace.create",
+    params: Record<string, unknown>,
+    requestIsCurrent: () => boolean,
+  ) {
+    const deadline = new EndpointCreationDeadline();
+    return deadline.wait(
+      (async () => {
+        if ((await navigationMode()) !== "browser-local")
+          throw new Error("Client-scoped creation requires Herdr endpoints.");
+        deadline.assertBeforeDispatch();
+        if (method === "workspace.create" && params.browser_source === null) {
+          if (!args.createEmptyWorkspace)
+            throw new Error("Empty-session creation is unavailable.");
+          return args.createEmptyWorkspace(
+            params,
+            () => !disposed && requestIsCurrent(),
+            deadline,
+          );
+        }
+        const source = parseEndpointCreationSource(params.browser_source);
+        if (
+          method === "tab.create" &&
+          params.workspace_id !== source.workspace_id
+        ) {
+          throw new Error(
+            "Creation source does not belong to the requested workspace.",
+          );
+        }
+        const shared = sharedTerminals.get(source.terminal_id);
+        if (!shared || !(shared.thin instanceof EndpointTerminalSession)) {
+          throw new Error(
+            "Open the source terminal tab and wait for it to connect before creating.",
+          );
+        }
+        const validateAttachment = await waitForOwnedTerminal(
+          ws,
+          source.terminal_id,
+          shared,
+          requestIsCurrent,
+        );
+        const creationParams = { ...params };
+        delete creationParams.browser_source;
+        const result = await shared.thin.create(
+          method,
+          {
+            ...creationParams,
+            ...(method === "workspace.create"
+              ? { source_workspace_id: source.workspace_id }
+              : {}),
+            focus: false,
+          },
+          source.pane_id,
+          async () => {
+            validateAttachment();
+            if (!args.validateCreationSource)
+              throw new Error("Creation source validation is unavailable.");
+            await args.validateCreationSource(source);
+            validateAttachment();
+          },
+          deadline,
+        );
+        return result;
+      })(),
+    );
   }
 
   async function handleTerminalRpc(
@@ -725,70 +841,52 @@ export function createTerminalBridge(args: {
         const cols = Number(params.cols ?? 100);
         const rows = Number(params.rows ?? 30);
         if (!terminalId) return fail("terminal_id required");
-        const participantId =
-          typeof params.participant_id === "string" && params.participant_id
-            ? params.participant_id
-            : null;
-        const paneId =
-          typeof params.pane_id === "string" && params.pane_id
-            ? params.pane_id
-            : terminalId;
-        const observeOnly = params.observe_only === true;
-        let ownsLayout = !observeOnly;
-        let hasClaim = false;
-        let claim: unknown = null;
-        if (participantId && args.herdrCall && !observeOnly) {
-          try {
-            const result = await args.herdrCall("collaboration.claim", {
-              participant_id: participantId,
-              pane_id: paneId,
-              takeover: params.takeover === true,
-              ...(typeof params.protect_ms === "number"
-                ? { protect_ms: params.protect_ms }
-                : {}),
-            });
-            hasClaim = result?.granted === true;
-            ownsLayout = hasClaim;
-            claim = result?.claim ?? null;
-          } catch (error) {
-            // An older Herdr server has no collaboration API. Preserve the
-            // historical single-user writable attach in that case.
-            if (!formatError(error).includes("unknown")) throw error;
-          }
+        let surfaceSize: { cols: number; rows: number } | undefined;
+        if (
+          params.surface_cols !== undefined ||
+          params.surface_rows !== undefined
+        ) {
+          const surfaceCols = params.surface_cols;
+          const surfaceRows = params.surface_rows;
+          if (
+            typeof surfaceCols !== "number" ||
+            typeof surfaceRows !== "number" ||
+            !Number.isInteger(surfaceCols) ||
+            !Number.isInteger(surfaceRows) ||
+            surfaceCols < 1 ||
+            surfaceCols > 65_535 ||
+            surfaceRows < 1 ||
+            surfaceRows > 65_535
+          )
+            return fail(
+              "surface_cols and surface_rows must be integers between 1 and 65535",
+            );
+          surfaceSize = { cols: surfaceCols, rows: surfaceRows };
         }
-        const accessByTerminal = terminalAccess.get(ws) ?? new Map();
-        accessByTerminal.set(terminalId, {
-          participantId,
-          paneId,
-          ownsLayout,
-          hasClaim,
-        });
-        terminalAccess.set(ws, accessByTerminal);
-        const relaySize = ownsLayout
-          ? relaySizeFromParams(params, { cols, rows })
-          : null;
+        const relaySize = relaySizeFromParams(params, { cols, rows });
         const relayRevision = relaySize ? ++clipboardRelayRevision : null;
 
         const existingShared = sharedTerminals.get(terminalId);
         const sharedMode =
           existingShared && !existingShared.thin.isClosed ? "reused" : "new";
-        const viewed = terminalViewers.get(ws) ?? new Set<string>();
+        const viewed = terminalViewers.get(ws) ?? new Map();
         const refreshReusedTerminal =
-          ownsLayout &&
           sharedMode === "reused" &&
           !existingShared?.connecting &&
           !viewed.has(terminalId) &&
           existingShared?.cols === cols &&
           existingShared.rows === rows;
         terminals.set(ws, { terminalId, cols, rows });
-        viewed.add(terminalId);
+        viewed.set(terminalId, { cols, rows });
         terminalViewers.set(ws, viewed);
-        let shared = getSharedTerminal(
+        const tokens = attachmentTokens.get(ws) ?? new Map<string, object>();
+        tokens.set(terminalId, {});
+        attachmentTokens.set(ws, tokens);
+        const shared = await getSharedTerminal(
           terminalId,
           cols,
           rows,
-          ownsLayout ? "control" : "observe",
-          params.takeover === true,
+          surfaceSize,
         );
         shared.viewers.add(ws);
         try {
@@ -796,49 +894,6 @@ export function createTerminalBridge(args: {
         } catch (e) {
           detachTerminalViewer(ws, terminalId);
           throw e;
-        }
-        if (ownsLayout && params.takeover !== true) {
-          const decision = await waitForTerminalControlDecision(shared);
-          if (
-            decision === false &&
-            isOccupiedTerminalControl(shared.lastError)
-          ) {
-            // A stock/direct Herdr client or another Studio bridge already owns
-            // terminal input. Preserve that client by reconnecting read-only;
-            // only the explicit Take control action is allowed to evict it.
-            const viewers = new Set(shared.viewers);
-            shared.viewers.clear();
-            ownsLayout = false;
-            const access = terminalAccess.get(ws)?.get(terminalId);
-            if (access) {
-              access.ownsLayout = false;
-              if (access.hasClaim && access.participantId && args.herdrCall) {
-                await args
-                  .herdrCall("collaboration.release", {
-                    participant_id: access.participantId,
-                    pane_id: access.paneId,
-                  })
-                  .catch(() => null);
-              }
-              access.hasClaim = false;
-            }
-            const observer = getSharedTerminal(
-              terminalId,
-              cols,
-              rows,
-              "observe",
-            );
-            for (const viewer of viewers) observer.viewers.add(viewer);
-            observer.viewers.add(ws);
-            await observer.connecting;
-            shared = observer;
-          } else if (decision === false) {
-            throw new Error(
-              isCurrent(operationRevision)
-                ? (shared.lastError ?? "terminal stream closed")
-                : "terminal bridge disposed",
-            );
-          }
         }
         if (
           !isCurrent(operationRevision) ||
@@ -849,10 +904,9 @@ export function createTerminalBridge(args: {
           throw new Error("terminal bridge disposed");
         }
         if (
-          ownsLayout &&
-          (shared.cols !== cols ||
-            shared.rows !== rows ||
-            refreshReusedTerminal)
+          shared.cols !== cols ||
+          shared.rows !== rows ||
+          refreshReusedTerminal
         ) {
           // Herdr resets its ANSI baseline on Resize, including a same-size
           // resize. Refresh a reused stream so a newly attached browser gets a
@@ -860,14 +914,14 @@ export function createTerminalBridge(args: {
           shared.thin.resize(cols, rows);
           shared.cols = cols;
           shared.rows = rows;
-          console.log(
-            refreshReusedTerminal
-              ? "[bridge] terminal refreshed"
-              : "[bridge] terminal resized",
-            connectionDetail,
-            `client=${args.clientLabel(ws)}`,
-            `terminal=${terminalId}`,
-            `size=${cols}x${rows}`,
+          logger.debug(
+            refreshReusedTerminal ? "terminal refreshed" : "terminal resized",
+            {
+              connection: args.connectionId ?? "legacy-default",
+              client: args.clientLabel(ws),
+              terminal: terminalId,
+              size: `${cols}x${rows}`,
+            },
           );
         }
         if (relaySize && relayRevision !== null) {
@@ -878,38 +932,20 @@ export function createTerminalBridge(args: {
           shared.thin.close();
           throw new Error("terminal bridge disposed");
         }
-        if (ownsLayout && participantId) {
-          for (const accessEntries of terminalAccess.values()) {
-            const previous = accessEntries.get(terminalId);
-            if (
-              !previous?.ownsLayout ||
-              previous.participantId === participantId
-            ) {
-              continue;
-            }
-            previous.ownsLayout = false;
-            previous.hasClaim = false;
-          }
-        }
-        console.log(
-          "[bridge] terminal attached",
-          connectionDetail,
-          `client=${args.clientLabel(ws)}`,
-          `terminal=${terminalId}`,
-          `viewers=${shared.viewers.size}`,
-          `size=${cols}x${rows}`,
-          `shared=${sharedMode}`,
-          `access=${ownsLayout ? "control" : "observe"}`,
-        );
-        return reply(
-          participantId
-            ? {
-                ok: true,
-                access: ownsLayout ? "control" : "observe",
-                claim,
-              }
-            : { ok: true },
-        );
+        logger.debug("terminal attached", {
+          connection: args.connectionId ?? "legacy-default",
+          client: args.clientLabel(ws),
+          terminal: terminalId,
+          viewers: shared.viewers.size,
+          size: `${cols}x${rows}`,
+          shared: sharedMode,
+        });
+        return reply({
+          ok: true,
+          ...(shared.thin instanceof EndpointTerminalSession
+            ? { endpoint: shared.thin.negotiation }
+            : {}),
+        });
       }
 
       if (method === "terminal.relay_resize") {
@@ -929,20 +965,6 @@ export function createTerminalBridge(args: {
           typeof params.pane_id === "string" && params.pane_id
             ? params.pane_id
             : null;
-        const accessEntries = terminalAccess.get(ws);
-        if (
-          accessEntries &&
-          accessEntries.size > 0 &&
-          !Array.from(accessEntries.values()).some(
-            (access) =>
-              access.ownsLayout &&
-              (access.participantId === null ||
-                !paneId ||
-                access.paneId === paneId),
-          )
-        ) {
-          return reply({ ok: true, ignored: true, confirmed: false });
-        }
         clipboardRelayRevision += 1;
         const confirmed = await resizeClipboardRelayAndConfirm(
           cols,
@@ -953,29 +975,6 @@ export function createTerminalBridge(args: {
           return fail("terminal bridge disposed");
         }
         return reply({ ok: true, confirmed });
-      }
-
-      if (method === "terminal.appearance") {
-        const appearance = params.appearance === "light" ? "light" : "dark";
-        const foreground = String(params.foreground ?? "");
-        const background = String(params.background ?? "");
-        const validHex = (value: string) => /^#[0-9a-f]{6}$/i.test(value);
-        if (!validHex(foreground) || !validHex(background)) {
-          return fail("foreground and background must be #rrggbb colors");
-        }
-        latestAppearance = { appearance, foreground, background };
-        // Do not create the foreground app relay before a terminal has produced
-        // its first frame: doing so would resize the live TUI to a synthetic
-        // browser viewport. The attach path creates the relay at the real size
-        // and forwards the latest appearance as soon as it is ready.
-        const relayed = sendLatestAppearance();
-        return reply({
-          ok: true,
-          appearance,
-          foreground,
-          background,
-          deferred: !relayed,
-        });
       }
 
       const session = terminals.get(ws);
@@ -993,73 +992,116 @@ export function createTerminalBridge(args: {
       const thin = shared?.thin;
       if (method === "terminal.detach") {
         detachTerminalViewer(ws, requestedTerminalId ?? null);
-        console.log(
-          "[bridge] terminal detached",
-          connectionDetail,
-          `client=${args.clientLabel(ws)}`,
-          `terminal=${requestedTerminalId ?? "none"}`,
-          requestedTerminalId && sharedTerminals.has(requestedTerminalId)
-            ? `viewers=${sharedTerminals.get(requestedTerminalId)?.viewers.size}`
-            : "viewers=0",
-        );
+        logger.debug("terminal detached", {
+          connection: args.connectionId ?? "legacy-default",
+          client: args.clientLabel(ws),
+          terminal: requestedTerminalId ?? "none",
+          viewers:
+            requestedTerminalId && sharedTerminals.has(requestedTerminalId)
+              ? sharedTerminals.get(requestedTerminalId)?.viewers.size
+              : 0,
+        });
+        return reply({ ok: true });
+      }
+      if (method === "terminal.focus") {
+        if (!thin || thin.isClosed || !shared || !requestedTerminalId) {
+          return fail(NO_TERMINAL_ATTACHED_MESSAGE);
+        }
+        // Legacy streams already have their own per-terminal cursor.
+        if (!(thin instanceof EndpointTerminalSession))
+          return reply({ ok: true });
+        const intent = {};
+        const token = attachmentTokens.get(ws)?.get(requestedTerminalId);
+        focusIntents.set(ws, intent);
+        const run = async () => {
+          if (focusIntents.get(ws) !== intent) return;
+          const validateAttachment = await waitForOwnedTerminal(
+            ws,
+            requestedTerminalId,
+            shared,
+            () =>
+              requestIsCurrent() &&
+              attachmentTokens.get(ws)?.get(requestedTerminalId) === token,
+          );
+          await thin.focus(() => {
+            validateAttachment();
+            return focusIntents.get(ws) === intent;
+          });
+        };
+        const previous = focusChains.get(ws) ?? Promise.resolve();
+        const task = previous.then(run, run);
+        focusChains.set(ws, task);
+        try {
+          await task;
+        } finally {
+          if (focusChains.get(ws) === task) focusChains.delete(ws);
+          if (focusIntents.get(ws) === intent) focusIntents.delete(ws);
+        }
         return reply({ ok: true });
       }
       if (method === "terminal.input") {
-        if (!thin || !requestedTerminalId) return fail("no terminal attached");
+        if (!thin || thin.isClosed || !shared || !requestedTerminalId) {
+          return fail(NO_TERMINAL_ATTACHED_MESSAGE);
+        }
         const b64 = String(params.data ?? "");
         if (!b64 || !STANDARD_BASE64_RE.test(b64)) {
           return fail("invalid terminal input");
         }
         const input = Buffer.from(b64, "base64");
         if (input.length === 0) return fail("terminal input required");
+        const validateAttachment = await waitForOwnedTerminal(
+          ws,
+          requestedTerminalId,
+          shared,
+          requestIsCurrent,
+        );
+        // Even a ready terminal yields above; recheck at the side-effect boundary.
+        validateAttachment();
         clipboardTarget = {
           ws,
           terminalId: requestedTerminalId,
           inputAt: Date.now(),
+          session: shared,
         };
         thin.input(input);
         return reply({ ok: true });
       }
       if (method === "terminal.resize") {
-        if (!thin || !shared) return fail("no terminal attached");
-        const access = terminalAccess.get(ws)?.get(requestedTerminalId ?? "");
-        if (!access?.ownsLayout) {
-          return reply({ ok: true, ignored: true });
-        }
+        if (!thin || !shared) return fail(NO_TERMINAL_ATTACHED_MESSAGE);
         const cols = Number(params.cols ?? 100);
         const rows = Number(params.rows ?? 30);
         const relaySize = relaySizeFromParams(params, { cols, rows });
         thin.resize(cols, rows);
+        terminalViewers.get(ws)!.set(requestedTerminalId!, { cols, rows });
         shared.cols = cols;
         shared.rows = rows;
         if (relaySize) {
           clipboardRelayRevision += 1;
           syncClipboardRelaySize(relaySize.cols, relaySize.rows);
         }
-        console.log(
-          "[bridge] terminal resized",
-          connectionDetail,
-          `client=${args.clientLabel(ws)}`,
-          `terminal=${requestedTerminalId ?? "none"}`,
-          `size=${cols}x${rows}`,
-        );
+        logger.debug("terminal resized", {
+          connection: args.connectionId ?? "legacy-default",
+          client: args.clientLabel(ws),
+          terminal: requestedTerminalId ?? "none",
+          size: `${cols}x${rows}`,
+        });
         return reply({ ok: true });
       }
       if (method === "terminal.scroll") {
-        if (!thin) return fail("no terminal attached");
-        if (
-          !terminalAccess.get(ws)?.get(requestedTerminalId ?? "")?.ownsLayout
-        ) {
-          return fail(
-            "pane scrolling follows the collaborator who owns its layout",
-          );
-        }
+        if (!thin) return fail(NO_TERMINAL_ATTACHED_MESSAGE);
         const direction = params.direction === "up" ? "up" : "down";
         const lines = Number(params.lines ?? 3);
         const column =
           typeof params.column === "number" ? Number(params.column) : null;
         const row = typeof params.row === "number" ? Number(params.row) : null;
-        const source = params.source === "page-key" ? "page-key" : "wheel";
+        // Explicit half-page shortcuts use pane.scroll on endpoints, while
+        // legacy AttachScroll keeps its original Wheel source and line count.
+        const source =
+          params.source === "page-key" ||
+          (params.source === "history" &&
+            thin instanceof EndpointTerminalSession)
+            ? "page-key"
+            : "wheel";
         thin.scroll(direction, lines, column, row, source);
         return reply({ ok: true });
       }
@@ -1070,11 +1112,24 @@ export function createTerminalBridge(args: {
   }
 
   function cleanupWs(ws: ServerWebSocket<unknown>) {
+    focusIntents.delete(ws);
+    focusChains.delete(ws);
     detachTerminalViewer(ws);
   }
 
   function viewedTerminals(ws: ServerWebSocket<unknown>): string[] {
-    return Array.from(terminalViewers.get(ws) ?? []);
+    return Array.from(terminalViewers.get(ws)?.keys() ?? []);
+  }
+
+  function endpointAvailability() {
+    return Object.fromEntries(
+      Array.from(sharedTerminals, ([id, session]) => [
+        id,
+        session.thin instanceof EndpointTerminalSession
+          ? session.thin.negotiation
+          : null,
+      ]),
+    );
   }
 
   function statusTerminals() {
@@ -1092,11 +1147,16 @@ export function createTerminalBridge(args: {
     for (const shared of sharedTerminals.values()) shared.thin.close();
     sharedTerminals.clear();
     terminalViewers.clear();
-    terminalAccess.clear();
+    attachmentTokens.clear();
+    focusIntents.clear();
+    focusChains.clear();
     terminals.clear();
   }
 
   return {
+    createFromTerminal,
+    navigationMode,
+    endpointAvailability,
     handleTerminalRpc,
     cleanupWs,
     viewedTerminals,
