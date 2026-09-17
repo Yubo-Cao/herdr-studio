@@ -28,6 +28,17 @@ server-rendered output rather than reconstructing a PTY in the bridge.
 
 ## Terminal endpoints
 
+Endpoint history scrolling tracks the latest requested offset separately from
+received surface offsets. Delayed surfaces cannot overwrite queued wheel intent.
+The final request returns to authoritative surface tracking after acknowledgement
+and a matching offset, with a bounded fallback for missing confirmation.
+
+Studio pane viewing mode blocks local keyboard, IME, paste, composer, focus, and
+resize commands while allowing explicit history scrolling. It is a browser-local
+preference, not an authorization boundary. `Take control` claims layout ownership
+with a 15-second takeover protection; keyboard input remains shared among editors.
+Non-owners preserve an existing shared terminal's dimensions on attachment.
+
 Interface text size uses root CSS zoom. Terminal surfaces cancel that zoom and
 scale xterm's font size directly, so cell measurements, selection, mouse input,
 and IME positioning stay in viewport CSS pixels. Radix popovers also cancel zoom
@@ -95,6 +106,11 @@ and routing lease. It is never replayed into a detached or replaced terminal.
 Disconnect rejects pending endpoint requests and invalidates clipboard ownership.
 
 ## Browser navigation and creation
+
+UI geometry uses `--ui-header-height` (40px), `--ui-row-height` (32px), and
+`--ui-control-height` (32px). Surfaces use `--ui-radius` (0); avatars and semantic
+status dots remain circular. Shared button and Radix avatar primitives live in
+`web/src/components/ui`, with common styles in `web/src/styles/ui.css`.
 
 On endpoint connections, `browserNavigation.ts` projects browser-local
 workspace/tab/pane choices into the shared UI selection fields. Snapshots supply

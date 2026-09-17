@@ -6,7 +6,8 @@ import { fileURLToPath, URL } from "node:url";
 const publicRoot = fileURLToPath(new URL("../server/public/", import.meta.url));
 const maxFileCount = 160;
 const maxTotalBytes = 12 * 1024 * 1024;
-const maxInitialJsBytes = 652 * 1024;
+// Radix avatar/popover and pane viewing controls; retain the transfer budget.
+const maxInitialJsBytes = 660 * 1024;
 const maxInitialJsGzipBytes = 200 * 1024;
 const maxInitialCssBytes = 192 * 1024;
 

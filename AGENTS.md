@@ -60,6 +60,25 @@ platform archive and checksum.
 
 ## Commit & Pull Request Guidelines
 
+### Sync completed work to the owner's fork
+
+The owner has requested that completed changes always be committed and pushed
+to their remote fork, `https://github.com/Yubo-Cao/herdr-studio` (`origin`), as
+part of finishing a task. This is standing authorization to sync task changes;
+do not ask for push permission again unless the owner changes this instruction.
+"Remote fork" means this GitHub repository, not a remote workstation.
+
+- Verify the push destination before writing. Never push to `upstream` as part
+  of this workflow.
+- Run the required checks, review the diff, and commit only the task's changes.
+  Exclude secrets, generated assets/binaries, and unrelated local work.
+- Push the task branch to `origin` and verify that its remote commit matches
+  local HEAD. Create a task branch when working on `main`; preserve the PR-based
+  main/release workflow below. This does not authorize merging or releases.
+- Report the pushed branch/commit and any failed checks. If synchronization is
+  blocked, preserve the local work and explain the failure rather than claiming
+  the fork is up to date. Never force-push or discard remote changes to sync.
+
 Git history uses concise imperative messages, for example `Use built-in CLI
 argument parser` or `Add command palette and release 0.0.3`. Keep commits
 focused and mention user-visible behavior in the message when relevant. PRs

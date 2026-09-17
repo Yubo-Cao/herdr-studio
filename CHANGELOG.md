@@ -2,6 +2,10 @@
 
 ## Unreleased
 
+- Restore square surfaces and consistent header, row, and control heights, with
+  compact collaborator avatars and per-pane viewing/layout-control actions.
+- Keep continuous terminal scrolling moving in the intended direction when
+  delayed screen updates arrive between wheel events.
 - Keep the cursor on the selected terminal pane when switching splits, and preserve
   cursor updates and hide/show transitions across incremental repaints.
 - Keep the Actions menu on screen and terminal selection aligned with the mouse

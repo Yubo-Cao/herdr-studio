@@ -838,9 +838,20 @@ export function createTerminalBridge(args: {
       const operationRevision = lifecycleRevision;
       if (method === "terminal.attach") {
         const terminalId = String(params.terminal_id ?? "");
-        const cols = Number(params.cols ?? 100);
-        const rows = Number(params.rows ?? 30);
+        let cols = Number(params.cols ?? 100);
+        let rows = Number(params.rows ?? 30);
         if (!terminalId) return fail("terminal_id required");
+        // A Studio viewer must not resize a stream owned by another viewer
+        // merely by joining it with a differently sized browser window.
+        const currentShared = sharedTerminals.get(terminalId);
+        if (
+          params.preserve_size === true &&
+          currentShared &&
+          !currentShared.thin.isClosed
+        ) {
+          cols = currentShared.cols;
+          rows = currentShared.rows;
+        }
         let surfaceSize: { cols: number; rows: number } | undefined;
         if (
           params.surface_cols !== undefined ||
@@ -863,7 +874,10 @@ export function createTerminalBridge(args: {
             );
           surfaceSize = { cols: surfaceCols, rows: surfaceRows };
         }
-        const relaySize = relaySizeFromParams(params, { cols, rows });
+        const relaySize =
+          params.preserve_size === true
+            ? null
+            : relaySizeFromParams(params, { cols, rows });
         const relayRevision = relaySize ? ++clipboardRelayRevision : null;
 
         const existingShared = sharedTerminals.get(terminalId);
@@ -874,8 +888,8 @@ export function createTerminalBridge(args: {
           sharedMode === "reused" &&
           !existingShared?.connecting &&
           !viewed.has(terminalId) &&
-          existingShared?.cols === cols &&
-          existingShared.rows === rows;
+          (params.preserve_size === true ||
+            (existingShared?.cols === cols && existingShared.rows === rows));
         terminals.set(ws, { terminalId, cols, rows });
         viewed.set(terminalId, { cols, rows });
         terminalViewers.set(ws, viewed);
@@ -902,6 +916,12 @@ export function createTerminalBridge(args: {
           detachTerminalViewer(ws, terminalId);
           shared.thin.close();
           throw new Error("terminal bridge disposed");
+        }
+        // Recheck after connection readiness: another viewer may have created
+        // or resized this stream while our attach awaited protocol discovery.
+        if (params.preserve_size === true) {
+          cols = shared.cols;
+          rows = shared.rows;
         }
         if (
           shared.cols !== cols ||

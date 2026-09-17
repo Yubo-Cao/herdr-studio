@@ -7,7 +7,17 @@ import { FitAddon } from "@xterm/addon-fit";
 import { UnicodeGraphemesAddon } from "@xterm/addon-unicode-graphemes";
 import type { IBufferLine, ILink, ITheme } from "@xterm/xterm";
 import { Terminal } from "@xterm/xterm";
-import { Columns2, Keyboard, Maximize2, Rows2, X } from "lucide-react";
+import {
+  Columns2,
+  Eye,
+  Keyboard,
+  Maximize2,
+  MousePointer2,
+  Rows2,
+  X,
+} from "lucide-react";
+import { usePaneControl } from "../usePaneControl";
+import { Button } from "./ui/Button";
 import {
   type CSSProperties,
   useCallback,
@@ -487,12 +497,22 @@ export function TerminalView({
     s.connections.find(
       (connection) => connection.id === terminalIdentity.connectionId,
     )?.generation ?? null;
-  const connectionClient = useMemo(
+  const baseConnectionClient = useMemo(
     () =>
       bridge.connection(terminalIdentity.connectionId, serverRuntimeGeneration),
     [serverRuntimeGeneration, terminalIdentity],
   );
   const connectionScopeKey = terminalConnectionKey(terminalIdentity);
+  const control = usePaneControl(
+    baseConnectionClient,
+    paneId ??
+      (s.selectedPaneId &&
+      s.layout?.panes.some((item) => item.pane_id === s.selectedPaneId)
+        ? s.selectedPaneId
+        : s.layout?.focused_pane_id),
+  );
+  const connectionClient = control.client;
+  const assertInputAllowed = control.assertInputAllowed;
   const terminalFileResolutionCache = useMemo(
     () =>
       new TerminalFileResolutionCache(
@@ -591,9 +611,25 @@ export function TerminalView({
   composerOpenRef.current = composerOpen;
   useLayoutEffect(() => {
     if (!termInstance) return;
-    termInstance.options.disableStdin = composerOpen;
-    if (composerOpen) termInstance.blur();
-  }, [composerOpen, termInstance]);
+    termInstance.options.disableStdin = composerOpen || control.access.viewOnly;
+    if (composerOpen || control.access.viewOnly) termInstance.blur();
+  }, [composerOpen, control.access.viewOnly, termInstance]);
+  useEffect(() => {
+    if (!control.access.ownsLayout || !termInstance || !pane?.terminal_id)
+      return;
+    void connectionClient
+      .call("terminal.resize", {
+        terminal_id: pane.terminal_id,
+        cols: termInstance.cols,
+        rows: termInstance.rows,
+      })
+      .catch(() => {});
+  }, [
+    control.access.ownsLayout,
+    connectionClient,
+    termInstance,
+    pane?.terminal_id,
+  ]);
   const setComposerOpen = useCallback(
     (open: boolean) => {
       if (controlledComposerOpen === undefined) setLocalComposerOpen(open);
@@ -1187,6 +1223,7 @@ export function TerminalView({
         setPasteLoading,
       );
     const pasteImage = async (blob: Blob, destinationPaneId: string | null) => {
+      assertInputAllowed();
       const file =
         blob instanceof File
           ? blob
@@ -2184,6 +2221,7 @@ export function TerminalView({
       renderedTerminalRef.current = null;
     };
   }, [
+    assertInputAllowed,
     connectionClient,
     container,
     fitVisibleTerminal,
@@ -2470,8 +2508,10 @@ export function TerminalView({
     const request = terminalComposerRequest(targetPaneId, text, submit);
     await connectionClient.call(request.method, request.params);
   };
-  const uploadComposerImage = (file: File) =>
-    uploadTerminalImage(connectionClient, file);
+  const uploadComposerImage = async (file: File) => {
+    assertInputAllowed();
+    return uploadTerminalImage(connectionClient, file);
+  };
   const notifyComposerError = (message: string) => {
     store.notify({
       kind: "error",
@@ -2480,10 +2520,13 @@ export function TerminalView({
     });
   };
   const mobileShortcutReason = (shortcut: MobileTerminalShortcut) =>
-    mobileTerminalShortcutExecution(shortcut.action)?.type === "scroll" &&
-    pane?.terminal_id
-      ? store.terminalScrollReason(pane.terminal_id)
-      : null;
+    control.access.viewOnly &&
+    mobileTerminalShortcutExecution(shortcut.action)?.type !== "scroll"
+      ? "This pane is view only"
+      : mobileTerminalShortcutExecution(shortcut.action)?.type === "scroll" &&
+          pane?.terminal_id
+        ? store.terminalScrollReason(pane.terminal_id)
+        : null;
   const runMobileShortcut = (shortcut: MobileTerminalShortcut) => {
     const execution = mobileTerminalShortcutExecution(shortcut.action);
     if (!execution) return;
@@ -2561,7 +2604,59 @@ export function TerminalView({
             <span className="terminal-pane-number">{paneIndex + 1}</span>
             <span className="terminal-pane-name">{paneLabel}</span>
           </div>
+          <div className="pane-control" aria-label="Pane control">
+            <span
+              className="pane-control-status"
+              title={
+                control.access.ownerName
+                  ? `${control.access.ownerName} controls layout. Input is shared unless you choose View only.`
+                  : "Collaborators share input and layout."
+              }
+            >
+              {control.access.viewOnly ? (
+                <Eye size={13} />
+              ) : (
+                <MousePointer2 size={13} />
+              )}
+              {control.access.viewOnly
+                ? "Viewing"
+                : control.access.ownsLayout
+                  ? "You control layout"
+                  : "Shared input"}
+            </span>
+            {!control.access.ownsLayout || control.access.viewOnly ? (
+              <Button
+                variant="outline"
+                disabled={
+                  control.busy || control.access.protectedUntil > Date.now()
+                }
+                onClick={control.takeControl}
+                title={
+                  control.access.protectedUntil > Date.now()
+                    ? "Another collaborator has protected layout control"
+                    : "Take layout control for 15 seconds; collaborators can still type"
+                }
+              >
+                Take control
+              </Button>
+            ) : null}
+            {!control.access.viewOnly ? (
+              <Button
+                onClick={control.watch}
+                disabled={control.busy}
+                title="Stop sending input and resizing this pane"
+              >
+                <Eye size={13} />
+                <span>View only</span>
+              </Button>
+            ) : null}
+          </div>
         </div>
+        {control.error ? (
+          <div className="pane-control-error" role="alert">
+            {control.error}
+          </div>
+        ) : null}
         <div className="terminal-main">
           <div ref={containerRef} className="terminal-view" />
           {showMobileKeys && hasMobileSideShortcuts ? (
@@ -2699,6 +2794,7 @@ export function TerminalView({
           <button
             type="button"
             className="terminal-pane-action"
+            disabled={control.access.viewOnly}
             title="Split pane right"
             aria-label="Split pane right"
             onPointerDown={preventPaneActionFocus}
@@ -2709,6 +2805,7 @@ export function TerminalView({
           <button
             type="button"
             className="terminal-pane-action"
+            disabled={control.access.viewOnly}
             title="Split pane down"
             aria-label="Split pane down"
             onPointerDown={preventPaneActionFocus}
@@ -2719,6 +2816,7 @@ export function TerminalView({
           <button
             type="button"
             className="terminal-pane-action"
+            disabled={control.access.viewOnly}
             title="Toggle pane zoom"
             aria-label="Toggle pane zoom"
             onPointerDown={preventPaneActionFocus}
@@ -2730,6 +2828,7 @@ export function TerminalView({
             <button
               type="button"
               className="terminal-pane-action is-danger"
+              disabled={control.access.viewOnly}
               title="Close pane"
               aria-label="Close pane"
               onPointerDown={preventPaneActionFocus}

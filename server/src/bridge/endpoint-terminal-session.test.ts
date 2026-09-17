@@ -70,6 +70,7 @@ type TestPane = {
   mouseReporting: boolean;
   rect?: Rect;
   innerRect?: Rect;
+  scrollOffset?: number;
 };
 const DEFAULT_PANES: TestPane[] = [
   { paneId: "w1:p1", x: 0, mouseReporting: false },
@@ -83,6 +84,7 @@ function writePane(
   mouseReporting = false,
   rect = { x, y, width: 10, height: 5 },
   innerRect = { x: x + 1, y: y + 1, width: 8, height: 3 },
+  scrollOffset = 0,
 ) {
   w.string(paneId);
   w.varint(1);
@@ -94,7 +96,7 @@ function writePane(
   }
   w.bool(false);
   w.bool(true); // scroll metrics present
-  w.varint(0); // offset_from_bottom
+  w.varint(scrollOffset); // offset_from_bottom
   w.varint(100); // max_offset_from_bottom
   w.varint(3); // viewport_rows
   w.bool(true); // focused
@@ -126,6 +128,7 @@ function surfaceFrame(
       pane.mouseReporting,
       pane.rect,
       pane.innerRect,
+      pane.scrollOffset,
     );
   w.varint(0);
   w.bool(false);
@@ -854,6 +857,41 @@ describe("EndpointTerminalSession", () => {
       async () => null,
     );
     await expect(session.connect(80, 24)).rejects.toThrow("no pane found");
+  });
+
+  test("queued downward scrolling ignores stale surface offsets", async () => {
+    const offsets: number[] = [];
+    let sendSurface!: (panes: TestPane[]) => void;
+    const socketPath = await startSessionServer({
+      panes: [{ ...DEFAULT_PANES[0]!, scrollOffset: 100 }],
+      onConnection: (send) => {
+        sendSurface = send;
+      },
+      onRequest: (method, params) => {
+        if (method === "pane.scroll") offsets.push(params.offset_from_bottom);
+      },
+    });
+    const session = new EndpointTerminalSession(
+      socketPath,
+      "term_scroll",
+      async () => "w1:p1",
+    );
+    try {
+      await session.connect(80, 24);
+      session.scroll("down", 10);
+      await settleUntil(() => offsets.length === 1);
+      sendSurface([{ ...DEFAULT_PANES[0]!, scrollOffset: 100 }]);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      session.scroll("down", 10);
+      await settleUntil(() => offsets.length === 2);
+      sendSurface([{ ...DEFAULT_PANES[0]!, scrollOffset: 90 }]);
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      session.scroll("down", 10);
+      await settleUntil(() => offsets.length === 3);
+      expect(offsets).toEqual([90, 80, 70]);
+    } finally {
+      session.close();
+    }
   });
 
   test("classifies input and sends pane.scroll with absolute offsets", async () => {

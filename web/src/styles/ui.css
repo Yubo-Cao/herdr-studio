@@ -1,0 +1,114 @@
+/* Shared primitives. Component height is independent of label/icon contents. */
+.ui-button {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: var(--ui-control-height);
+  min-height: var(--ui-control-height);
+  padding: 0 10px;
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: var(--ui-radius);
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+}
+.ui-button[data-variant="outline"] {
+  border-color: var(--border);
+}
+.ui-button[data-variant="primary"] {
+  background: var(--accent-2);
+  color: white;
+}
+.ui-button:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--text-strong);
+}
+.ui-button:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+.ui-button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+.ui-button-icon {
+  width: var(--ui-control-height);
+  padding: 0;
+}
+.ui-button svg {
+  flex: 0 0 auto;
+}
+.ui-avatar {
+  width: var(--ui-control-height);
+  height: var(--ui-control-height);
+  display: inline-flex;
+  flex: 0 0 auto;
+  overflow: hidden;
+  align-items: center;
+  justify-content: center;
+  border-radius: 50%;
+  background: color-mix(
+    in srgb,
+    var(--participant-color, var(--accent)) 16%,
+    var(--panel)
+  );
+  color: var(--text-strong);
+  font-size: 10px;
+  font-weight: 600;
+  line-height: 1;
+}
+.ui-avatar img {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.collaboration-popover {
+  z-index: 200;
+  max-width: calc(100vw - 16px);
+  padding: 8px;
+  border: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+}
+.collaboration-popover .collaboration-editor {
+  position: static;
+  padding: 0;
+  border: 0;
+  box-shadow: none;
+  align-items: center;
+}
+.collaboration-editor input {
+  min-width: 0;
+  width: 170px;
+  height: var(--ui-control-height);
+}
+.pane-control {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  margin-left: auto;
+  flex: 0 0 auto;
+}
+.pane-control-status {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 11px;
+  white-space: nowrap;
+  color: var(--muted);
+}
+.pane-control-error {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  color: var(--danger-text);
+  background: var(--danger-soft);
+  font-size: 12px;
+}

@@ -6,6 +6,7 @@ import type { FrameData } from "./thin-client";
 import type { Logger } from "../utils/logger";
 import { silentLogger } from "../utils/logger";
 import { MOUSE_KIND, VtInputClassifier } from "./vt-input-classifier";
+import { TerminalScrollIntent } from "./terminal-scroll-intent";
 
 const ESC_FLUSH_MS = 25;
 const FIRST_SURFACE_WAIT_MS = 10_000;
@@ -31,10 +32,7 @@ export class EndpointTerminalSession extends EventEmitter {
   private pressedMouseButtons = new Set<number>();
   private escFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private paneId: string | null = null;
-  private lastScroll: {
-    offsetFromBottom: number;
-    maxOffsetFromBottom: number;
-  } | null = null;
+  private scrollIntent = new TerminalScrollIntent();
   private closed = false;
   private seq = 0;
   private deferredFrame: {
@@ -247,12 +245,12 @@ export class EndpointTerminalSession extends EventEmitter {
     if (!pane?.mouseReporting) this.pressedMouseButtons.clear();
     if (!pane) return;
     this.fitSurface(surface, pane);
-    this.lastScroll = pane.scroll
-      ? {
-          offsetFromBottom: pane.scroll.offsetFromBottom,
-          maxOffsetFromBottom: pane.scroll.maxOffsetFromBottom,
-        }
-      : null;
+    if (pane.scroll)
+      this.scrollIntent.observe(
+        pane.scroll.offsetFromBottom,
+        pane.scroll.maxOffsetFromBottom,
+      );
+    else this.scrollIntent.reset();
 
     const cropped = cropFrame(surface.frame, pane.innerRect);
     const bytes = Buffer.from(frameToAnsi(cropped), "utf8");
@@ -516,33 +514,29 @@ export class EndpointTerminalSession extends EventEmitter {
       return;
     }
     this.client.assertMethod("pane.scroll");
-    if (!this.lastScroll) return;
     const delta = direction === "up" ? lines : -lines;
-    const offset = Math.max(
-      0,
-      Math.min(
-        this.lastScroll.maxOffsetFromBottom,
-        this.lastScroll.offsetFromBottom + delta,
-      ),
-    );
-    if (offset === this.lastScroll.offsetFromBottom) return;
-    this.lastScroll.offsetFromBottom = offset;
+    const intent = this.scrollIntent.next(delta);
+    if (!intent) return;
     const paneId = this.paneId;
     this.enqueueCommand(() =>
       this.client.callEndpoint("pane.scroll", {
         pane_id: paneId,
-        offset_from_bottom: offset,
+        offset_from_bottom: intent.offset,
       }),
-    ).catch((e) =>
-      this.logger.debug("endpoint pane.scroll failed", {
-        error: e instanceof Error ? e.message : String(e),
-      }),
-    );
+    )
+      .then(() => this.scrollIntent.acknowledge(intent.id))
+      .catch((e) => {
+        this.scrollIntent.fail(intent.id);
+        this.logger.debug("endpoint pane.scroll failed", {
+          error: e instanceof Error ? e.message : String(e),
+        });
+      });
   }
 
   close() {
     if (this.closed) return;
     this.closed = true;
+    this.scrollIntent.reset();
     this.pressedMouseButtons.clear();
     if (this.escFlushTimer) clearTimeout(this.escFlushTimer);
     this.clearDeferredFrame();

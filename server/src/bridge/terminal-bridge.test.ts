@@ -47,6 +47,53 @@ test("explicit half-page history retains legacy Wheel source and line count", as
 });
 
 const servers: net.Server[] = [];
+
+test("a view-only join preserves the existing stream size and still receives a frame", async () => {
+  const socketPath = await startThinServer();
+  const owner = {} as ServerWebSocket<unknown>;
+  const viewer = {} as ServerWebSocket<unknown>;
+  const ownerMessages: string[] = [];
+  const viewerMessages: string[] = [];
+  const bridge = createTerminalBridge({
+    clientSocketPath: socketPath,
+    herdrProtocol: async () => 17,
+    safeSend: (ws, payload) => {
+      (ws === owner ? ownerMessages : viewerMessages).push(payload);
+      return true;
+    },
+    clientLabel: () => "test",
+    markRpcError: () => {},
+  });
+  try {
+    await bridge.handleTerminalRpc(owner, "owner", "terminal.attach", {
+      terminal_id: "t1",
+      cols: 100,
+      rows: 30,
+      relay_active: false,
+    });
+    await waitForTerminalFrame(ownerMessages);
+    ownerMessages.length = 0;
+    await bridge.handleTerminalRpc(viewer, "viewer", "terminal.attach", {
+      terminal_id: "t1",
+      cols: 40,
+      rows: 15,
+      preserve_size: true,
+      relay_active: false,
+    });
+    expect((await waitForTerminalFrame(ownerMessages)).width).toBe(100);
+    expect((await waitForTerminalFrame(viewerMessages)).width).toBe(100);
+    ownerMessages.length = 0;
+    await bridge.handleTerminalRpc(viewer, "control", "terminal.resize", {
+      terminal_id: "t1",
+      cols: 80,
+      rows: 24,
+      relay_active: false,
+    });
+    expect((await waitForTerminalFrame(ownerMessages)).width).toBe(80);
+  } finally {
+    bridge.dispose();
+  }
+});
 const serverConnections = new Set<net.Socket>();
 
 afterEach(async () => {
