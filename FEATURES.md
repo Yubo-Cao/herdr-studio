@@ -80,7 +80,8 @@ keyboard shortcuts, or workspace/agent menus.
 - Closed worktrees must open before browsing; missing ones offer cleanup, never
   sibling files. Directory previews can prefill **New workspace**.
 
-Inspector and Annotations leave the sidebar unchanged. Preview is read-only;
+Inspector and Annotations leave the sidebar unchanged. Previews stay read-only
+until **Edit** opens the file editor;
 [resource ownership](docs/ARCHITECTURE.md#workspace-resource-ownership) prevents
 cross-worktree state mixing.
 
@@ -173,6 +174,12 @@ after fetch, and abort conflicts. They never push.
   CSS imports, plus HTTPS CDN stylesheets. Scripts, external images and external
   fonts are blocked; HTML source is limited to 512 KiB. Files outside the workspace
   remain available as source or downloads.
+- **Edit** opens complete text previews up to 512 KiB in a Monaco editor with
+  syntax highlighting for common languages. **Save** or Ctrl/Cmd+S writes the file
+  back to its host, including SSH connections and absolute filesystem paths;
+  **Revert** restores the last saved text. If the file changed on disk since it
+  was opened, choose **Reload** or **Overwrite**. Unsaved drafts survive switching
+  files and prompt before closing the editor or the page.
 - Preview images (including SVG), PDFs, and local Markdown images with zoom/Fit.
   Unsupported binaries are download-only; decoding depends on the browser.
 - Upload by dragging onto a checkout directory; download files or workspace

@@ -259,6 +259,24 @@ SSH. The source view and downloads remain available.
 These limits do not bound decoded image memory or browser rendering cost. User
 links and deliberate copy/drag into other controls remain untrusted user actions.
 
+## File editing
+
+`file.write` saves UTF-8 editor content: `{ workspace_id, path, content,
+expected_mtime_ms?, force?, scope? }` returns `{ path, size, mtime_ms, created }`.
+Workspace scope takes checkout-relative paths with the same lexical confinement
+as other file operations; `scope: "filesystem"` takes an absolute host path.
+Writes replace an existing regular file (resolving symlinks to their target) or
+create one in an existing directory, never a directory. Content lands in a
+sibling temporary file that keeps the original mode and is renamed into place.
+`expected_mtime_ms` must match the current modification time unless `force` is
+set; a mismatch fails with "file changed on disk". SSH runs the check, temporary
+write, and rename in one remote script with one-second mtime resolution, matching
+previews. Bodies are limited to 5 MiB. Clean drafts follow reloads; saves
+invalidate the preview cache and refresh rendered previews.
+
+The Monaco editor is a lazy chunk with Monarch grammars and only the base editor
+worker; language-service workers are excluded and nothing loads from a CDN.
+
 ## Agent activity
 
 `agent.list` adds optional `last_activity_at` from session-file mtime without

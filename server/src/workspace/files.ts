@@ -17,6 +17,7 @@ import {
   readLocalFile,
   resolveLocalFilePaths,
   uploadLocalFile,
+  writeLocalFile,
 } from "./local-files";
 import {
   deleteRemoteFile,
@@ -25,6 +26,7 @@ import {
   readRemoteFile,
   resolveRemoteFilePaths,
   uploadRemoteFile,
+  writeRemoteFile,
 } from "./remote-files";
 import {
   pullGit,
@@ -375,6 +377,46 @@ export function createFileHandlers({
     };
   }
 
+  async function writeFile(params: Record<string, unknown>) {
+    const workspaceId = String(params.workspace_id ?? "");
+    if (!workspaceId) throw new Error("file.write requires workspace_id");
+    const absolute = params.scope === "filesystem";
+    const path = absolute
+      ? sanitizeFilesystemPath(params.path)
+      : sanitizeExplorerPath(params.path);
+    if (!path) throw new Error("file.write requires path");
+    if (typeof params.content !== "string") {
+      throw new Error("file.write requires string content");
+    }
+    const expectedMtimeMs =
+      typeof params.expected_mtime_ms === "number" &&
+      Number.isFinite(params.expected_mtime_ms)
+        ? params.expected_mtime_ms
+        : undefined;
+    const options = { absolute, expectedMtimeMs, force: params.force === true };
+    const body = Buffer.from(params.content, "utf8");
+    const workspace = await getWorkspace(workspaceId);
+    const checkoutPath = await explorerRoot(workspaceId, workspace);
+    if (!checkoutPath) throw new Error("workspace has no directory path");
+    const host = sshHost();
+    const written = host
+      ? await writeRemoteFile({
+          host,
+          rootPath: checkoutPath,
+          requestedPath: path,
+          body,
+          options,
+          shQuote,
+        })
+      : await writeLocalFile(checkoutPath, path, body, options);
+    return {
+      ...written,
+      ...(absolute ? { scope: "filesystem" as const } : {}),
+      workspace_id: workspaceId,
+      checkout_path: checkoutPath,
+    };
+  }
+
   async function gitRoot(workspaceId: string, workspace: any) {
     const host = sshHost();
     const tried = new Set<string>();
@@ -506,6 +548,7 @@ export function createFileHandlers({
     downloadWorkspaceFile: downloadFile,
     uploadWorkspaceFile: uploadFile,
     deleteWorkspaceFile: deleteFile,
+    writeWorkspaceFile: writeFile,
     readGitDiffSummary,
     readGitDiffFile,
     runGitPull,

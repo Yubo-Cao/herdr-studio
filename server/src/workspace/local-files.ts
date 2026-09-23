@@ -1,13 +1,21 @@
 import {
+  chmod,
   lstat,
   readdir,
   realpath,
+  rename,
   rm,
   stat,
   writeFile,
 } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
-import { DOWNLOAD_TIMEOUT_MS, LIST_LIMIT } from "./file-constants";
+import {
+  DOWNLOAD_TIMEOUT_MS,
+  FILE_WRITE_CONFLICT_MESSAGE,
+  FILE_WRITE_MAX_BYTES,
+  LIST_LIMIT,
+} from "./file-constants";
 import {
   assertInsideRoot,
   entrySort,
@@ -21,6 +29,8 @@ import type {
   FileListResult,
   FilePreviewResult,
   FileUploadResult,
+  FileWriteOptions,
+  FileWriteResult,
 } from "./file-types";
 import { runBinaryProcessWithTimeout } from "./process";
 import { decodePreviewBuffer, previewLimitForPath } from "./preview";
@@ -287,5 +297,83 @@ export async function deleteLocalFile(
       : info.isSymbolicLink()
         ? "symlink"
         : "file",
+  };
+}
+
+/**
+ * Save editor content over an existing regular file, or create one in an
+ * existing directory. The body lands in a sibling temporary file that is
+ * renamed into place, so readers never observe a partial write.
+ */
+export async function writeLocalFile(
+  rootPath: string,
+  requestedPath: string,
+  body: Buffer,
+  options: FileWriteOptions = {},
+): Promise<FileWriteResult> {
+  if (body.length > FILE_WRITE_MAX_BYTES) {
+    throw new Error("file is too large to save from the editor");
+  }
+  const rootReal = await realpath(rootPath);
+  if (!!options.absolute !== isAbsolute(requestedPath)) {
+    throw new Error(
+      options.absolute
+        ? "filesystem writes require an absolute path"
+        : "workspace writes require a checkout-relative path",
+    );
+  }
+  const targetPath = options.absolute
+    ? resolve(requestedPath)
+    : lexicalTargetInsideRoot(rootReal, requestedPath);
+  const existing = await stat(targetPath).catch(
+    (error: NodeJS.ErrnoException) => {
+      if (error.code === "ENOENT") return null;
+      throw error;
+    },
+  );
+  if (existing && !existing.isFile()) {
+    throw new Error("only regular files can be edited");
+  }
+  if (!existing && (await lstat(targetPath).catch(() => null))) {
+    throw new Error("cannot save through a broken symlink");
+  }
+  if (options.expectedMtimeMs !== undefined && !options.force) {
+    if (!existing) {
+      throw new Error(`${FILE_WRITE_CONFLICT_MESSAGE}: it no longer exists`);
+    }
+    if (Math.abs(existing.mtimeMs - options.expectedMtimeMs) >= 1) {
+      throw new Error(`${FILE_WRITE_CONFLICT_MESSAGE} since it was opened`);
+    }
+  }
+  // Replace the link target, not the link, when saving through a symlink.
+  const writeTarget = existing
+    ? await realpath(targetPath)
+    : join(await realpath(dirname(targetPath)), basename(targetPath));
+  if (!existing) {
+    const parent = await stat(dirname(writeTarget));
+    if (!parent.isDirectory()) {
+      throw new Error("save target directory does not exist");
+    }
+  }
+  const temporary = join(
+    dirname(writeTarget),
+    `.${basename(writeTarget)}.roamgate-${randomBytes(6).toString("hex")}`,
+  );
+  try {
+    await writeFile(temporary, body, { flag: "wx" });
+    if (existing) await chmod(temporary, existing.mode & 0o7777);
+    await rename(temporary, writeTarget);
+  } catch (error) {
+    await rm(temporary, { force: true }).catch(() => {});
+    throw error;
+  }
+  const saved = await stat(writeTarget);
+  return {
+    path: options.absolute
+      ? requestedPath
+      : relativePreviewPath(rootReal, targetPath),
+    size: saved.size,
+    mtime_ms: saved.mtimeMs,
+    created: !existing,
   };
 }

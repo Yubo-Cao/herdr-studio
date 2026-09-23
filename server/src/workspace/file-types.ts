@@ -49,6 +49,22 @@ export type FileUploadResult = {
   overwritten: boolean;
 };
 
+export type FileWriteResult = {
+  path: string;
+  size: number;
+  mtime_ms: number;
+  created: boolean;
+};
+
+export type FileWriteOptions = {
+  /** Reject the write unless the file still has this modification time. */
+  expectedMtimeMs?: number;
+  /** Overwrite regardless of `expectedMtimeMs`. */
+  force?: boolean;
+  /** Treat `requestedPath` as an absolute host path (`scope=filesystem`). */
+  absolute?: boolean;
+};
+
 export type FileDeleteResult = {
   path: string;
   type: FileExplorerEntry["type"];

@@ -1,5 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import { mkdir, mkdtemp, rm, symlink, writeFile } from "node:fs/promises";
+import {
+  chmod,
+  mkdir,
+  mkdtemp,
+  readFile,
+  readdir,
+  rm,
+  stat,
+  symlink,
+  writeFile,
+} from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { shQuote } from "../utils/process-utils";
@@ -19,6 +29,7 @@ import {
   readRemoteFile,
   resolveRemoteFilePaths,
   uploadRemoteFile,
+  writeRemoteFile,
 } from "./remote-files";
 
 function b64(value: string) {
@@ -496,4 +507,73 @@ test("remote resolution includes directories and explicit symlinks but rejects r
   } finally {
     await rm(root, { recursive: true, force: true });
   }
+});
+
+test("remote writes save atomically and reject conflicts and escapes", async () => {
+  await withTempDir(async (root) => {
+    await mkdir(join(root, "src"));
+    await writeFile(join(root, "src", "app.ts"), "old");
+    await chmod(join(root, "src", "app.ts"), 0o640);
+    const outside = await mkdtemp(join(tmpdir(), "herdr-gui-remote-outside-"));
+    try {
+      const write = (
+        requestedPath: string,
+        content: string,
+        options: Parameters<typeof writeRemoteFile>[0]["options"] = {},
+      ) =>
+        writeRemoteFile({
+          host: "example.test",
+          rootPath: root,
+          requestedPath,
+          body: Buffer.from(content),
+          options,
+          shQuote,
+          runProcessWithInputTimeoutImpl: async (argv, input) =>
+            runShellCommand(argv.at(-1) ?? "", String(input)),
+        });
+      const mtimeMs =
+        Math.floor((await stat(join(root, "src", "app.ts"))).mtimeMs / 1000) *
+        1000;
+      await expect(
+        write("src/app.ts", "new", { expectedMtimeMs: mtimeMs }),
+      ).resolves.toMatchObject({ path: "src/app.ts", size: 3, created: false });
+      expect(await readFile(join(root, "src", "app.ts"), "utf8")).toBe("new");
+      expect((await stat(join(root, "src", "app.ts"))).mode & 0o777).toBe(
+        0o640,
+      );
+      expect(await readdir(join(root, "src"))).toEqual(["app.ts"]);
+      await expect(
+        write("src/app.ts", "stale", { expectedMtimeMs: mtimeMs - 60_000 }),
+      ).rejects.toThrow("file changed on disk");
+      await expect(
+        write("src/app.ts", "forced", {
+          expectedMtimeMs: mtimeMs - 60_000,
+          force: true,
+        }),
+      ).resolves.toMatchObject({ size: 6 });
+      await expect(write("src/new.md", "# new")).resolves.toMatchObject({
+        path: "src/new.md",
+        created: true,
+      });
+      await expect(write("src", "x")).rejects.toThrow("only regular files");
+      await expect(write("../escape.txt", "x")).rejects.toThrow(
+        "escaped the workspace checkout",
+      );
+      await expect(write(join(root, "src", "app.ts"), "x")).rejects.toThrow(
+        "checkout-relative",
+      );
+
+      const absolute = join(outside, "notes.txt");
+      await writeFile(absolute, "outside");
+      await expect(
+        write(absolute, "fs", { absolute: true }),
+      ).resolves.toMatchObject({ path: absolute, size: 2 });
+      expect(await readFile(absolute, "utf8")).toBe("fs");
+      await expect(
+        write("src/app.ts", "x", { absolute: true }),
+      ).rejects.toThrow("absolute path");
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
+  });
 });
