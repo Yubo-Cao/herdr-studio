@@ -231,26 +231,77 @@ export function encodeVoiceWav(samples: Float32Array): Uint8Array {
   return bytes;
 }
 
-/** Streaming linear resampler from the capture context rate to 16 kHz. */
-export class LinearResampler {
+/**
+ * Streaming downsampler from the capture context rate to 16 kHz. A
+ * Blackman-windowed sinc low-pass (cutoff 7.2 kHz) removes content above the
+ * new Nyquist rate before interpolation; without it, 48 kHz microphone audio
+ * aliases into the speech band and recognition accuracy drops sharply.
+ * Browsers' own MediaStream-to-16 kHz-context conversion has the same flaw,
+ * so capture runs at the device rate and resamples here.
+ */
+export class VoiceResampler {
+  private readonly taps: Float32Array;
+  private history: Float32Array;
   private position = 0;
-  private previous = 0;
-  constructor(private readonly inputRate: number) {}
+  private lastFiltered = 0;
+  private readonly step: number;
+
+  constructor(
+    private readonly inputRate: number,
+    tapCount = 63,
+  ) {
+    this.step = inputRate / VOICE_SAMPLE_RATE;
+    const cutoff = (0.45 * VOICE_SAMPLE_RATE) / inputRate;
+    this.taps = new Float32Array(tapCount);
+    const middle = (tapCount - 1) / 2;
+    let sum = 0;
+    for (let index = 0; index < tapCount; index++) {
+      const x = index - middle;
+      const sinc =
+        x === 0
+          ? 2 * cutoff
+          : Math.sin(2 * Math.PI * cutoff * x) / (Math.PI * x);
+      const window =
+        0.42 -
+        0.5 * Math.cos((2 * Math.PI * index) / (tapCount - 1)) +
+        0.08 * Math.cos((4 * Math.PI * index) / (tapCount - 1));
+      this.taps[index] = sinc * window;
+      sum += this.taps[index]!;
+    }
+    for (let index = 0; index < tapCount; index++) this.taps[index]! /= sum;
+    this.history = new Float32Array(tapCount - 1);
+  }
 
   process(input: Float32Array): Float32Array {
     if (this.inputRate === VOICE_SAMPLE_RATE) return input.slice();
-    const step = this.inputRate / VOICE_SAMPLE_RATE;
+    const tapCount = this.taps.length;
+    const buffer = new Float32Array(this.history.length + input.length);
+    buffer.set(this.history);
+    buffer.set(input, this.history.length);
+    // filtered[k] is the low-passed value of input sample k.
+    const filtered = new Float32Array(input.length);
+    for (let k = 0; k < input.length; k++) {
+      let acc = 0;
+      for (let tap = 0; tap < tapCount; tap++)
+        acc += this.taps[tap]! * buffer[k + tap]!;
+      filtered[k] = acc;
+    }
+    this.history = buffer.slice(buffer.length - (tapCount - 1));
+    // Positions in [-1, 0) interpolate from the previous chunk's last sample.
+    const at = (index: number) =>
+      index < 0 ? this.lastFiltered : filtered[index]!;
     const output: number[] = [];
-    while (this.position < input.length) {
+    while (this.position <= input.length - 1) {
       const index = Math.floor(this.position);
       const fraction = this.position - index;
-      const left = index === 0 ? this.previous : input[index - 1]!;
-      const right = input[index]!;
-      output.push(left + (right - left) * fraction);
-      this.position += step;
+      const left = at(index);
+      output.push(
+        fraction === 0 ? left : left + (at(index + 1) - left) * fraction,
+      );
+      this.position += this.step;
     }
     this.position -= input.length;
-    this.previous = input[input.length - 1] ?? this.previous;
+    this.lastFiltered = filtered[input.length - 1] ?? this.lastFiltered;
     return Float32Array.from(output);
   }
 }

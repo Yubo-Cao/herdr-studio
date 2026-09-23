@@ -1,8 +1,10 @@
 import {
-  LinearResampler,
+  VoiceResampler,
   VoiceSegmenter,
   type VoiceSegmenterEvent,
 } from "./voiceSegmenter";
+
+const RENDER_QUANTUM = 128;
 
 // AudioWorkletGlobalScope is not part of TypeScript's DOM libraries.
 declare const sampleRate: number;
@@ -20,7 +22,7 @@ declare function registerProcessor(
  * segment is posted as a transferable Float32Array.
  */
 class VoiceCaptureProcessor extends AudioWorkletProcessor {
-  private readonly resampler = new LinearResampler(sampleRate);
+  private readonly resampler = new VoiceResampler(sampleRate);
   private readonly segmenter = new VoiceSegmenter();
   private stopped = false;
 
@@ -44,9 +46,10 @@ class VoiceCaptureProcessor extends AudioWorkletProcessor {
 
   process(inputs: Float32Array[][]) {
     if (this.stopped) return false;
-    const channels = inputs[0];
-    if (!channels?.length) return true;
-    const frames = channels[0]!.length;
+    const channels = inputs[0] ?? [];
+    // An ended or muted source delivers no channels; treat it as silence so
+    // the VAD still sees the trailing pause and commits the utterance.
+    const frames = channels[0]?.length ?? RENDER_QUANTUM;
     const mono = new Float32Array(frames);
     for (const channel of channels)
       for (let index = 0; index < frames; index++)

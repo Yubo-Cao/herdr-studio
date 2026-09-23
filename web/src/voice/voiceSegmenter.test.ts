@@ -2,7 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   dictationInsertion,
   encodeVoiceWav,
-  LinearResampler,
+  VoiceResampler,
   VOICE_SAMPLE_RATE,
   VoiceSegmenter,
   type VoiceSegmenterEvent,
@@ -96,10 +96,32 @@ describe("voice audio helpers", () => {
   });
 
   test("resamples 48 kHz input to 16 kHz across chunks", () => {
-    const resampler = new LinearResampler(48_000);
-    const first = resampler.process(new Float32Array(480));
-    const second = resampler.process(new Float32Array(480));
-    expect(first.length + second.length).toBe(320);
+    const resampler = new VoiceResampler(48_000);
+    let total = 0;
+    for (let chunk = 0; chunk < 10; chunk++)
+      total += resampler.process(new Float32Array(128)).length;
+    expect(Math.abs(total - Math.round((1280 * 16) / 48))).toBeLessThanOrEqual(
+      1,
+    );
+  });
+
+  test("passes speech frequencies and rejects aliasing tones", () => {
+    const amplitude = (frequency: number) => {
+      const resampler = new VoiceResampler(48_000);
+      const input = new Float32Array(48_000);
+      for (let index = 0; index < input.length; index++)
+        input[index] = Math.sin((2 * Math.PI * frequency * index) / 48_000);
+      let peak = 0;
+      for (let offset = 0; offset < input.length; offset += 128) {
+        const output = resampler.process(input.subarray(offset, offset + 128));
+        if (offset < 4800) continue;
+        for (const sample of output) peak = Math.max(peak, Math.abs(sample));
+      }
+      return peak;
+    };
+    expect(amplitude(1000)).toBeGreaterThan(0.95);
+    // 12 kHz would alias to 4 kHz at 16 kHz without the low-pass filter.
+    expect(amplitude(12_000)).toBeLessThan(0.01);
   });
 
   test("spaces Latin transcripts but not CJK", () => {

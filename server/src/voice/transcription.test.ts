@@ -53,6 +53,9 @@ describe("voice provider configuration", () => {
     expect(provider?.kind === "command" && provider.argv[0]).toBe(
       "llama-funasr-cli",
     );
+    expect(provider?.kind === "command" && provider.argv).not.toContain(
+      "--vad",
+    );
   });
 
   test("prefers an explicit command and validates it", () => {
@@ -68,6 +71,22 @@ describe("voice provider configuration", () => {
     expect(() =>
       voiceProviderFromEnv({ ROAMGATE_VOICE_COMMAND: '["asr"]' }),
     ).toThrow("{input}");
+  });
+
+  test("prefers a cloud key over the local Fun-ASR fallback", () => {
+    expect(
+      voiceProviderFromEnv({
+        ELEVENLABS_API_KEY: "k",
+        ROAMGATE_VOICE_FUNASR_MODEL_DIR: "/models/nano",
+      }),
+    ).toMatchObject({ kind: "elevenlabs" });
+    expect(
+      voiceProviderFromEnv({
+        ELEVENLABS_API_KEY: "k",
+        ROAMGATE_VOICE_FUNASR_MODEL_DIR: "/models/nano",
+        ROAMGATE_VOICE_PROVIDER: "funasr",
+      }),
+    ).toMatchObject({ kind: "command", label: "Fun-ASR" });
   });
 
   test("configures an OpenAI-compatible endpoint", () => {

@@ -383,8 +383,8 @@ environment (`~/.config/roamgate/roamgate.env`) and never reach the browser.
 | `ROAMGATE_VOICE_COMMAND` | A local command as a JSON argv array containing `{input}` (the WAV path); stdout is the transcript |
 
 `ROAMGATE_VOICE_PROVIDER` (`elevenlabs`, `openai`, `funasr`, `command`, or
-`off`) selects one explicitly; otherwise the order is command, Fun-ASR,
-OpenAI-compatible, ElevenLabs. `ROAMGATE_VOICE_LANGUAGE` pins the language;
+`off`) selects one explicitly; otherwise the order is command, ElevenLabs,
+OpenAI-compatible, Fun-ASR. `ROAMGATE_VOICE_LANGUAGE` pins the language;
 by default providers detect it. Browsers allow microphone capture only on
 HTTPS or localhost origins.
 

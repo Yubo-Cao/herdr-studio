@@ -78,16 +78,10 @@ export async function startDictation(
   });
   let context: AudioContext;
   try {
-    // A 16 kHz context avoids resampling; browsers that cannot open one at
-    // this rate fall back to the device rate and the worklet resamples.
-    try {
-      context = new AudioContext({
-        sampleRate: 16_000,
-        latencyHint: "interactive",
-      });
-    } catch {
-      context = new AudioContext({ latencyHint: "interactive" });
-    }
+    // Capture at the device rate: browsers resample a 48 kHz microphone into a
+    // 16 kHz context without adequate filtering. The worklet low-pass filters
+    // and downsamples instead.
+    context = new AudioContext({ latencyHint: "interactive" });
     await context.audioWorklet.addModule(workletUrl);
   } catch (error) {
     for (const track of stream.getTracks()) track.stop();

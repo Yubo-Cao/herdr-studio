@@ -25,6 +25,10 @@ export type VoiceProvider =
 
 type Environment = Record<string, string | undefined>;
 
+/**
+ * Fun-ASR-Nano without its FSMN VAD: browser segments are already single
+ * utterances, and re-segmenting them drops speech at the split points.
+ */
 function funAsrCommand(environment: Environment): string[] | null {
   const modelDir = roamgateEnv("VOICE_FUNASR_MODEL_DIR", environment)?.trim();
   if (!modelDir) return null;
@@ -38,8 +42,6 @@ function funAsrCommand(environment: Environment): string[] | null {
     join(modelDir, "qwen3-0.6b-q4km.gguf"),
     "-a",
     "{input}",
-    "--vad",
-    join(modelDir, "fsmn-vad.gguf"),
   ];
 }
 
@@ -124,11 +126,12 @@ export function voiceProviderFromEnv(
       return elevenLabsProvider();
     case undefined:
     case "":
+      // An explicit command wins; cloud keys outrank the local fallback.
       return (
         commandProvider() ??
-        funAsrProvider() ??
+        elevenLabsProvider() ??
         openAiProvider() ??
-        elevenLabsProvider()
+        funAsrProvider()
       );
     default:
       throw new Error(`unknown ROAMGATE_VOICE_PROVIDER: ${requested}`);
