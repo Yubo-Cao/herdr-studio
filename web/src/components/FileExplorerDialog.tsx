@@ -15,8 +15,10 @@ import {
   ChevronRight,
   Ellipsis,
   File,
+  FilePlus,
   Folder,
   FolderOpen,
+  FolderPlus,
   RefreshCw,
   Search,
   Upload,
@@ -46,7 +48,8 @@ import type {
   GitDiffEntry,
 } from "../types";
 import { CloseButton } from "./CloseButton";
-import { ConfirmDialog } from "./ModalDialogs";
+import { ConfirmDialog, TextInputDialog } from "./ModalDialogs";
+import { Button } from "./ui/Button";
 import {
   focusTreeItem,
   keyboardContextMenuPoint,
@@ -81,6 +84,11 @@ import {
   uploadExplorerFile,
   deleteExplorerEntry,
   isExplorerDirectoryEntry,
+  createExplorerEntry,
+  isFilesystemPath,
+  readExplorerViewMemory,
+  symlinkDescription,
+  writeExplorerViewMemory,
 } from "./fileExplorerResources";
 import "./FileExplorerDialog.css";
 
@@ -411,13 +419,52 @@ function FileExplorerContent({
     cacheWorkspaceId,
     cacheResourceKey,
   );
+  // An explicit host directory (for example an agent cwd outside the checkout)
+  // opens Filesystem mode there. Record it before the mode state initializes.
+  const initialFilesystemDirectory =
+    initialDirectory && isFilesystemPath(initialDirectory)
+      ? initialDirectory
+      : null;
+  const appliedInitialDirectoryRef = useRef<string | null>(null);
+  const initialDirectoryKey = initialFilesystemDirectory
+    ? `${runtimeContext}\n${initialFilesystemDirectory}`
+    : null;
+  if (
+    initialDirectoryKey &&
+    appliedInitialDirectoryRef.current !== initialDirectoryKey
+  ) {
+    appliedInitialDirectoryRef.current = initialDirectoryKey;
+    writeExplorerViewMemory(runtimeContext, {
+      mode: "filesystem",
+      directory: initialFilesystemDirectory ?? undefined,
+    });
+  }
+  // Filesystem mode is view-local: remembered for this session per connection
+  // and workspace, never persisted, and never a permission for other views.
   const [filesystemContext, setFilesystemContext] = useState<string | null>(
-    null,
+    () =>
+      readExplorerViewMemory(runtimeContext).mode === "filesystem"
+        ? runtimeContext
+        : null,
   );
   const filesystem = filesystemContext === runtimeContext;
+  const [filesystemRefresh, setFilesystemRefresh] = useState(0);
+  const [creatingEntry, setCreatingEntry] = useState<
+    "file" | "directory" | null
+  >(null);
   useEffect(() => {
-    setFilesystemContext(null);
-  }, [runtimeContext]);
+    setFilesystemContext(
+      readExplorerViewMemory(runtimeContext).mode === "filesystem"
+        ? runtimeContext
+        : null,
+    );
+  }, [runtimeContext, initialDirectoryKey]);
+  const setExplorerMode = (mode: "workspace" | "filesystem") => {
+    writeExplorerViewMemory(runtimeContext, { mode });
+    setEntryMenu(null);
+    setPendingDeleteEntry(null);
+    setFilesystemContext(mode === "filesystem" ? runtimeContext : null);
+  };
   const runtimeContextRef = useRef(runtimeContext);
   runtimeContextRef.current = runtimeContext;
   const { search, rootInfo, children, expanded, error } = cache;
@@ -1102,10 +1149,15 @@ function FileExplorerContent({
         entry.path,
       );
       if (!runtimeContextIsCurrent(requestContext)) return;
-      removeEntryFromCache(entry);
       clearDeletedPreview(entry);
-      await loadDirectory(parentDirectoryPath(entry.path), true);
-      if (!runtimeContextIsCurrent(requestContext)) return;
+      if (isFilesystemPath(entry.path)) {
+        // Host listings are owned by the filesystem browser; ask it to reload.
+        setFilesystemRefresh((value) => value + 1);
+      } else {
+        removeEntryFromCache(entry);
+        await loadDirectory(parentDirectoryPath(entry.path), true);
+        if (!runtimeContextIsCurrent(requestContext)) return;
+      }
       void loadGitStatus(true);
       store.notify({
         kind: "success",
@@ -1129,6 +1181,57 @@ function FileExplorerContent({
       if (runtimeContextIsCurrent(requestContext)) {
         markDeletePath(entry.path, false);
       }
+    }
+  };
+
+  const createEntryInWorkspace = async (
+    kind: "file" | "directory",
+    value: string,
+  ) => {
+    if (!workspace?.workspace_id || !connectionClient.isCurrent()) return;
+    const path = value
+      .trim()
+      .replace(/\\/g, "/")
+      .split("/")
+      .filter(Boolean)
+      .join("/");
+    if (!path) return;
+    const requestContext = runtimeContext;
+    try {
+      const created = await createExplorerEntry(
+        connectionClient,
+        workspace.workspace_id,
+        path,
+        kind,
+      );
+      if (!runtimeContextIsCurrent(requestContext)) return;
+      const parent = parentDirectoryPath(created.path);
+      const ancestors = directoryPaths(parent);
+      updateCache({
+        expanded: new Set([...expanded, ...ancestors.filter(Boolean)]),
+      });
+      for (const directory of ancestors) {
+        await loadDirectory(directory, directory === parent);
+        if (!runtimeContextIsCurrent(requestContext)) return;
+      }
+      if (kind === "file") {
+        void loadPreview({
+          name: created.path.split("/").pop() ?? created.path,
+          path: created.path,
+          type: "file",
+          size: 0,
+          mtime_ms: Date.now(),
+          hidden: false,
+        });
+      }
+    } catch (e) {
+      if (!runtimeContextIsCurrent(requestContext)) return;
+      store.notify({
+        kind: "error",
+        message:
+          kind === "file" ? "Cannot create file" : "Cannot create folder",
+        detail: (e as Error).message,
+      });
     }
   };
 
@@ -1389,19 +1492,9 @@ function FileExplorerContent({
     const gitStatus = isDirectory
       ? gitStatusMaps.directoryStatuses.get(entry.path)
       : gitStatusMaps.fileStatuses.get(entry.path);
-    const symlinkMeta =
-      entry.type !== "symlink"
-        ? ""
-        : entry.symlink_status === "external"
-          ? "external symlink"
-          : entry.symlink_status === "broken"
-            ? "broken symlink"
-            : entry.symlink_target_type === "directory"
-              ? "symlink to directory"
-              : entry.symlink_target_type === "file"
-                ? "symlink to file"
-                : "symlink";
-    const meta = [symlinkMeta, displaySize(entry)].filter(Boolean).join(" · ");
+    const meta = [symlinkDescription(entry), displaySize(entry)]
+      .filter(Boolean)
+      .join(" · ");
 
     return (
       <div key={entry.path}>
@@ -1629,23 +1722,56 @@ function FileExplorerContent({
 
       <div className="file-explorer-content">
         <div className="file-explorer-browser">
+          {workspace ? (
+            <div className="ui-bar file-explorer-modebar">
+              <div
+                className="file-explorer-mode-switch"
+                role="radiogroup"
+                aria-label="Explorer scope"
+              >
+                {(["workspace", "filesystem"] as const).map((mode) => (
+                  <button
+                    type="button"
+                    key={mode}
+                    role="radio"
+                    aria-checked={filesystem === (mode === "filesystem")}
+                    title={
+                      mode === "workspace"
+                        ? "Browse this workspace checkout"
+                        : "Browse any path on the connected host"
+                    }
+                    onClick={() => setExplorerMode(mode)}
+                  >
+                    {mode === "workspace" ? "Workspace" : "Filesystem"}
+                  </button>
+                ))}
+              </div>
+              {!filesystem ? (
+                <span
+                  className="file-explorer-mode-root"
+                  title={rootInfo?.root ?? initialWorkspacePath(workspace)}
+                >
+                  {rootInfo?.root ?? initialWorkspacePath(workspace)}
+                </span>
+              ) : null}
+            </div>
+          ) : null}
           {filesystem && workspace ? (
             <FilesystemBrowser
-              key={runtimeContext}
+              key={initialDirectoryKey ?? runtimeContext}
               client={connectionClient}
               workspaceId={workspace.workspace_id}
+              memoryContext={runtimeContext}
               initialPath={rootInfo?.root || initialWorkspacePath(workspace)}
+              workspaceRoot={rootInfo?.root || initialWorkspacePath(workspace)}
               showHidden={showHidden}
               onShowHiddenChange={setShowHidden}
               activePath={activePath ?? previewEntry?.path}
+              refreshToken={filesystemRefresh}
               onSelect={(entry) => {
                 void loadPreview(entry);
               }}
               onMenu={openEntryMenu}
-              onExit={() => {
-                setEntryMenu(null);
-                setFilesystemContext(null);
-              }}
             />
           ) : (
             <>
@@ -1671,20 +1797,24 @@ function FileExplorerContent({
                   />
                   Hidden
                 </label>
-                <button
-                  type="button"
-                  className="ghost file-action"
-                  aria-label="Browse filesystem"
-                  title="Browse filesystem: allow navigation outside this workspace"
+                <Button
+                  icon
+                  title="New file"
+                  aria-label="New file"
                   disabled={!workspace}
-                  onClick={() => {
-                    setEntryMenu(null);
-                    setPendingDeleteEntry(null);
-                    setFilesystemContext(runtimeContext);
-                  }}
+                  onClick={() => setCreatingEntry("file")}
                 >
-                  <FolderOpen size={15} />
-                </button>
+                  <FilePlus size={14} />
+                </Button>
+                <Button
+                  icon
+                  title="New folder"
+                  aria-label="New folder"
+                  disabled={!workspace}
+                  onClick={() => setCreatingEntry("directory")}
+                >
+                  <FolderPlus size={14} />
+                </Button>
                 <button
                   type="button"
                   className="ghost file-action"
@@ -1803,7 +1933,22 @@ function FileExplorerContent({
         onCopy={(entry) => {
           void copyEntryPath(entry);
         }}
-        onDelete={filesystem ? undefined : setPendingDeleteEntry}
+        onDelete={setPendingDeleteEntry}
+      />
+      <TextInputDialog
+        open={creatingEntry !== null}
+        title={creatingEntry === "directory" ? "New Folder" : "New File"}
+        label="Path relative to the workspace root"
+        placeholder={
+          creatingEntry === "directory" ? "src/components" : "src/notes.md"
+        }
+        submitLabel="Create"
+        onClose={() => setCreatingEntry(null)}
+        onSubmit={(value) => {
+          const kind = creatingEntry;
+          setCreatingEntry(null);
+          if (kind) void createEntryInWorkspace(kind, value);
+        }}
       />
       <ConfirmDialog
         open={!!pendingDeleteEntry}

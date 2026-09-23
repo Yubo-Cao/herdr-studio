@@ -11,17 +11,50 @@ export function sanitizeExplorerPath(value: unknown): string {
   return parts.join("/");
 }
 
-/** Filesystem browsing requires an explicit absolute directory on the host. */
+/**
+ * Filesystem browsing requires an explicit absolute host path. `~` and `~/...`
+ * are accepted here and expanded against the runtime host's home directory.
+ */
 export function sanitizeFilesystemPath(value: unknown): string {
   const path =
     typeof value === "string" ? value.trim().replace(/\\/g, "/") : "";
   if (
-    (!path.startsWith("/") && !/^[a-z]:\//i.test(path)) ||
+    (!path.startsWith("/") &&
+      !/^[a-z]:\//i.test(path) &&
+      !isHomeRelativePath(path)) ||
     path.includes("\0")
   ) {
     throw new Error("filesystem browsing requires an absolute path");
   }
   return path;
+}
+
+export function isHomeRelativePath(path: string) {
+  return path === "~" || path.startsWith("~/");
+}
+
+/** Replace a leading `~` with `home`; other paths are returned unchanged. */
+export function expandHomePath(path: string, home: string) {
+  if (!isHomeRelativePath(path)) return path;
+  const base = home.replace(/\/+$/, "") || "/";
+  const rest = path.slice(2).replace(/^\/+/, "");
+  if (!rest) return base;
+  return base === "/" ? `/${rest}` : `${base}/${rest}`;
+}
+
+/** Split an absolute host path into its parent directory and final name. */
+export function splitFilesystemPath(path: string) {
+  const trimmed = path.replace(/\/+$/, "");
+  const slash = trimmed.lastIndexOf("/");
+  const name = slash >= 0 ? trimmed.slice(slash + 1) : "";
+  if (!name || name === "." || name === "..") {
+    throw new Error("filesystem path must name an entry inside a directory");
+  }
+  const parent = trimmed.slice(0, slash);
+  return {
+    parent: parent && !/^[a-z]:$/i.test(parent) ? parent : `${parent}/`,
+    name,
+  };
 }
 
 export function sanitizePreviewPath(value: unknown): string {

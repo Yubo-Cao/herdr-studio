@@ -568,6 +568,61 @@ export function requestFilePreview(
   return scopedTask;
 }
 
+/** Host paths (absolute or `~`) use filesystem scope; others are checkout-relative. */
+export function isFilesystemPath(path: string) {
+  return /^(?:\/|[a-z]:[\\/]|~(?:\/|$))/i.test(path);
+}
+
+export function symlinkDescription(entry: FileExplorerEntry) {
+  if (entry.type !== "symlink" && !entry.symlink_status) return "";
+  if (entry.symlink_status === "external") return "external symlink";
+  if (entry.symlink_status === "broken") return "broken symlink";
+  if (entry.symlink_target_type === "directory") return "symlink to directory";
+  if (entry.symlink_target_type === "file") return "symlink to file";
+  return "symlink";
+}
+
+export type ExplorerViewMemory = {
+  mode: "workspace" | "filesystem";
+  directory?: string;
+};
+
+// Session-only memory of each explorer's mode and host directory. It is not a
+// persisted permission: reloading the page returns every explorer to the
+// workspace tree.
+const explorerViewMemory = new Map<string, ExplorerViewMemory>();
+
+export function readExplorerViewMemory(context: string): ExplorerViewMemory {
+  return explorerViewMemory.get(context) ?? { mode: "workspace" };
+}
+
+export function writeExplorerViewMemory(
+  context: string,
+  patch: Partial<ExplorerViewMemory>,
+) {
+  explorerViewMemory.set(context, {
+    ...readExplorerViewMemory(context),
+    ...patch,
+  });
+}
+
+export async function createExplorerEntry(
+  client: ConnectionClient,
+  workspaceId: string,
+  path: string,
+  kind: "directory" | "file",
+) {
+  if (!client.isCurrent()) throw new Error("connection changed during create");
+  const result = (await client.call("file.mkdir", {
+    workspace_id: workspaceId,
+    path,
+    kind,
+    ...(isFilesystemPath(path) ? { scope: "filesystem" } : {}),
+  })) as { path: string; type: "directory" | "file" };
+  if (!client.isCurrent()) throw new Error("connection changed during create");
+  return result;
+}
+
 export async function uploadExplorerFile(
   client: ConnectionClient,
   workspaceId: string,
@@ -588,6 +643,7 @@ export async function uploadExplorerFile(
   url.searchParams.set("workspace_id", workspaceId);
   url.searchParams.set("directory", directory);
   url.searchParams.set("filename", file.name);
+  if (isFilesystemPath(directory)) url.searchParams.set("scope", "filesystem");
   const response = await fetch(url, {
     method: "POST",
     body: file,
@@ -630,6 +686,7 @@ export async function deleteExplorerEntry(
     throw new Error("invalid delete origin");
   url.searchParams.set("workspace_id", workspaceId);
   url.searchParams.set("path", path);
+  if (isFilesystemPath(path)) url.searchParams.set("scope", "filesystem");
   const response = await fetch(url, { method: "POST" });
   const text = await response.text();
   if (!client.isCurrent()) throw new Error("connection changed during delete");

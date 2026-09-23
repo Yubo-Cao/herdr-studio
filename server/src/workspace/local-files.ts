@@ -1,5 +1,6 @@
 import {
   lstat,
+  mkdir,
   readdir,
   realpath,
   rm,
@@ -15,6 +16,7 @@ import {
   relativePreviewPath,
 } from "./file-paths";
 import type {
+  FileCreateResult,
   FileDeleteResult,
   FileDownloadResult,
   FileExplorerEntry,
@@ -275,6 +277,7 @@ export async function deleteLocalFile(
 ): Promise<FileDeleteResult> {
   const rootReal = await realpath(rootPath);
   const targetPath = lexicalTargetInsideRoot(rootReal, requestedPath);
+  if (targetPath === rootReal) throw new Error("refusing to delete the root");
   const info = await lstat(targetPath);
   await rm(targetPath, {
     recursive: info.isDirectory(),
@@ -288,4 +291,33 @@ export async function deleteLocalFile(
         ? "symlink"
         : "file",
   };
+}
+
+/** Create one empty file or directory; the parent must exist. */
+export async function createLocalEntry(
+  rootPath: string,
+  requestedPath: string,
+  kind: FileCreateResult["type"],
+): Promise<FileCreateResult> {
+  const rootReal = await realpath(rootPath).catch((cause: unknown) => {
+    throw new Error("parent directory does not exist", { cause });
+  });
+  const targetPath = lexicalTargetInsideRoot(rootReal, requestedPath);
+  if (targetPath === rootReal) throw new Error("entry name is required");
+  const parentInfo = await stat(dirname(targetPath)).catch(() => null);
+  if (!parentInfo?.isDirectory()) {
+    throw new Error("parent directory does not exist");
+  }
+  try {
+    if (kind === "directory") await mkdir(targetPath);
+    else await writeFile(targetPath, "", { flag: "wx" });
+  } catch (error) {
+    if ((error as NodeJS.ErrnoException).code === "EEXIST") {
+      throw new Error("an entry with that name already exists", {
+        cause: error,
+      });
+    }
+    throw error;
+  }
+  return { path: relativePreviewPath(rootReal, targetPath), type: kind };
 }

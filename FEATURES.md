@@ -159,10 +159,17 @@ after fetch, and abort conflicts. They never push.
 - Browse cached trees, toggle hidden files, and filter **loaded** names/paths
   with case-insensitive substrings or globs (`*`, `?`, `[]`, `{}`, `**`).
   Git badges mark changes; ignored files are dimmed.
-- **Browse filesystem** opts into read-only host browsing outside the checkout.
-  Parent/absolute-path navigation allows preview, copy path, and download.
-  **Workspace only** restores the tree; refresh or checkout/connection changes
-  reset this mode.
+- The explorer header switches between **Workspace** (the checkout tree) and
+  **Filesystem** (any path on the connected host, local or SSH). Filesystem mode
+  has back/forward/up, clickable breadcrumbs, a path bar (click the path; `~`
+  and `~/...` resolve to the host user's home), quick locations (workspace
+  root, pane directories, Home, `/`), a loaded-entry filter, and hidden-file
+  toggle. Arrow keys move between rows; Backspace or Left goes up. Each
+  explorer remembers its mode and directory until the page reloads; opening an
+  agent's files at a cwd outside the checkout starts in Filesystem mode there.
+- Both modes create files and folders, upload (button or drop), and delete with
+  confirmation. Files outside the checkout preview and download like workspace
+  files.
 - Text previews provide highlighting, line numbers, search, and refresh.
   Markdown has a Preview/Source switch with the active mode highlighted;
   Mermaid fences and `.mmd`/`.mermaid` files

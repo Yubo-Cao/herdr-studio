@@ -1,16 +1,25 @@
+import { homedir } from "node:os";
 import type { HerdrClient } from "../bridge/herdr-client";
 import { sshCommandArgv } from "../bridge/ssh-command";
 import { checkoutPath as getCheckoutPath } from "./utils";
 import {
   downloadContentDisposition,
+  expandHomePath,
   inlineContentDisposition,
+  isHomeRelativePath,
   sanitizeExplorerPath,
   sanitizeFilesystemPath,
   sanitizePreviewPath,
   sanitizeUploadFilename,
+  splitFilesystemPath,
 } from "./file-paths";
-import type { FileResolution, RunProcessWithCodeTimeout } from "./file-types";
+import type {
+  FileCreateResult,
+  FileResolution,
+  RunProcessWithCodeTimeout,
+} from "./file-types";
 import {
+  createLocalEntry,
   deleteLocalFile,
   downloadLocalFile,
   listLocalFiles,
@@ -19,10 +28,12 @@ import {
   uploadLocalFile,
 } from "./local-files";
 import {
+  createRemoteEntry,
   deleteRemoteFile,
   downloadRemoteFile,
   listRemoteFiles,
   readRemoteFile,
+  readRemoteHome,
   resolveRemoteFilePaths,
   uploadRemoteFile,
 } from "./remote-files";
@@ -59,6 +70,30 @@ export function createFileHandlers({
   shQuote: (value: string) => string;
   lastStepBaselines?: LastStepBaselineStore;
 }) {
+  const remoteHomes = new Map<string, Promise<string>>();
+
+  /** Home of the runtime user on the host that owns the files. */
+  async function hostHome(host: string | undefined) {
+    if (!host) return homedir();
+    let home = remoteHomes.get(host);
+    if (!home) {
+      home = readRemoteHome({ host, runProcessWithCodeTimeout, shQuote });
+      remoteHomes.set(host, home);
+      home.catch(() => {
+        if (remoteHomes.get(host) === home) remoteHomes.delete(host);
+      });
+    }
+    return home;
+  }
+
+  /** Sanitize an explicit host path and expand `~` on the runtime host. */
+  async function filesystemPath(value: unknown, host: string | undefined) {
+    const path = sanitizeFilesystemPath(value);
+    return isHomeRelativePath(path)
+      ? expandHomePath(path, await hostHome(host))
+      : path;
+  }
+
   async function explorerRoot(
     workspaceId: string,
     workspace: any,
@@ -89,7 +124,10 @@ export function createFileHandlers({
   async function fileTarget(params: Record<string, unknown>, method: string) {
     const workspaceId = String(params.workspace_id ?? "");
     if (!workspaceId) throw new Error(`${method} requires workspace_id`);
-    const path = sanitizePreviewPath(params.path);
+    const path =
+      params.scope === "filesystem"
+        ? await filesystemPath(params.path, sshHost())
+        : sanitizePreviewPath(params.path);
     if (!path) throw new Error(`${method} requires path`);
     const workspace = await getWorkspace(workspaceId);
     const checkoutPath = await explorerRoot(workspaceId, workspace);
@@ -102,7 +140,7 @@ export function createFileHandlers({
     if (!workspaceId) throw new Error("file.download requires workspace_id");
     const path =
       params.scope === "filesystem"
-        ? sanitizeFilesystemPath(params.path)
+        ? await filesystemPath(params.path, sshHost())
         : sanitizeExplorerPath(params.path);
     if (!path) throw new Error("file.download requires path");
     const workspace = await getWorkspace(workspaceId);
@@ -111,26 +149,38 @@ export function createFileHandlers({
     return { checkoutPath, path };
   }
 
-  async function uploadTarget(params: Record<string, unknown>) {
+  /**
+   * Upload, delete, and create run against a root plus a root-relative path.
+   * Workspace scope roots at the checkout and confines the path lexically.
+   * Filesystem scope roots at the explicit host directory itself (upload) or
+   * at the named entry's parent (delete/create), so the same helpers apply.
+   */
+  async function mutationTarget(
+    params: Record<string, unknown>,
+    method: string,
+    pathKey: "path" | "directory",
+  ) {
     const workspaceId = String(params.workspace_id ?? "");
-    if (!workspaceId) throw new Error("file.upload requires workspace_id");
-    const directory = sanitizeExplorerPath(params.directory);
-    const filename = sanitizeUploadFilename(params.filename);
+    if (!workspaceId) throw new Error(`${method} requires workspace_id`);
     const workspace = await getWorkspace(workspaceId);
     const checkoutPath = await explorerRoot(workspaceId, workspace);
     if (!checkoutPath) throw new Error("workspace has no directory path");
-    return { workspaceId, checkoutPath, directory, filename };
+    if (params.scope !== "filesystem") {
+      const path = sanitizeExplorerPath(params[pathKey]);
+      if (!path && pathKey === "path")
+        throw new Error(`${method} requires path`);
+      return { workspaceId, rootPath: checkoutPath, path, filesystem: false };
+    }
+    const absolute = await filesystemPath(params[pathKey], sshHost());
+    if (pathKey === "directory") {
+      return { workspaceId, rootPath: absolute, path: "", filesystem: true };
+    }
+    const { parent, name } = splitFilesystemPath(absolute);
+    return { workspaceId, rootPath: parent, path: name, filesystem: true };
   }
 
-  async function deleteTarget(params: Record<string, unknown>) {
-    const workspaceId = String(params.workspace_id ?? "");
-    if (!workspaceId) throw new Error("file.delete requires workspace_id");
-    const path = sanitizeExplorerPath(params.path);
-    if (!path) throw new Error("file.delete requires path");
-    const workspace = await getWorkspace(workspaceId);
-    const checkoutPath = await explorerRoot(workspaceId, workspace);
-    if (!checkoutPath) throw new Error("workspace has no directory path");
-    return { workspaceId, checkoutPath, path };
+  function joinFilesystemPath(root: string, name: string) {
+    return `${root.replace(/\/+$/, "")}/${name}`;
   }
 
   async function listFiles(params: Record<string, unknown>) {
@@ -140,12 +190,12 @@ export function createFileHandlers({
     const checkoutPath = await explorerRoot(workspaceId, workspace);
     if (!checkoutPath) throw new Error("workspace has no directory path");
     const filesystem = params.scope === "filesystem";
+    const host = sshHost();
     const rootPath = filesystem
-      ? sanitizeFilesystemPath(params.path || checkoutPath)
+      ? await filesystemPath(params.path || checkoutPath, host)
       : checkoutPath;
     const relativePath = filesystem ? "" : sanitizeExplorerPath(params.path);
     const showHidden = params.show_hidden === true;
-    const host = sshHost();
     const list = host
       ? await listRemoteFiles({
           host,
@@ -335,43 +385,108 @@ export function createFileHandlers({
   }
 
   async function uploadFile(params: Record<string, unknown>, request: Request) {
-    const { workspaceId, checkoutPath, directory, filename } =
-      await uploadTarget(params);
+    const filename = sanitizeUploadFilename(params.filename);
+    const {
+      workspaceId,
+      rootPath,
+      path: directory,
+      filesystem,
+    } = await mutationTarget(params, "file.upload", "directory");
     const body = Buffer.from(await request.arrayBuffer());
     const host = sshHost();
     const upload = host
       ? await uploadRemoteFile({
           host,
-          rootPath: checkoutPath,
+          rootPath,
           directory,
           filename,
           body,
           shQuote,
         })
-      : await uploadLocalFile(checkoutPath, directory, filename, body);
+      : await uploadLocalFile(rootPath, directory, filename, body);
     return {
       workspace_id: workspaceId,
-      directory,
+      directory: filesystem ? rootPath : directory,
       filename,
       ...upload,
+      ...(filesystem
+        ? {
+            scope: "filesystem" as const,
+            path: joinFilesystemPath(rootPath, filename),
+          }
+        : {}),
     };
   }
 
   async function deleteFile(params: Record<string, unknown>) {
-    const { workspaceId, checkoutPath, path } = await deleteTarget(params);
+    const { workspaceId, rootPath, path, filesystem } = await mutationTarget(
+      params,
+      "file.delete",
+      "path",
+    );
     const host = sshHost();
+    if (
+      filesystem &&
+      joinFilesystemPath(rootPath, path) ===
+        (await hostHome(host)).replace(/\/+$/, "")
+    ) {
+      throw new Error("refusing to delete the home directory");
+    }
     const deleted = host
       ? await deleteRemoteFile({
           host,
-          rootPath: checkoutPath,
+          rootPath,
           requestedPath: path,
           runProcessWithCodeTimeout,
           shQuote,
         })
-      : await deleteLocalFile(checkoutPath, path);
+      : await deleteLocalFile(rootPath, path);
     return {
       workspace_id: workspaceId,
       ...deleted,
+      ...(filesystem
+        ? {
+            scope: "filesystem" as const,
+            path: joinFilesystemPath(rootPath, path),
+          }
+        : {}),
+    };
+  }
+
+  async function createEntry(params: Record<string, unknown>) {
+    const kind: FileCreateResult["type"] =
+      params.kind === "directory"
+        ? "directory"
+        : params.kind === "file"
+          ? "file"
+          : (() => {
+              throw new Error('file.mkdir kind must be "directory" or "file"');
+            })();
+    const { workspaceId, rootPath, path, filesystem } = await mutationTarget(
+      params,
+      "file.mkdir",
+      "path",
+    );
+    const host = sshHost();
+    const created = host
+      ? await createRemoteEntry({
+          host,
+          rootPath,
+          requestedPath: path,
+          kind,
+          runProcessWithCodeTimeout,
+          shQuote,
+        })
+      : await createLocalEntry(rootPath, path, kind);
+    return {
+      workspace_id: workspaceId,
+      ...created,
+      ...(filesystem
+        ? {
+            scope: "filesystem" as const,
+            path: joinFilesystemPath(rootPath, path),
+          }
+        : {}),
     };
   }
 
@@ -506,6 +621,7 @@ export function createFileHandlers({
     downloadWorkspaceFile: downloadFile,
     uploadWorkspaceFile: uploadFile,
     deleteWorkspaceFile: deleteFile,
+    createWorkspaceEntry: createEntry,
     readGitDiffSummary,
     readGitDiffFile,
     runGitPull,

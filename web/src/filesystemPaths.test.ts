@@ -2,13 +2,78 @@ import { expect, test } from "bun:test";
 import {
   directoryPreviewName,
   directoryPreviewPath,
+  filesystemBaseName,
+  filesystemBreadcrumbs,
   normalizeFilesystemPath,
   parentFilesystemPath,
 } from "./filesystemPaths";
 import {
   absolutePath,
+  isFilesystemPath,
   isWorkspaceRelativePath,
+  readExplorerViewMemory,
+  symlinkDescription,
+  writeExplorerViewMemory,
 } from "./components/fileExplorerResources";
+
+test("filesystem breadcrumbs link every ancestor from the root", () => {
+  expect(filesystemBreadcrumbs("/home/me/src")).toEqual([
+    { label: "/", path: "/" },
+    { label: "home", path: "/home" },
+    { label: "me", path: "/home/me" },
+    { label: "src", path: "/home/me/src" },
+  ]);
+  expect(filesystemBreadcrumbs("/")).toEqual([{ label: "/", path: "/" }]);
+  expect(filesystemBreadcrumbs("C:\\Users\\me")).toEqual([
+    { label: "C:", path: "C:/" },
+    { label: "Users", path: "C:/Users" },
+    { label: "me", path: "C:/Users/me" },
+  ]);
+  expect(filesystemBreadcrumbs("relative/path")).toEqual([]);
+  expect(filesystemBaseName("/home/me/")).toBe("me");
+  expect(filesystemBaseName("/")).toBe("/");
+});
+
+test("host paths select filesystem scope and view memory stays per context", () => {
+  for (const path of ["/etc", "C:/Users", "~", "~/src"]) {
+    expect(isFilesystemPath(path)).toBe(true);
+  }
+  for (const path of ["", "src/app", "~other"]) {
+    expect(isFilesystemPath(path)).toBe(false);
+  }
+  expect(readExplorerViewMemory("a")).toEqual({ mode: "workspace" });
+  writeExplorerViewMemory("a", { mode: "filesystem", directory: "/tmp" });
+  writeExplorerViewMemory("a", { directory: "/var" });
+  expect(readExplorerViewMemory("a")).toEqual({
+    mode: "filesystem",
+    directory: "/var",
+  });
+  expect(readExplorerViewMemory("b")).toEqual({ mode: "workspace" });
+});
+
+test("symlink descriptions match the workspace tree wording", () => {
+  const base = { name: "x", path: "x", size: 0, mtime_ms: 0, hidden: false };
+  expect(symlinkDescription({ ...base, type: "file" })).toBe("");
+  expect(
+    symlinkDescription({ ...base, type: "symlink", symlink_status: "broken" }),
+  ).toBe("broken symlink");
+  expect(
+    symlinkDescription({
+      ...base,
+      type: "directory",
+      symlink_status: "external",
+      symlink_target_type: "directory",
+    }),
+  ).toBe("external symlink");
+  expect(
+    symlinkDescription({
+      ...base,
+      type: "symlink",
+      symlink_status: "internal",
+      symlink_target_type: "file",
+    }),
+  ).toBe("symlink to file");
+});
 
 test("filesystem parents stop at POSIX, drive, and share roots", () => {
   for (const [path, parent] of [
