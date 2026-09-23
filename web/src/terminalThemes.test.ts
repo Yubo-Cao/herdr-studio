@@ -90,7 +90,7 @@ describe("terminal theme presets", () => {
       );
       expect(preset?.theme).toEqual(terminalThemeFor(mode));
     }
-    expect(terminalThemeFor("dark").background).toBe("#0d1117");
+    expect(terminalThemeFor("dark").background).toBe("#0e1014");
     expect(terminalThemeFor("dark").red).toBeUndefined();
     expect(terminalThemeFor("light").background).toBe("#ffffff");
     expect(terminalThemeFor("light").red).toBe("#cf222e");

@@ -10,11 +10,11 @@ export const CUSTOM_TERMINAL_THEME_SELECTION_ALPHA = 0.3;
 // Dark keeps the historical palette exactly: only background, foreground,
 // cursor, and selection are overridden; ANSI colors stay at xterm defaults.
 const DARK_TERMINAL_THEME: ITheme = {
-  background: "#0d1117",
-  foreground: "#d0d7de",
-  cursor: "#58a6ff",
+  background: "#0e1014",
+  foreground: "#d4d8df",
+  cursor: "#6ea0ff",
   overviewRulerBorder: "rgba(0,0,0,0)",
-  selectionBackground: "rgba(56,139,253,0.34)",
+  selectionBackground: "rgba(110,160,255,0.3)",
 };
 
 // Light mode needs the full 16-color ANSI palette: the dark-oriented default
@@ -22,9 +22,9 @@ const DARK_TERMINAL_THEME: ITheme = {
 const LIGHT_TERMINAL_THEME: ITheme = {
   background: "#ffffff",
   foreground: "#24292f",
-  cursor: "#0969da",
+  cursor: "#2f6fe0",
   overviewRulerBorder: "rgba(0,0,0,0)",
-  selectionBackground: "rgba(9,105,218,0.22)",
+  selectionBackground: "rgba(47,111,224,0.2)",
   black: "#24292f",
   red: "#cf222e",
   green: "#116329",

@@ -1,4 +1,89 @@
-/* Shared primitives. Component height is independent of label/icon contents. */
+/* Shared primitives. Heights come from tokens.css, never from content. */
+.ui-bar {
+  box-sizing: border-box;
+  min-width: 0;
+  height: var(--ui-bar-height);
+  min-height: var(--ui-bar-height);
+  flex: 0 0 var(--ui-bar-height);
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--panel);
+  color: var(--text);
+  font-size: var(--ui-font-size-sm);
+}
+.ui-bar-title {
+  min-width: 0;
+  overflow: hidden;
+  color: var(--text-strong);
+  font-size: var(--ui-font-size-sm);
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.ui-bar-spacer {
+  flex: 1 1 auto;
+}
+
+.ui-token {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  height: var(--ui-token-height);
+  min-width: var(--ui-token-height);
+  max-width: 100%;
+  flex: 0 0 auto;
+  padding: 0 6px;
+  overflow: hidden;
+  border: 1px solid var(--token-border);
+  border-radius: var(--ui-radius-sm);
+  background: var(--token-bg);
+  color: var(--token-text);
+  font: 500 var(--ui-font-size-xs) / 1 inherit;
+  font-family: inherit;
+  font-variant-numeric: tabular-nums;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  --token-bg: color-mix(in srgb, var(--text) 7%, transparent);
+  --token-border: transparent;
+  --token-text: var(--muted);
+}
+.ui-token.is-code {
+  font-family: var(--mono-font);
+  font-size: 10.5px;
+  letter-spacing: -0.01em;
+}
+.ui-token svg {
+  flex: 0 0 auto;
+}
+.ui-token[data-tone="accent"],
+.ui-token[data-tone="info"] {
+  --token-bg: var(--accent-soft);
+  --token-text: var(--accent);
+}
+.ui-token[data-tone="success"] {
+  --token-bg: var(--success-soft);
+  --token-text: var(--success-text);
+}
+.ui-token[data-tone="warning"] {
+  --token-bg: var(--warning-soft);
+  --token-text: var(--warning-text);
+}
+.ui-token[data-tone="danger"] {
+  --token-bg: var(--danger-soft);
+  --token-text: var(--danger-text);
+}
+button.ui-token {
+  cursor: pointer;
+}
+button.ui-token:hover:not(:disabled) {
+  --token-border: var(--border);
+  color: var(--text);
+}
+
 .ui-button {
   box-sizing: border-box;
   display: inline-flex;
@@ -7,32 +92,39 @@
   gap: 6px;
   height: var(--ui-control-height);
   min-height: var(--ui-control-height);
-  padding: 0 10px;
+  padding: 0 8px;
   flex: 0 0 auto;
   border: 1px solid transparent;
   border-radius: var(--ui-radius);
   background: transparent;
-  color: var(--text);
+  color: var(--muted);
   font: inherit;
-  font-size: 12px;
+  font-size: var(--ui-font-size-sm);
   line-height: 1;
   white-space: nowrap;
   cursor: pointer;
 }
 .ui-button[data-variant="outline"] {
   border-color: var(--border);
+  color: var(--text);
 }
 .ui-button[data-variant="primary"] {
   background: var(--accent-2);
   color: white;
 }
 .ui-button:hover:not(:disabled) {
-  background: var(--accent-soft);
+  border-color: transparent;
+  background: var(--panel-2);
   color: var(--text-strong);
+}
+.ui-button[data-variant="primary"]:hover:not(:disabled) {
+  background: var(--accent);
+  color: white;
 }
 .ui-button:focus-visible {
   outline: 2px solid var(--accent);
-  outline-offset: 2px;
+  outline-offset: 1px;
+  box-shadow: none;
 }
 .ui-button:disabled {
   opacity: 0.45;
@@ -56,7 +148,7 @@
   border-radius: 50%;
   background: color-mix(
     in srgb,
-    var(--participant-color, var(--accent)) 16%,
+    var(--participant-color, var(--accent)) 18%,
     var(--panel)
   );
   color: var(--text-strong);
@@ -74,15 +166,12 @@
   max-width: calc(100vw - 16px);
   padding: 8px;
   border: 1px solid var(--border);
+  border-radius: var(--ui-radius);
   background: var(--panel);
   color: var(--text);
-  box-shadow: 0 8px 24px rgb(0 0 0 / 18%);
+  box-shadow: var(--shadow-lg);
 }
 .collaboration-popover .collaboration-editor {
-  position: static;
-  padding: 0;
-  border: 0;
-  box-shadow: none;
   align-items: center;
 }
 .collaboration-editor input {
@@ -93,22 +182,13 @@
 .pane-control {
   display: flex;
   align-items: center;
-  gap: 4px;
-  margin-left: auto;
+  gap: 2px;
   flex: 0 0 auto;
-}
-.pane-control-status {
-  display: inline-flex;
-  align-items: center;
-  gap: 5px;
-  font-size: 11px;
-  white-space: nowrap;
-  color: var(--muted);
 }
 .pane-control-error {
   flex: 0 0 auto;
   padding: 6px 8px;
   color: var(--danger-text);
   background: var(--danger-soft);
-  font-size: 12px;
+  font-size: var(--ui-font-size-sm);
 }
