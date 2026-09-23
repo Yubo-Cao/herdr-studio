@@ -26,8 +26,7 @@
   margin: 0;
   padding: 12px 14px;
   overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 7px;
+  border: 0;
   background: var(--terminal-bg);
   color: var(--text);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -68,8 +67,7 @@
   align-items: center;
   justify-content: center;
   gap: 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border: 0;
   background: var(--input-bg);
   color: var(--muted);
   font-size: 13px;

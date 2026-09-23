@@ -113,7 +113,6 @@
   justify-content: center;
   padding: 0;
   border: 0;
-  border-radius: 4px;
   background: transparent;
   color: var(--muted);
   cursor: pointer;
@@ -174,7 +173,6 @@
   left: 4px;
   right: 4px;
   height: 2px;
-  border-radius: 1px;
   background: var(--accent);
   pointer-events: none;
 }
@@ -248,7 +246,6 @@
   left: 4px;
   right: 4px;
   height: 2px;
-  border-radius: 1px;
   background: var(--accent);
   pointer-events: none;
 }
@@ -273,7 +270,6 @@
 :where(html[data-layout="mobile"]) {
   .panel.tree {
     border: none;
-    border-radius: 0;
     border-bottom: 1px solid var(--border);
   }
 }

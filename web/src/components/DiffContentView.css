@@ -1,15 +1,9 @@
-.workspace-inspector .diff-content-view {
-  border-radius: 8px;
-}
-
 .workspace-inspector.is-compact .diff-content-view {
   border: 0;
-  border-radius: 0;
 }
 
 .file-preview-changes > .diff-content-view {
   border: none;
-  border-radius: 0;
 }
 
 .diff-content-view {
@@ -19,29 +13,28 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--viewer-border);
-  border-radius: 10px;
+  border: 0;
   background: var(--diff-bg);
 }
 
+/* Same bar height as the navigation toolbar so both rows read as one. */
 .diff-content-head {
+  box-sizing: border-box;
   flex: 0 0 auto;
   display: flex;
   align-items: center;
   flex-wrap: wrap;
-  gap: 8px;
-  /* Same height as the navigation header (scope toggle block + its
-     margin), so both header rows read as one line. */
-  min-height: 46px;
-  padding: 7px 12px;
+  gap: 6px;
+  min-height: var(--ui-bar-height);
+  padding: 4px 6px 4px 12px;
   border-bottom: 1px solid var(--viewer-border);
-  background: var(--viewer-header-bg);
+  background: var(--viewer-panel-bg);
 }
 
 .diff-content-view.is-embedded .diff-content-head {
-  min-height: 38px;
+  min-height: var(--ui-bar-height);
   justify-content: flex-end;
-  padding: 5px 8px;
+  padding: 4px 6px;
 }
 
 .diff-content-title {
@@ -65,7 +58,6 @@
   width: 26px;
   height: 26px;
   padding: 0;
-  border-radius: 6px;
   color: var(--muted);
 }
 
@@ -103,8 +95,7 @@
   gap: 6px;
   overflow: hidden;
   padding: 3px 8px;
-  border: 1px solid color-mix(in srgb, var(--accent) 48%, transparent);
-  border-radius: 999px;
+  border: 0;
   background: var(--accent-soft);
   color: var(--text-strong);
   font: 11px / 1.2 var(--sans-font);
@@ -178,15 +169,13 @@
   max-width: min(100%, 1080px);
   max-height: 72vh;
   object-fit: contain;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 0;
   background: var(--panel);
   box-shadow: var(--shadow-lg);
 }
 
 .diff2html-wrapper .diff-search-match {
   padding: 0 1px;
-  border-radius: 3px;
   background: color-mix(in srgb, var(--yellow) 42%, transparent);
   color: var(--text-strong);
   outline: 1px solid color-mix(in srgb, var(--yellow) 48%, transparent);

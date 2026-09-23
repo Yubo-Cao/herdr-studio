@@ -51,8 +51,7 @@
 .mermaid-diagram-error {
   margin: 0.85em 0;
   padding: 8px 12px;
-  border: 1px solid var(--danger-border);
-  border-radius: 7px;
+  border: 0;
   background: var(--danger-soft);
   color: var(--danger-text);
   font-size: 12.5px;

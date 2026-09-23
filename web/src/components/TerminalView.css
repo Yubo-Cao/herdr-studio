@@ -1,6 +1,5 @@
 .app.zen .workspace-terminal-surface > .terminal-shell .terminal-view {
   border-width: 0;
-  border-radius: 0;
 }
 
 .terminal-view {
@@ -12,7 +11,6 @@
   min-height: 0;
   background: var(--terminal-bg);
   border: 0;
-  border-radius: 0;
   overflow: hidden;
   overscroll-behavior: contain;
   touch-action: none;
@@ -81,7 +79,6 @@
   height: var(--ui-control-height);
   padding: 0;
   border: 0;
-  border-radius: var(--ui-radius);
   color: var(--muted);
   background: transparent;
   touch-action: manipulation;
@@ -147,7 +144,7 @@
 
   .terminal-mobile-keys-toggle,
   .terminal-mobile-keys-panel {
-    border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
+    border: 0;
     background: color-mix(in srgb, var(--panel) 68%, transparent);
     box-shadow: var(--shadow-lg);
     -webkit-backdrop-filter: blur(14px);
@@ -161,7 +158,6 @@
     align-items: center;
     justify-content: center;
     padding: 0;
-    border-radius: 999px;
     color: var(--text-strong);
     pointer-events: auto;
     touch-action: manipulation;
@@ -190,7 +186,6 @@
     /* Anchor overflow at the right edge so the directional and page keys stay
        visible on narrow screens. The nested grid resets item order to LTR. */
     direction: rtl;
-    border-radius: 12px;
     opacity: 0;
     pointer-events: none;
     transform: translateX(10px) scale(0.9);
@@ -236,8 +231,7 @@
     align-items: center;
     justify-content: center;
     padding: 0 4px;
-    border: 1px solid color-mix(in srgb, var(--border) 72%, var(--text) 28%);
-    border-radius: 6px;
+    border: 0;
     background: color-mix(in srgb, var(--panel-2) 76%, transparent);
     color: var(--text-strong);
     overflow: hidden;
@@ -291,8 +285,7 @@
     height: 32px;
     padding: 0 4px;
     overflow: hidden;
-    border: 1px solid color-mix(in srgb, var(--border) 72%, var(--text) 28%);
-    border-radius: 7px;
+    border: 0;
     background: color-mix(in srgb, var(--panel) 70%, transparent);
     box-shadow: var(--shadow-lg);
     color: var(--text-strong);
@@ -349,11 +342,9 @@
     border-right: none;
     border-bottom: none;
     border-left: none;
-    border-radius: 0;
   }
 
   .pane-layout-cell .terminal-view {
-    border-radius: 0;
   }
 
   .terminal-pane-toolbar {
@@ -371,7 +362,6 @@
   }
 
   .terminal-empty {
-    border-radius: 0;
   }
 }
 
@@ -397,8 +387,7 @@
   min-height: max(44px, calc(44px / var(--ui-scale, 1)));
   color: var(--text-strong);
   background: var(--panel);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: 0;
   touch-action: manipulation;
 }
 
@@ -464,7 +453,6 @@
   padding: 0;
   transform: translate(-50%, -50%);
   border: 0;
-  border-radius: 50%;
   background: transparent;
   touch-action: none;
 }
@@ -476,7 +464,6 @@
   height: 12px;
   margin: auto;
   border: 2px solid var(--panel);
-  border-radius: 50%;
   background: var(--accent);
   box-shadow: 0 0 0 1px var(--accent);
 }

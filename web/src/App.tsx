@@ -753,14 +753,6 @@ function PaneJumpOverlay({
                   ) : null}
                 </span>
                 <span className="pane-jump-subtitle">
-                  {entry.agent ? (
-                    <>
-                      <span className="pane-jump-agent-name">
-                        {entry.agent}
-                      </span>
-                      {" · "}
-                    </>
-                  ) : null}
                   <span className="pane-jump-tab" title={entry.tabLabel}>
                     {entry.tabLabel}
                   </span>

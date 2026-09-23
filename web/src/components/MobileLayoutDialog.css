@@ -15,8 +15,7 @@
 .layout-preferences input {
   min-width: 0;
   max-width: 160px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 0;
   padding: 5px 6px;
   background: var(--input-bg);
   color: var(--text);

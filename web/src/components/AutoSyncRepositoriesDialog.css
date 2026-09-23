@@ -47,8 +47,7 @@
   gap: 16px;
   min-height: 92px;
   padding: 11px 12px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 0;
   background: var(--input-bg);
 }
 
@@ -113,7 +112,6 @@
   justify-content: center;
   gap: 5px;
   border: 1px dashed var(--border);
-  border-radius: 8px;
   color: var(--muted);
   text-align: center;
 }
@@ -148,8 +146,7 @@
 .auto-sync-status {
   flex: 0 0 auto;
   padding: 2px 6px;
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  border: 0;
   color: var(--text);
   font-size: 10px;
   font-weight: 700;

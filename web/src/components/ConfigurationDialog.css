@@ -177,7 +177,6 @@
       calc(12px + env(safe-area-inset-bottom, 0px))
       calc(12px + env(safe-area-inset-left, 0px));
     border-bottom: none;
-    border-radius: 16px 16px 0 0;
     animation: configuration-sheet-in 160ms ease-out;
   }
 }

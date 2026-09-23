@@ -20,7 +20,6 @@
   margin: 0;
   padding: 16px;
   border: 0;
-  border-radius: 0;
   overflow: auto;
 }
 
@@ -73,8 +72,7 @@
   white-space: pre-wrap;
   overflow-wrap: anywhere;
   background: var(--input-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 0;
   user-select: text;
   -webkit-user-select: text;
 }

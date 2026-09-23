@@ -44,8 +44,7 @@ body {
 }
 
 button {
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 0;
   background: var(--panel-2);
   color: var(--text);
   padding: 6px 10px;
@@ -63,13 +62,12 @@ button {
 }
 
 button:hover:not(:disabled) {
-  border-color: var(--accent);
+  background: var(--field-bg-hover);
 }
 
 button:focus-visible {
-  outline: none;
-  border-color: color-mix(in srgb, var(--accent) 72%, var(--border));
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
 }
 
 @media (forced-colors: active) {
@@ -95,20 +93,18 @@ button.ghost:hover:not(:disabled) {
 }
 
 button.danger {
-  border-color: var(--danger-border);
   background: var(--danger-soft);
   color: var(--danger-text);
 }
 
 button.danger:hover:not(:disabled) {
-  border-color: var(--red);
+  background: color-mix(in srgb, var(--red) 22%, transparent);
 }
 
 input,
 textarea {
-  border: 1px solid var(--border);
-  border-radius: 8px;
-  background: var(--input-bg);
+  border: 0;
+  background: var(--field-bg);
   color: var(--text);
   padding: 8px 11px;
   font-family: inherit;
@@ -123,8 +119,7 @@ textarea {
 
 input:focus,
 textarea:focus {
-  border-color: var(--accent);
-  box-shadow: 0 0 0 3px var(--accent-soft);
+  box-shadow: inset 0 -2px 0 var(--accent);
 }
 
 .muted {
@@ -143,7 +138,6 @@ textarea:focus {
 .status-dot {
   width: 8px;
   height: 8px;
-  border-radius: 50%;
   background: var(--muted);
 }
 
@@ -224,7 +218,6 @@ textarea:focus {
   height: var(--ui-control-height);
   padding: 0 7px;
   border: none;
-  border-radius: var(--ui-radius);
   background: transparent;
   color: var(--muted);
   font-size: 12px;
@@ -243,7 +236,6 @@ textarea:focus {
   height: var(--ui-control-height);
   padding: 0;
   border: none;
-  border-radius: var(--ui-radius);
   background: transparent;
   color: var(--muted);
   font-size: 18px;
@@ -272,7 +264,6 @@ textarea:focus {
   flex: 0 0 auto;
   border: 2px solid var(--border);
   border-top-color: var(--accent);
-  border-radius: 50%;
   animation: row-spinner 0.8s linear infinite;
 }
 
@@ -305,7 +296,6 @@ textarea:focus {
   font-size: 10.5px;
   line-height: 1;
   padding: 0 5px;
-  border-radius: var(--ui-radius-sm);
   border: 0;
   color: var(--muted);
   background: color-mix(in srgb, var(--text) 7%, transparent);
@@ -372,16 +362,9 @@ textarea:focus {
      beyond reach whenever the containing block is shorter than the modal). */
   margin: auto;
   padding: 18px;
-  border: 1px solid color-mix(in srgb, var(--shell-border) 84%, var(--text) 16%);
-  border-radius: 16px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--shell-panel) 93%, white 7%),
-    var(--shell-panel) 96px
-  );
-  box-shadow:
-    var(--shadow-modal),
-    inset 0 1px 0 color-mix(in srgb, white 9%, transparent);
+  border: 0;
+  background: var(--shell-panel);
+  box-shadow: var(--shadow-modal);
   outline: none;
   isolation: isolate;
   animation: modal-in 190ms cubic-bezier(0.2, 0.8, 0.2, 1);
@@ -481,7 +464,6 @@ textarea:focus {
   height: 12px;
   border: 2px solid var(--border);
   border-top-color: var(--accent);
-  border-radius: 999px;
   animation: row-spinner 0.8s linear infinite;
 }
 
@@ -543,8 +525,7 @@ textarea:focus {
   width: 38px;
   height: 22px;
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 999px;
+  border: 0;
   background: var(--input-bg);
   transition:
     border-color 150ms ease,
@@ -557,7 +538,6 @@ textarea:focus {
   left: 3px;
   width: 14px;
   height: 14px;
-  border-radius: 50%;
   background: var(--muted);
   transition:
     transform 150ms ease,
@@ -669,7 +649,6 @@ textarea:focus {
   height: var(--ui-token-height);
   padding: 0 6px;
   border: 0;
-  border-radius: var(--ui-radius-sm);
   background: color-mix(in srgb, var(--text) 7%, transparent);
   color: var(--muted);
   font-size: var(--ui-font-size-xs);
@@ -706,7 +685,6 @@ textarea:focus {
   align-items: center;
   justify-content: center;
   gap: 8px;
-  border-radius: 9px;
   /* Follow the terminal theme: the hard-coded dark values matched the dark
      palette but flashed black over the light terminal on every paste. */
   background: color-mix(in srgb, var(--terminal-bg) 78%, transparent);
@@ -723,7 +701,6 @@ textarea:focus {
 .terminal-loading-dot {
   width: 7px;
   height: 7px;
-  border-radius: 50%;
   background: var(--accent);
   animation: terminal-loading-pulse 1s ease-in-out infinite;
 }
@@ -799,7 +776,6 @@ textarea:focus {
 
   .terminal-loading {
     inset: 0;
-    border-radius: 0;
   }
 }
 
@@ -839,6 +815,5 @@ textarea:focus {
   height: 14px;
   border: 2px solid currentColor;
   border-top-color: transparent;
-  border-radius: 999px;
   animation: toast-loading-spin 0.8s linear infinite;
 }

@@ -14,7 +14,6 @@
   width: 7px;
   height: 7px;
   border: 1.5px solid var(--shell-panel);
-  border-radius: 999px;
   background: var(--muted);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 55%, transparent);
 }

@@ -321,7 +321,7 @@ export function PopupOverlay({ terminalTheme }: { terminalTheme: ITheme }) {
           maxHeight: "92vh",
           display: "flex",
           flexDirection: "column",
-          borderRadius: 8,
+          borderRadius: 0,
           overflow: "hidden",
           boxShadow: "0 12px 40px rgba(0, 0, 0, 0.45)",
           background: "#1e1e1e",

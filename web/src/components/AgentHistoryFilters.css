@@ -18,8 +18,7 @@
   font-size: 11px;
   color: var(--muted);
   background: transparent;
-  border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border: 0;
 }
 
 .agent-history-filter.is-user {

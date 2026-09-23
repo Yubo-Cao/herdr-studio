@@ -3,8 +3,7 @@
   width: min(100%, 480px);
   flex-shrink: 0;
   padding: 30px;
-  border: 1px solid var(--border);
-  border-radius: 18px;
+  border: 0;
   background:
     linear-gradient(145deg, var(--accent-soft), transparent 40%), var(--panel);
   box-shadow: 0 16px 48px color-mix(in srgb, var(--bg) 45%, transparent);
@@ -25,8 +24,7 @@
   place-items: center;
   width: 44px;
   height: 44px;
-  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--border));
-  border-radius: 12px;
+  border: 0;
   background: var(--accent-soft);
   color: var(--accent);
 }
@@ -44,8 +42,7 @@
   gap: 5px;
   margin-left: auto;
   padding: 5px 8px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 0;
   color: var(--herdr-setup-muted);
   font-size: 11px;
   white-space: nowrap;
@@ -109,7 +106,6 @@
 .herdr-setup-progress {
   margin: 26px 0;
   padding: 16px;
-  border-radius: 10px;
   background: var(--accent-soft);
 }
 
@@ -125,7 +121,6 @@
 
 .herdr-setup-card button {
   min-height: 42px;
-  border-radius: 9px;
   font-size: 13px;
 }
 
@@ -180,8 +175,7 @@
   gap: 4px;
   margin-bottom: 20px;
   padding: 12px;
-  border: 1px solid var(--danger-border);
-  border-radius: 9px;
+  border: 0;
   background: var(--danger-soft);
   color: var(--danger-text);
   font-size: 12px;
@@ -209,7 +203,6 @@
 .herdr-setup-card-compact {
   margin-block: 8px;
   padding: 16px;
-  border-radius: 10px;
   box-shadow: none;
 }
 
@@ -237,7 +230,6 @@
 @media (max-width: 520px) {
   .herdr-setup-card {
     padding: 22px;
-    border-radius: 14px;
   }
   .herdr-setup-heading {
     gap: 8px;

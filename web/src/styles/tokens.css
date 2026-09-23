@@ -1,8 +1,8 @@
 :root {
   color-scheme: dark;
-  /* One geometry scale for every bar, row, control, and token. */
-  --ui-radius: 6px;
-  --ui-radius-sm: 4px;
+  /* One geometry scale for every bar, row, control, and token. The design
+     is square and borderless: surfaces separate by tone, never by outline
+     or rounding (scripts/check-web-style.test.ts enforces this). */
   --ui-bar-height: 36px;
   --ui-header-height: var(--ui-bar-height);
   --ui-row-height: 28px;
@@ -18,6 +18,8 @@
   --panel: #121419;
   --panel-2: #1a1d23;
   --input-bg: #0e1014;
+  --field-bg: #1a1d23;
+  --field-bg-hover: #20242b;
   --terminal-bg: #0e1014;
   --terminal-fg: #d4d8df;
   --border: #23272e;
@@ -100,6 +102,8 @@
   --panel: #f7f8fa;
   --panel-2: #eceef2;
   --input-bg: #ffffff;
+  --field-bg: #eef0f3;
+  --field-bg-hover: #e6e9ed;
   --terminal-bg: #ffffff;
   --terminal-fg: #24292f;
   --border: #e1e4e8;

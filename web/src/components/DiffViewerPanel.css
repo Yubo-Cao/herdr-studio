@@ -1,10 +1,5 @@
-.workspace-inspector .diff-viewer-side {
-  border-radius: 8px;
-}
-
 .workspace-inspector.is-compact .diff-viewer-side {
   border: 0;
-  border-radius: 0;
 }
 
 .diff-viewer-side {
@@ -15,9 +10,8 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 12px;
-  border: 1px solid var(--viewer-border);
-  border-radius: 10px;
+  padding: 0;
+  border: 0;
   background: var(--viewer-panel-bg);
 }
 
@@ -29,12 +23,8 @@
 .diff-scope-toggle {
   display: grid;
   grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 4px;
-  margin-bottom: 4px;
-  padding: 3px;
-  border: 1px solid var(--viewer-border);
-  border-radius: 8px;
-  background: var(--viewer-content-bg);
+  gap: 2px;
+  margin-bottom: 0;
 }
 
 .diff-scope-label-short {
@@ -61,10 +51,15 @@
 
 /* Scope toggle and icon actions share one row in every layout. */
 .diff-panel-toolbar {
+  box-sizing: border-box;
+  height: var(--ui-bar-height);
+  flex: 0 0 var(--ui-bar-height);
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 6px;
+  margin-bottom: 0;
+  padding: 0 6px;
+  border-bottom: 1px solid var(--viewer-border);
 }
 
 .diff-panel-toolbar .diff-scope-toggle {
@@ -81,24 +76,28 @@
 .diff-toolbar-actions button {
   white-space: nowrap;
   min-width: 0;
-  min-height: 28px;
-  padding: 4px 7px;
+  height: var(--ui-control-height);
+  min-height: var(--ui-control-height);
+  padding: 0 7px;
   border: none;
-  border-radius: 6px;
   background: transparent;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--ui-font-size-sm);
 }
 
 .diff-scope-toggle button:hover,
-.diff-scope-toggle button.is-active,
 .diff-toolbar-actions button:hover {
-  background: var(--accent-soft);
+  background: var(--panel-2);
   color: var(--text);
 }
 
+.diff-scope-toggle button.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
 .diff-toolbar-actions .diff-refresh {
-  width: 28px;
+  width: var(--ui-control-height);
   padding: 0;
 }
 
@@ -106,9 +105,7 @@
   flex: 1 1 auto;
   min-height: 120px;
   overflow: auto;
-  border: 1px solid var(--viewer-border);
-  border-radius: 8px;
-  background: var(--viewer-content-bg);
+  background: transparent;
 }
 
 .diff-file-row {
@@ -121,7 +118,6 @@
   padding: 7px 9px;
   border: none;
   border-bottom: 1px solid var(--border-soft);
-  border-radius: 0;
   background: transparent;
   text-align: left;
 }
@@ -141,7 +137,6 @@
   gap: 5px;
   padding: 4px 8px;
   border: none;
-  border-radius: 0;
   background: transparent;
   color: var(--text);
   text-align: left;
@@ -242,8 +237,7 @@
   min-height: 0;
   margin-top: 10px;
   overflow: auto;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 0;
   background: var(--terminal-bg);
 }
 
@@ -261,22 +255,17 @@
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
-  gap: 3px;
-  padding: 2px;
-  border: 1px solid var(--viewer-border);
-  border-radius: 8px;
-  background: var(--viewer-content-bg);
+  gap: 2px;
 }
 
 .diff-hunk-navigation button {
-  width: 24px;
-  height: 24px;
+  width: var(--ui-control-height);
+  height: var(--ui-control-height);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
   border: none;
-  border-radius: 6px;
   background: transparent;
   color: var(--muted);
 }
@@ -318,13 +307,12 @@
 .diff-search {
   flex: 1 1 160px;
   min-width: 120px;
-  height: 30px;
+  height: var(--ui-control-height);
   display: inline-flex;
   align-items: center;
   gap: 6px;
   padding: 0 8px;
-  border: 1px solid var(--viewer-border);
-  border-radius: 8px;
+  border: 0;
   background: var(--viewer-content-bg);
   color: var(--muted);
 }
@@ -375,19 +363,19 @@
 
 .diff-search-button {
   flex: 0 0 auto;
-  width: 30px;
-  height: 30px;
+  width: var(--ui-control-height);
+  height: var(--ui-control-height);
   display: inline-flex;
   align-items: center;
   justify-content: center;
   padding: 0;
-  border-radius: 8px;
-  background: var(--viewer-content-bg);
+  border-color: transparent;
+  background: transparent;
   color: var(--muted);
 }
 
 .diff-search-button:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: transparent;
   background: var(--accent-soft);
   color: var(--text-strong);
 }
@@ -402,17 +390,13 @@
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  padding: 2px;
-  border: 1px solid var(--viewer-border);
-  border-radius: 8px;
-  background: var(--viewer-content-bg);
 }
 
 .diff-view-toggle button {
-  min-width: 64px;
-  padding: 4px 8px;
+  min-width: 0;
+  height: var(--ui-control-height);
+  padding: 0 8px;
   border: none;
-  border-radius: 6px;
   background: transparent;
   color: var(--muted);
   font-size: 12px;
@@ -427,16 +411,17 @@
 .diff-wrap-toggle {
   flex: 0 0 auto;
   width: max-content;
-  padding: 5px 9px;
-  border-radius: 8px;
+  height: var(--ui-control-height);
+  padding: 0 8px;
+  border-color: transparent;
   color: var(--muted);
-  background: var(--viewer-content-bg);
-  font-size: 12px;
+  background: transparent;
+  font-size: var(--ui-font-size-sm);
 }
 
 .diff-wrap-toggle:hover,
 .diff-wrap-toggle.is-active {
-  border-color: var(--accent);
+  border-color: transparent;
   background: var(--accent-soft);
   color: var(--text-strong);
 }
@@ -462,10 +447,10 @@
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  min-height: 38px;
-  padding: 5px 10px;
+  min-height: var(--ui-bar-height);
+  padding: 0 6px 0 8px;
   border-bottom: 1px solid var(--viewer-border);
-  background: color-mix(in srgb, var(--viewer-header-bg) 88%, var(--diff-bg));
+  background: var(--shell-panel);
 }
 
 .diff-file-section-title {
@@ -485,7 +470,6 @@
   justify-content: center;
   padding: 0;
   border: none;
-  border-radius: 6px;
   background: transparent;
   color: var(--muted);
 }
@@ -510,7 +494,9 @@
 
 .diff-file-section-title strong {
   color: var(--text-strong);
-  font-size: 13px;
+  font-family: var(--mono-font);
+  font-size: var(--ui-font-size-sm);
+  font-weight: 500;
 }
 
 .diff-file-section-meta {
@@ -524,16 +510,17 @@
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  min-height: 28px;
-  padding: 0 9px;
-  border-radius: 8px;
-  background: var(--viewer-content-bg);
+  height: var(--ui-control-height);
+  min-height: var(--ui-control-height);
+  padding: 0 8px;
+  border-color: transparent;
+  background: transparent;
   color: var(--muted);
-  font-size: 12px;
+  font-size: var(--ui-font-size-sm);
 }
 
 .diff-file-open:hover:not(:disabled) {
-  border-color: var(--accent);
+  border-color: transparent;
   background: var(--accent-soft);
   color: var(--text-strong);
 }
@@ -642,7 +629,6 @@
 .diff-skeleton-badge,
 .diff-skeleton-line {
   display: block;
-  border-radius: 999px;
   background: linear-gradient(
     90deg,
     var(--border-soft),
@@ -656,7 +642,6 @@
 .diff-skeleton-badge {
   width: 56px;
   height: 16px;
-  border-radius: 6px;
 }
 
 .diff-skeleton-lines {
@@ -683,7 +668,6 @@
     border-top: none;
     border-right: none;
     border-bottom: none;
-    border-radius: 0;
   }
 
   .diff-search-controls {

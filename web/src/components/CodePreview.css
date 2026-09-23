@@ -23,8 +23,7 @@
   line-height: 1.45;
   white-space: pre;
   background: var(--input-bg);
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 0;
 }
 
 .code-preview {

@@ -76,8 +76,7 @@
 
 .file-preview-markdown code {
   padding: 0.12em 0.35em;
-  border: 1px solid var(--border-soft);
-  border-radius: 5px;
+  border: 0;
   background: var(--panel);
   color: var(--text-code);
   font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
@@ -87,8 +86,7 @@
 .file-preview-markdown pre {
   overflow: auto;
   padding: 12px 14px;
-  border: 1px solid var(--border-soft);
-  border-radius: 7px;
+  border: 0;
   background: var(--viewer-code-bg);
   color: var(--text-code);
 }
@@ -96,7 +94,6 @@
 .file-preview-markdown pre code {
   padding: 0;
   border: 0;
-  border-radius: 0;
   background: transparent;
   color: inherit;
 }
@@ -112,7 +109,7 @@
 .file-preview-markdown th,
 .file-preview-markdown td {
   padding: 6px 9px;
-  border: 1px solid var(--border-soft);
+  border: 0;
 }
 
 .file-preview-markdown th {
@@ -127,7 +124,6 @@
 
 .file-preview-markdown img {
   max-width: 100%;
-  border-radius: 7px;
   box-shadow: 0 0 0 1px var(--border-soft);
 }
 

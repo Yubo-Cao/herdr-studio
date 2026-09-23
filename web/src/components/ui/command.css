@@ -33,7 +33,6 @@
   height: 42px;
   border: 0;
   border-bottom: 1px solid var(--border);
-  border-radius: 0;
   background: var(--input-bg);
   padding: 0 13px;
   font-size: 14px;
@@ -81,7 +80,6 @@
   align-items: center;
   min-height: 42px;
   padding: 7px 8px;
-  border-radius: 7px;
   color: var(--text);
   cursor: pointer;
   outline: none;

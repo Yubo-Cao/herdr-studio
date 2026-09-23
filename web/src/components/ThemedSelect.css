@@ -5,8 +5,7 @@
   gap: 6px;
   min-width: 0;
   max-width: 100%;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 0;
   padding: 5px 6px;
   background: var(--input-bg);
   color: var(--text);
@@ -36,8 +35,7 @@
   min-width: 0;
   height: 30px;
   padding: 0 7px;
-  border: 1px solid var(--viewer-border);
-  border-radius: 7px;
+  border: 0;
   background: var(--input-bg);
   color: var(--text);
   font-size: 11px;
@@ -46,8 +44,7 @@
 .layout-preferences .themed-select-trigger {
   min-width: 0;
   max-width: 160px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 0;
   padding: 5px 6px;
   background: var(--input-bg);
   color: var(--text);
@@ -58,8 +55,7 @@
   width: 100%;
   min-width: 0;
   padding: 7px 9px;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 0;
   background: var(--input-bg);
   color: var(--text);
   font: inherit;

@@ -1,10 +1,8 @@
 .workspace-inspector .file-explorer-side {
-  border-radius: 8px;
 }
 
 .workspace-inspector.is-compact .file-explorer-side {
   border: 0;
-  border-radius: 0;
 }
 
 .file-explorer-modal {
@@ -19,8 +17,7 @@
   flex-direction: column;
   overflow: hidden;
   padding: 12px;
-  border: 1px solid var(--viewer-border);
-  border-radius: 10px;
+  border: 0;
   background: var(--viewer-panel-bg);
 }
 
@@ -79,7 +76,6 @@
     border-top: none;
     border-right: none;
     border-bottom: none;
-    border-radius: 0;
   }
 
   .file-explorer-content {
@@ -105,7 +101,6 @@
 .file-skeleton-icon,
 .file-skeleton-line {
   display: block;
-  border-radius: 999px;
   background: linear-gradient(
     90deg,
     var(--border-soft),
@@ -119,7 +114,6 @@
 .file-skeleton-icon {
   width: 15px;
   height: 15px;
-  border-radius: 5px;
 }
 
 .file-skeleton-lines {

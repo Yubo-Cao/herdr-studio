@@ -14,8 +14,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--viewer-border);
-  border-radius: 10px;
+  border: 0;
   background: var(--viewer-panel-bg);
   box-shadow: var(--shadow-lg);
 }
@@ -113,8 +112,7 @@
   display: grid;
   gap: 7px;
   padding: 9px;
-  border: 1px solid var(--viewer-border);
-  border-radius: 8px;
+  border: 0;
   background: var(--viewer-content-bg);
 }
 
@@ -142,7 +140,6 @@
 .annotation-card-head span {
   flex: 0 0 auto;
   padding: 2px 5px;
-  border-radius: 999px;
   background: var(--warning-soft);
   color: var(--warning-text);
   font-size: 8px;
@@ -167,8 +164,7 @@
   min-height: 64px;
   resize: vertical;
   padding: 7px 8px;
-  border: 1px solid var(--viewer-border);
-  border-radius: 7px;
+  border: 0;
   outline: none;
   background: var(--input-bg);
   color: var(--text);

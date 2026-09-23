@@ -57,8 +57,7 @@
   gap: 6px;
   min-height: 30px;
   padding: 0 10px;
-  border: 1px solid var(--border);
-  border-radius: 8px;
+  border: 0;
   background: var(--panel-2);
   color: var(--text);
   font-size: 12px;
@@ -90,8 +89,7 @@
   gap: 8px;
   width: 100%;
   padding: 8px;
-  border: 1px solid var(--border-soft);
-  border-radius: 12px;
+  border: 0;
   background: var(--panel-2);
   color: var(--text);
   text-align: left;
@@ -116,8 +114,7 @@
   display: grid;
   gap: 8px;
   padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
-  border-radius: 8px;
+  border: 0;
   font-family: monospace;
 }
 
@@ -148,7 +145,6 @@
 .terminal-theme-dot {
   width: 10px;
   height: 10px;
-  border-radius: 50%;
 }
 
 .terminal-theme-card-name {
@@ -193,8 +189,7 @@
   width: 24px;
   height: 24px;
   padding: 0;
-  border: 1px solid var(--border);
-  border-radius: 6px;
+  border: 0;
   background: color-mix(in srgb, var(--panel) 88%, transparent);
   color: var(--text);
 }
@@ -249,8 +244,7 @@
   gap: 8px;
   min-width: 0;
   padding: 4px 8px 4px 4px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border: 0;
   background: var(--panel-2);
   font-size: 12px;
 }
@@ -260,7 +254,6 @@
   height: 28px;
   padding: 0;
   border: none;
-  border-radius: 6px;
   background: none;
   cursor: pointer;
 }

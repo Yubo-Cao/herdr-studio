@@ -21,15 +21,12 @@ describe("pane identity", () => {
     expect(customTabLabel(" docs ")).toBe("docs");
   });
 
-  test("prefers the pane name over the agent name", () => {
+  test("never names a pane after its agent", () => {
     expect(paneDisplayName(pane({ label: "review merge" }))).toBe(
       "review merge",
     );
     expect(paneDisplayName(pane())).toBe("project");
-    expect(paneDisplayName(pane({ cwd: undefined }))).toBe("claude");
-    expect(paneDisplayName(pane({ cwd: undefined, agent: undefined }))).toBe(
-      "p2",
-    );
+    expect(paneDisplayName(pane({ cwd: undefined }))).toBe("p2");
   });
 
   test("uses a custom tab name only for single-pane tabs", () => {

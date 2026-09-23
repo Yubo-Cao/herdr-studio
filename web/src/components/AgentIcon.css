@@ -8,7 +8,6 @@
   height: 18px;
   flex-basis: 18px;
   border: 0;
-  border-radius: var(--ui-radius-sm);
   background: transparent;
   box-shadow: none;
 }
@@ -26,8 +25,7 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--border-soft);
-  border-radius: var(--ui-radius);
+  border: 0;
   background: var(--input-bg);
   color: var(--muted);
 }
@@ -36,7 +34,6 @@
   width: 23px;
   height: 23px;
   flex-basis: 23px;
-  border-radius: 6px;
 }
 
 .agent-icon-svg {
@@ -63,7 +60,6 @@
 .agent-icon[data-agent="kimi"] {
   border-color: rgba(23, 131, 255, 0.42);
   background: #151b2a;
-  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.04);
 }
 
 .agent-icon[data-agent="cline"],

@@ -16,8 +16,7 @@
   min-height: 64px;
   resize: vertical;
   padding: 7px 8px;
-  border: 1px solid var(--viewer-border);
-  border-radius: 7px;
+  border: 0;
   outline: none;
   background: var(--input-bg);
   color: var(--text);
@@ -39,8 +38,7 @@
   display: grid;
   gap: 8px;
   padding: 10px;
-  border: 1px solid var(--viewer-border);
-  border-radius: 9px;
+  border: 0;
   background: var(--viewer-panel-bg);
   color: var(--text);
   box-shadow: var(--shadow-lg);

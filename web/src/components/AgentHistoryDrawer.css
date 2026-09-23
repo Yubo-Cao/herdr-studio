@@ -10,7 +10,6 @@
 
 .workspace-inspector.is-compact .agent-history-drawer.is-embedded {
   border: 0;
-  border-radius: 0;
 }
 
 .agent-history-drawer {
@@ -24,7 +23,6 @@
   color: var(--text);
   background: var(--shell-panel);
   border: 0 solid transparent;
-  border-radius: 10px;
   opacity: 0;
   transform: translateX(10px);
   transition:
@@ -103,7 +101,6 @@
 .agent-history-count {
   flex: 0 0 auto;
   padding: 1px 5px;
-  border-radius: 999px;
   color: var(--muted);
   background: var(--panel-2);
   font-size: 9px;
@@ -144,7 +141,6 @@
 .agent-history-icon {
   width: 24px;
   height: 24px;
-  border-radius: 6px;
 }
 
 .agent-history-icon:hover,
@@ -172,8 +168,7 @@
   text-overflow: ellipsis;
   text-transform: capitalize;
   white-space: nowrap;
-  border: 1px solid var(--border-soft);
-  border-radius: 999px;
+  border: 0;
 }
 
 .agent-history-status.is-idle,
@@ -200,8 +195,7 @@
   font-size: 12px;
   line-height: 1.35;
   background: var(--danger-soft);
-  border: 1px solid var(--danger-border);
-  border-radius: 8px;
+  border: 0;
 }
 
 .agent-history-state {
@@ -217,7 +211,6 @@
   text-align: center;
   background: var(--input-bg);
   border: 1px dashed var(--border);
-  border-radius: 10px;
 }
 
 .agent-history-timeline {
@@ -247,7 +240,6 @@
   width: 22px;
   height: 22px;
   flex: 0 0 auto;
-  border-radius: 6px;
 }
 
 .agent-history-overview {
@@ -260,8 +252,7 @@
 
 .agent-history-details > .agent-history-overview {
   margin-bottom: 8px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
+  border: 0;
 }
 
 .agent-history-overview > div {
@@ -313,7 +304,6 @@
   color: var(--muted);
   font-size: 12px;
   border: 1px dashed var(--border);
-  border-radius: 8px;
   background: var(--input-bg);
 }
 
@@ -345,8 +335,7 @@
   font-size: 10px;
   white-space: nowrap;
   background: var(--code-bg);
-  border: 1px solid var(--border-soft);
-  border-radius: 6px;
+  border: 0;
 }
 
 .agent-history-search {
@@ -412,7 +401,6 @@
   top: 0;
   left: 0;
   height: 100%;
-  border-radius: 1.5px;
   background: var(--accent);
   opacity: 0.55;
 }
@@ -426,7 +414,6 @@
   height: 10px;
   padding: 0;
   border: none;
-  border-radius: 1.5px;
   background: var(--muted);
   opacity: 0.45;
   /* The wave grows bars via transform (compositor-only) instead of height:
@@ -569,7 +556,6 @@
   width: 100%;
   padding: 14px 10px;
   border: 1px dashed var(--border);
-  border-radius: 7px;
   background: transparent;
   color: var(--muted);
   font-size: 11px;
@@ -596,8 +582,7 @@
   padding: 7px 9px;
   color: var(--text);
   background: var(--panel);
-  border: 1px solid var(--border-soft);
-  border-radius: 7px;
+  border: 0;
 }
 
 .agent-history-unavailable > button:hover {
@@ -614,7 +599,6 @@
     width: auto;
     max-width: none;
     flex-basis: auto;
-    border-radius: 0;
     transform: translateX(18px);
     /* Keep scrollable content above the mobile viewport's bottom safe area. */
     padding-bottom: env(safe-area-inset-bottom, 0px);

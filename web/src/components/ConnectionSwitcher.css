@@ -15,7 +15,6 @@
   gap: 6px;
   padding: 0 8px;
   border-color: transparent;
-  border-radius: var(--ui-radius);
   background: var(--topbar-control-bg);
   color: var(--topbar-control-text);
 }
@@ -59,7 +58,6 @@
   width: 8px;
   height: 8px;
   flex: 0 0 auto;
-  border-radius: 50%;
   background: var(--muted);
 }
 
@@ -88,8 +86,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  border: 1px solid var(--shell-border);
-  border-radius: 9px;
+  border: 0;
   background: var(--shell-panel);
   box-shadow: var(--shadow-lg);
 }
@@ -210,7 +207,6 @@
   padding: 9px 12px;
   border: 0;
   border-top: 1px solid var(--border-soft);
-  border-radius: 0;
   background: transparent;
   color: var(--text);
   text-align: left;
@@ -246,8 +242,7 @@
 
 .connection-manager-modal > .connection-browser-status {
   margin-top: 10px;
-  border: 1px solid var(--border-soft);
-  border-radius: 7px;
+  border: 0;
 }
 
 .connection-manager-toolbar {
@@ -275,8 +270,7 @@
   display: grid;
   gap: 9px;
   padding: 12px;
-  border: 1px solid var(--border-soft);
-  border-radius: 9px;
+  border: 0;
   background: color-mix(in srgb, var(--panel-2) 55%, transparent);
 }
 
@@ -319,8 +313,7 @@
   align-items: center;
   gap: 3px;
   padding: 2px 6px;
-  border: 1px solid var(--border-soft);
-  border-radius: 999px;
+  border: 0;
   color: var(--text);
   font-size: 10px;
 }

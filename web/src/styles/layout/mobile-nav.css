@@ -17,8 +17,7 @@
     display: inline-flex;
     gap: 3px;
     padding: 4px;
-    border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-    border-radius: 999px;
+    border: 0;
     background: color-mix(in srgb, var(--panel) 76%, transparent);
     box-shadow: var(--shadow-lg);
     transform: translate3d(0, 0, 0) scale(1);
@@ -41,7 +40,6 @@
     align-items: center;
     justify-content: center;
     border: none;
-    border-radius: 999px;
     background: transparent;
     padding: 0;
     color: var(--muted);
@@ -59,7 +57,6 @@
   .mobile-nav button.active {
     background: var(--accent-soft);
     color: var(--text-strong);
-    box-shadow: inset 0 0 0 1px var(--accent);
   }
 
   .mobile-nav button:disabled {
@@ -75,7 +72,6 @@
     min-width: 15px;
     height: 15px;
     padding: 0 4px;
-    border-radius: 999px;
     background: var(--text-strong);
     color: var(--panel);
     font-size: 9px;
@@ -123,8 +119,7 @@
     align-items: center;
     gap: 3px;
     padding: 4px;
-    border: 1px solid color-mix(in srgb, var(--border) 72%, transparent);
-    border-radius: 999px;
+    border: 0;
     background: color-mix(in srgb, var(--panel) 76%, transparent);
     box-shadow: var(--shadow-lg);
     transform: translate3d(0, 0, 0) scale(1);
@@ -146,7 +141,6 @@
     padding: 0;
     overflow: visible;
     border: 0;
-    border-radius: 0;
     background: transparent;
     box-shadow: none;
     transform: translate3d(0, 0, 0) scale(1);
@@ -165,8 +159,7 @@
     right: 1px;
     width: 7px;
     height: 7px;
-    border: 1px solid var(--panel);
-    border-radius: 999px;
+    border: 0;
     background: var(--accent);
     pointer-events: none;
   }

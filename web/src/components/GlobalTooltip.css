@@ -4,13 +4,8 @@
   width: max-content;
   max-width: min(360px, calc((100vw - 24px) / var(--ui-scale, 1)));
   padding: 7px 9px;
-  border: 1px solid color-mix(in srgb, var(--border) 78%, transparent);
-  border-radius: 8px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--panel-2) 94%, white 6%),
-    color-mix(in srgb, var(--panel) 96%, black 4%)
-  );
+  border: 0;
+  background: var(--shell-panel);
   color: var(--text-strong);
   box-shadow: var(--shadow-tooltip);
   font-size: 12px;

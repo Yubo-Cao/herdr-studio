@@ -38,8 +38,7 @@
   flex: 0 0 auto;
   padding: 0 6px;
   overflow: hidden;
-  border: 1px solid var(--token-border);
-  border-radius: var(--ui-radius-sm);
+  border: 0;
   background: var(--token-bg);
   color: var(--token-text);
   font: 500 var(--ui-font-size-xs) / 1 inherit;
@@ -94,8 +93,7 @@ button.ui-token:hover:not(:disabled) {
   min-height: var(--ui-control-height);
   padding: 0 8px;
   flex: 0 0 auto;
-  border: 1px solid transparent;
-  border-radius: var(--ui-radius);
+  border: 0;
   background: transparent;
   color: var(--muted);
   font: inherit;
@@ -145,7 +143,6 @@ button.ui-token:hover:not(:disabled) {
   overflow: hidden;
   align-items: center;
   justify-content: center;
-  border-radius: 50%;
   background: color-mix(
     in srgb,
     var(--participant-color, var(--accent)) 18%,
@@ -165,8 +162,7 @@ button.ui-token:hover:not(:disabled) {
   z-index: 200;
   max-width: calc(100vw - 16px);
   padding: 8px;
-  border: 1px solid var(--border);
-  border-radius: var(--ui-radius);
+  border: 0;
   background: var(--panel);
   color: var(--text);
   box-shadow: var(--shadow-lg);

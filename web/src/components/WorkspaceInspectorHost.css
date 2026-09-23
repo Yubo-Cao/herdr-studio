@@ -75,7 +75,6 @@
   gap: 2px;
   height: var(--ui-token-height);
   padding: 0 5px;
-  border-radius: var(--ui-radius-sm);
   background: var(--accent-soft);
   color: var(--accent);
   font-size: 10px;
@@ -99,7 +98,6 @@
   gap: 5px;
   padding: 0 8px;
   border-color: transparent;
-  border-radius: var(--ui-radius);
   background: transparent;
   color: var(--muted);
   font-size: var(--ui-font-size-sm);
@@ -137,7 +135,6 @@
   align-items: center;
   justify-content: center;
   padding: 0 5px;
-  border-radius: var(--ui-radius-sm);
   background: var(--warning-soft);
   color: var(--warning-text);
   font-size: 10.5px;
@@ -271,8 +268,7 @@
   display: grid;
   place-items: center;
   padding: 0 3px;
-  border: 1px solid var(--viewer-header-bg);
-  border-radius: 999px;
+  border: 0;
   background: var(--accent);
   color: var(--accent-contrast, #fff);
   font-size: 8px;
@@ -338,7 +334,6 @@
 @container workspace-stage (max-width: 699px) {
   .workspace-inspector {
     border: 0;
-    border-radius: 0;
     box-shadow: none;
   }
 }

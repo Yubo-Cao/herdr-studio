@@ -15,19 +15,19 @@ export function paneLocationName(
 }
 
 /**
- * The name a pane is known by. The agent icon already identifies the agent,
- * so the agent name is only the last resort after the user's pane name, a
- * custom single-pane tab name, and the working directory.
+ * The name a pane is known by: the user's pane name, a custom single-pane
+ * tab name, the working directory, then the pane ID. The agent is never used
+ * as a name; wherever panes are listed its icon already identifies it.
  */
 export function paneDisplayName(
-  pane: Pick<Pane, "label" | "agent" | "cwd" | "foreground_cwd" | "pane_id">,
+  pane: Pick<Pane, "label" | "cwd" | "foreground_cwd" | "pane_id">,
   options: { tabLabel?: string; tabPaneCount?: number } = {},
 ): string {
   const label = pane.label?.trim();
   if (label) return label;
   const tabLabel = customTabLabel(options.tabLabel);
   if (tabLabel && (options.tabPaneCount ?? 1) <= 1) return tabLabel;
-  return paneLocationName(pane) || pane.agent?.trim() || shortId(pane.pane_id);
+  return paneLocationName(pane) || shortId(pane.pane_id);
 }
 
 export type PaneTabGroup<T extends Pick<Pane, "tab_id">> = {
