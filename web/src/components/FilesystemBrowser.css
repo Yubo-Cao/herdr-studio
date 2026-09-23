@@ -249,30 +249,6 @@
   padding: 0 8px;
   background: transparent;
 }
-.file-explorer-mode-switch {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-  padding: 2px;
-  background: color-mix(in srgb, var(--text) 6%, transparent);
-}
-.file-explorer-mode-switch button {
-  height: calc(var(--ui-control-height) - 4px);
-  padding: 0 10px;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font-size: var(--ui-font-size-sm);
-  font-weight: 500;
-}
-.file-explorer-mode-switch button:hover:not(:disabled) {
-  color: var(--text-strong);
-}
-.file-explorer-mode-switch button[aria-checked="true"] {
-  background: var(--panel);
-  color: var(--text-strong);
-  box-shadow: 0 0 0 1px var(--border);
-}
 .file-explorer-mode-root {
   min-width: 0;
   flex: 1 1 auto;
@@ -329,11 +305,11 @@
   max-height: min(560px, calc(100vh - 260px));
   overflow: auto;
   border: 0;
-  background: var(--viewer-content-bg);
+  background: transparent;
 }
 
 .file-tree.is-drop-target {
-  border-color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .file-explorer-side .file-tree {
@@ -488,8 +464,8 @@
 }
 
 .file-action {
-  width: 28px;
-  height: 26px;
+  width: var(--ui-control-height);
+  height: var(--ui-control-height);
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -497,8 +473,12 @@
 }
 
 .file-explorer-toolbar {
+  box-sizing: border-box;
+  min-height: var(--ui-bar-height);
   display: flex;
   align-items: center;
-  gap: 8px;
-  margin-bottom: 10px;
+  gap: 6px;
+  margin-bottom: 0;
+  padding: 0 6px 0 8px;
+  border-bottom: 1px solid var(--viewer-border);
 }

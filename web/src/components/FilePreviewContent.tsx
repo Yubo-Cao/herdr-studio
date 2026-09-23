@@ -71,6 +71,7 @@ import { invalidateFilePreviewCache } from "./fileExplorerResources";
 import { lazyWithReload } from "../lazyWithReload";
 import { Button } from "./ui/Button";
 import { Token } from "./ui/Token";
+import { SegmentedControl } from "./ui/SegmentedControl";
 import "./FilePreviewContent.css";
 
 const FileEditor = lazyWithReload("file-editor", () =>
@@ -733,31 +734,19 @@ export function FilePreviewContent({
               </button>
             ) : null}
             {!showingChanges && hasRichPreview && !editing ? (
-              <button
-                type="button"
+              <SegmentedControl
                 className="file-preview-mode-toggle"
-                role="switch"
-                aria-label="Source mode"
-                aria-checked={previewMode === "raw"}
-                onClick={() =>
-                  setPreviewMode((mode) =>
-                    mode === "rendered" ? "raw" : "rendered",
-                  )
-                }
-              >
-                <span className="file-preview-mode-label">
-                  {hasMermaidPreview ? "Diagram" : "Preview"}
-                </span>
-                <span
-                  className={
-                    "settings-switch" + (previewMode === "raw" ? " is-on" : "")
-                  }
-                  aria-hidden="true"
-                >
-                  <span />
-                </span>
-                <span className="file-preview-mode-label">Source</span>
-              </button>
+                aria-label="Preview mode"
+                value={previewMode}
+                onChange={setPreviewMode}
+                options={[
+                  {
+                    value: "rendered",
+                    label: hasMermaidPreview ? "Diagram" : "Preview",
+                  },
+                  { value: "raw", label: "Source" },
+                ]}
+              />
             ) : null}
             {changesAvailable ? (
               <button
@@ -784,12 +773,11 @@ export function FilePreviewContent({
           aria-label={`Editing ${entry?.name ?? previewPath}`}
         >
           <div className="ui-bar file-editor-bar">
-            <span className="file-editor-path" title={previewPath}>
-              {previewPath}
-            </span>
+            <span className="ui-bar-title">Editing</span>
             <Token tone={dirty ? "warning" : "neutral"}>
               {saving ? "Saving" : dirty ? "Unsaved" : "Saved"}
             </Token>
+            <span className="ui-bar-spacer" />
             <Button
               variant="primary"
               disabled={!dirty || saving}

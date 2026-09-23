@@ -90,6 +90,7 @@ import {
   symlinkDescription,
   writeExplorerViewMemory,
 } from "./fileExplorerResources";
+import { SegmentedControl } from "./ui/SegmentedControl";
 import "./FileExplorerDialog.css";
 
 const FilePreviewContent = lazyWithReload("file-preview", () =>
@@ -1724,28 +1725,24 @@ function FileExplorerContent({
         <div className="file-explorer-browser">
           {workspace ? (
             <div className="ui-bar file-explorer-modebar">
-              <div
+              <SegmentedControl
                 className="file-explorer-mode-switch"
-                role="radiogroup"
                 aria-label="Explorer scope"
-              >
-                {(["workspace", "filesystem"] as const).map((mode) => (
-                  <button
-                    type="button"
-                    key={mode}
-                    role="radio"
-                    aria-checked={filesystem === (mode === "filesystem")}
-                    title={
-                      mode === "workspace"
-                        ? "Browse this workspace checkout"
-                        : "Browse any path on the connected host"
-                    }
-                    onClick={() => setExplorerMode(mode)}
-                  >
-                    {mode === "workspace" ? "Workspace" : "Filesystem"}
-                  </button>
-                ))}
-              </div>
+                value={filesystem ? "filesystem" : "workspace"}
+                onChange={setExplorerMode}
+                options={[
+                  {
+                    value: "workspace",
+                    label: "Workspace",
+                    title: "Browse this workspace checkout",
+                  },
+                  {
+                    value: "filesystem",
+                    label: "Filesystem",
+                    title: "Browse any path on the connected host",
+                  },
+                ]}
+              />
               {!filesystem ? (
                 <span
                   className="file-explorer-mode-root"

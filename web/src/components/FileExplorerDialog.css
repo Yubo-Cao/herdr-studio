@@ -1,6 +1,3 @@
-.workspace-inspector .file-explorer-side {
-}
-
 .workspace-inspector.is-compact .file-explorer-side {
   border: 0;
 }
@@ -16,7 +13,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
-  padding: 12px;
+  padding: 0;
   border: 0;
   background: var(--viewer-panel-bg);
 }
@@ -63,7 +60,7 @@
   flex: 1 1 auto;
   display: flex;
   flex-direction: column;
-  gap: 8px;
+  gap: 0;
 }
 
 .file-explorer-side .file-explorer-browser {
