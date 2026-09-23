@@ -3528,19 +3528,19 @@ export function TerminalView({
             </div>
           </div>
         ) : null}
+        {composerOpen ? (
+          <TerminalComposer
+            draftKey={composerDraftKey}
+            shortcutRows={mobileShortcuts}
+            onRunShortcut={runMobileShortcut}
+            shortcutDisabledReason={mobileShortcutReason}
+            onClose={() => setComposerOpen(false)}
+            onSubmit={submitTerminalComposer}
+            onUploadImage={uploadComposerImage}
+            onError={notifyComposerError}
+          />
+        ) : null}
         <div className="terminal-pane-toolbar" aria-label="Pane actions">
-          {composerOpen ? (
-            <TerminalComposer
-              draftKey={composerDraftKey}
-              shortcutRows={mobileShortcuts}
-              onRunShortcut={runMobileShortcut}
-              shortcutDisabledReason={mobileShortcutReason}
-              onClose={() => setComposerOpen(false)}
-              onSubmit={submitTerminalComposer}
-              onUploadImage={uploadComposerImage}
-              onError={notifyComposerError}
-            />
-          ) : null}
           {s.endpointAvailability[pane.terminal_id] &&
           store.terminalScrollReason(pane.terminal_id) ? (
             <span
