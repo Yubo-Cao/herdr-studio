@@ -74,11 +74,20 @@ Releases must package/inspect every supported archive/checksum; see
 
 | Path under `web/src/` | Responsibility |
 | --- | --- |
-| `styles/tokens.css` | Theme variables (`:root`, `data-theme`, `data-accent`) |
+| `styles/tokens.css` | Theme variables and the geometry scale (`--ui-bar-height`, `--ui-row-height`, `--ui-control-height`, `--ui-token-height`) |
+| `styles/ui.css` | Styles for the shared primitives in `components/ui/` |
 | `styles/base.css` | Resets/shared primitives: modals, forms, badges, statuses, panels, loading |
 | `styles/vendor.css` | Shared syntax/diff overrides; consumer-specific overrides stay with components |
 | `styles/layout/*.css` | App-shell regions, imported once by `App.tsx` |
 | `components/<Name>.css` | Component-owned styles, imported/deleted with the component; same for `components/ui/` |
+
+The UI is square and borderless: no rounded corners and no boxed outlines.
+Surfaces separate by tone, with a single 1px divider only where two surfaces of
+the same tone meet; fields and buttons read through fill, not borders.
+`scripts/check-web-style.test.ts` enforces this. Build chrome from
+`components/ui/` (`Button`, `IconButton`, `SegmentedControl`, `Token`, and the
+`.ui-bar` header) instead of new per-component control CSS; every bar uses
+`--ui-bar-height` and every chip is a `Token`.
 
 Prefix classes with the component name; keep media queries beside their rules,
 not in a separate mobile stylesheet. Shell/Suspense fallback styles must load

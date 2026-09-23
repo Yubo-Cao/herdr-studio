@@ -89,6 +89,11 @@ cross-worktree state mixing.
 
 - See recognized agents and working/blocked/done/idle status; focus their panes
   from the tree, switcher, command menu, Agent panel, or notifications.
+- Agent rows show the agent icon with the pane's name (its Herdr pane name,
+  a custom single-pane tab name, or its directory) and a code-style pane ID;
+  the agent name is not repeated. Tabs holding several panes appear as a
+  heading that groups their agent rows. Pane headers show the same name and
+  a click-to-copy pane ID.
 - Choose nested agents, **Agents: Separate**, or **Agents: Compact**. Separate
   supports attention-first, workspace/manual ordering, grouping, and dragging
   in ungrouped manual mode. Idle recency uses session-file activity, falling
