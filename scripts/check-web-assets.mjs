@@ -5,7 +5,8 @@ import { fileURLToPath, URL } from "node:url";
 
 const publicRoot = fileURLToPath(new URL("../server/public/", import.meta.url));
 const maxFileCount = 160;
-const maxTotalBytes = 12 * 1024 * 1024;
+// The lazy Monaco file editor (core, grammars, worker, codicons) adds ~3.5 MiB.
+const maxTotalBytes = 16 * 1024 * 1024;
 const maxInitialJsBytes = 660 * 1024;
 const maxInitialJsGzipBytes = 200 * 1024;
 const maxInitialCssBytes = 196 * 1024;

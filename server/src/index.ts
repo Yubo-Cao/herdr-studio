@@ -164,6 +164,7 @@ const IMPORTANT_RPC_METHODS = new Set([
   "agent_history.entry",
   "agent_session.get",
   "file.read",
+  "file.write",
   "git.diff_file",
   "git.file_action",
   "git.pull",
@@ -804,6 +805,7 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     listWorkspaceFiles,
     resolveWorkspaceFiles,
     readWorkspaceFile,
+    writeWorkspaceFile,
     readGitDiffSummary,
     readGitDiffFile,
     runGitPull,
@@ -908,6 +910,16 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
       sendReply({ id, result }, "file-read");
     } catch (e) {
       sendError("file-read-error", e);
+    }
+    return;
+  }
+  if (method === "file.write") {
+    try {
+      const result = await writeWorkspaceFile(params ?? {});
+      if (!result.scope) invalidateGitStatus(result.checkout_path);
+      sendReply({ id, result }, "file-write");
+    } catch (e) {
+      sendError("file-write-error", e);
     }
     return;
   }

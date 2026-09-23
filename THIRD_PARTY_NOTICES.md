@@ -28,6 +28,14 @@ LobeHub, under the MIT License. See
 vendors the same Codex and Kimi SVGs as `site/assets/codex.svg` and
 `site/assets/kimi.svg` so it does not need a package install or icon CDN.
 
+## Monaco Editor
+
+The file editor bundles [Monaco Editor](https://github.com/microsoft/monaco-editor),
+Copyright (c) Microsoft Corporation, under the MIT License, including its
+Codicons icon font, which Microsoft publishes under
+[CC BY 4.0](https://creativecommons.org/licenses/by/4.0/). The package's
+`ThirdPartyNotices.txt` lists the components Monaco itself redistributes.
+
 ## Pi
 
 `web/src/assets/pi-logo.svg` is adapted from the

@@ -1,9 +1,12 @@
 import { shortcutMatches } from "../shortcutPreferences";
 import {
+  FILE_WRITE_CONFLICT_MESSAGE,
+  FILE_WRITE_MAX_BYTES,
   HTML_PREVIEW_MAX_BYTES,
   isHtmlPath,
 } from "../../../shared/filePreview";
 import {
+  Suspense,
   useCallback,
   useEffect,
   useMemo,
@@ -14,7 +17,15 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { EditorView as CodeMirrorEditorView } from "@codemirror/view";
-import { ChevronLeft, FolderPlus, RefreshCw } from "lucide-react";
+import {
+  ChevronLeft,
+  FolderPlus,
+  Pencil,
+  RefreshCw,
+  RotateCcw,
+  Save,
+  X,
+} from "lucide-react";
 import { fileReviewLineLabel, MAX_QUOTE_LENGTH } from "../annotations";
 import {
   FileAnnotationDrag,
@@ -56,7 +67,49 @@ import {
   normalizeFilesystemPath,
 } from "../filesystemPaths";
 import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
+import { invalidateFilePreviewCache } from "./fileExplorerResources";
+import { lazyWithReload } from "../lazyWithReload";
+import { Button } from "./ui/Button";
+import { Token } from "./ui/Token";
 import "./FilePreviewContent.css";
+
+const FileEditor = lazyWithReload("file-editor", () =>
+  import("./FileEditor").then((module) => ({ default: module.FileEditor })),
+);
+
+type EditorDraft = {
+  /** Text the draft was based on, i.e. the file content at last load/save. */
+  base: string;
+  text: string;
+  /** Modification time of `base`, sent as the save precondition. */
+  mtimeMs: number;
+};
+
+/**
+ * Open editor drafts keyed by connection, workspace, and path. They survive
+ * switching files or closing the Inspector, so navigation never silently
+ * discards unsaved edits; only Save, Revert, or a confirmed Close does.
+ */
+const editorDrafts = new Map<string, EditorDraft>();
+
+function hasDirtyEditorDrafts() {
+  for (const draft of editorDrafts.values()) {
+    if (draft.text !== draft.base) return true;
+  }
+  return false;
+}
+
+if (typeof window !== "undefined") {
+  window.addEventListener("beforeunload", (event) => {
+    if (!hasDirtyEditorDrafts()) return;
+    event.preventDefault();
+    event.returnValue = "";
+  });
+}
+
+function isAbsoluteFilePath(path: string) {
+  return /^(?:\/|[a-z]:[\\/])/i.test(path);
+}
 
 export type ActiveFilePreviewSelection = {
   entry: FileExplorerEntry | null;
@@ -230,6 +283,34 @@ export function FilePreviewContent({
   const theme = useDocumentTheme();
   const previewText = preview?.text ?? null;
   const previewPath = preview?.path ?? "";
+  const draftKey =
+    preview?.workspace_id && previewPath
+      ? `${connectionClient.connectionId}:${connectionClient.generation}:${preview.workspace_id}:${previewPath}`
+      : "";
+  const [, setDraftRevision] = useState(0);
+  const [saving, setSaving] = useState(false);
+  const [saveConflict, setSaveConflict] = useState<string | null>(null);
+  const draft = draftKey ? editorDrafts.get(draftKey) : undefined;
+  const editing = !!draft;
+  const dirty = !!draft && draft.text !== draft.base;
+  const canEdit =
+    !!preview &&
+    previewText !== null &&
+    !preview.binary &&
+    !preview.truncated &&
+    preview.type !== "directory" &&
+    !preview.image_data_url &&
+    !!preview.workspace_id &&
+    preview.size <= FILE_WRITE_MAX_BYTES;
+  const updateDraft = useCallback(
+    (next: EditorDraft | null) => {
+      if (!draftKey) return;
+      if (next) editorDrafts.set(draftKey, next);
+      else editorDrafts.delete(draftKey);
+      setDraftRevision((revision) => revision + 1);
+    },
+    [draftKey],
+  );
   const markdownDocumentPath = preview
     ? workspaceMarkdownDocumentPath(previewPath, preview.root)
     : previewPath;
@@ -336,7 +417,127 @@ export function FilePreviewContent({
   useEffect(() => {
     setPendingAnnotation(null);
     setMarkdownSelection(null);
+    setSaveConflict(null);
   }, [previewPath]);
+
+  useEffect(() => {
+    // A clean draft follows reloads; a dirty one keeps the user's text and
+    // relies on the save precondition to detect the external change.
+    const current = draftKey ? editorDrafts.get(draftKey) : undefined;
+    if (!current || previewText === null || !preview) return;
+    if (current.text !== current.base || current.base === previewText) return;
+    updateDraft({
+      base: previewText,
+      text: previewText,
+      mtimeMs: preview.mtime_ms,
+    });
+  }, [draftKey, preview, previewText, updateDraft]);
+
+  const startEditing = () => {
+    if (!preview || previewText === null || !canEdit) return;
+    setSaveConflict(null);
+    updateDraft({
+      base: previewText,
+      text: previewText,
+      mtimeMs: preview.mtime_ms,
+    });
+  };
+
+  const stopEditing = () => {
+    if (
+      dirty &&
+      !window.confirm(
+        `Discard unsaved changes to ${entry?.name ?? previewPath}?`,
+      )
+    )
+      return;
+    setSaveConflict(null);
+    updateDraft(null);
+  };
+
+  const revertDraft = () => {
+    if (!draft) return;
+    setSaveConflict(null);
+    updateDraft({ ...draft, text: draft.base });
+  };
+
+  const saveDraft = async (force = false) => {
+    const current = draftKey ? editorDrafts.get(draftKey) : undefined;
+    if (!preview || !current || saving) return;
+    if (new TextEncoder().encode(current.text).length > FILE_WRITE_MAX_BYTES) {
+      store.notify({
+        kind: "error",
+        message: "File is too large to save",
+        detail: `The editor saves files up to ${FILE_WRITE_MAX_BYTES / 1024 / 1024} MiB.`,
+      });
+      return;
+    }
+    const absolute = isAbsoluteFilePath(previewPath);
+    setSaving(true);
+    try {
+      const result = (await connectionClient.call("file.write", {
+        workspace_id: preview.workspace_id,
+        path: previewPath,
+        content: current.text,
+        expected_mtime_ms: current.mtimeMs,
+        ...(force ? { force: true } : {}),
+        ...(absolute ? { scope: "filesystem" } : {}),
+      })) as { mtime_ms: number };
+      if (!connectionClient.isCurrent()) return;
+      // Keep typing that happened while the save was in flight.
+      const latest = editorDrafts.get(draftKey) ?? current;
+      editorDrafts.set(draftKey, {
+        base: current.text,
+        text: latest.text,
+        mtimeMs: result.mtime_ms,
+      });
+      setDraftRevision((revision) => revision + 1);
+      setSaveConflict(null);
+      invalidateFilePreviewCache(
+        connectionClient,
+        preview.workspace_id,
+        previewPath,
+      );
+      onRefresh?.();
+      store.notify({
+        kind: "success",
+        message: "File saved",
+        detail: previewPath,
+        autoDismissMs: 3000,
+      });
+    } catch (saveError) {
+      const message = (saveError as Error).message;
+      if (message.includes(FILE_WRITE_CONFLICT_MESSAGE)) {
+        setSaveConflict(message);
+      } else {
+        store.notify({
+          kind: "error",
+          message: "Failed to save file",
+          detail: message,
+        });
+      }
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  const reloadAfterConflict = () => {
+    if (
+      dirty &&
+      !window.confirm("Discard your edits and reload the file from disk?")
+    )
+      return;
+    setSaveConflict(null);
+    updateDraft(null);
+    if (preview) {
+      invalidateFilePreviewCache(
+        connectionClient,
+        preview.workspace_id,
+        previewPath,
+      );
+    }
+    onRefresh?.();
+  };
 
   useEffect(() => {
     if (previewText === null || !previewPath || preview?.truncated) return;
@@ -355,7 +556,7 @@ export function FilePreviewContent({
   }, [changesAvailable, changesKey, detailTab]);
 
   useEffect(() => {
-    if (showingChanges || !hasPreviewText) return;
+    if (showingChanges || !hasPreviewText || editing) return;
     const onKey = (e: KeyboardEvent) => {
       if (e.defaultPrevented || document.querySelector(".shortcut-modal"))
         return;
@@ -383,7 +584,7 @@ export function FilePreviewContent({
     window.addEventListener("keydown", onKey, { capture: true });
     return () =>
       window.removeEventListener("keydown", onKey, { capture: true });
-  }, [hasPreviewText, renderRichPreview, showingChanges]);
+  }, [editing, hasPreviewText, renderRichPreview, showingChanges]);
 
   useEffect(() => {
     const section = previewSectionRef.current;
@@ -459,7 +660,7 @@ export function FilePreviewContent({
       tabIndex={-1}
       onKeyDownCapture={(e) => {
         if (shortcutMatches(e.nativeEvent, "preview.search")) {
-          if (showingChanges || renderRichPreview) return;
+          if (showingChanges || renderRichPreview || editing) return;
           e.preventDefault();
           e.stopPropagation();
           openPreviewSearch(editorViewRef.current);
@@ -510,6 +711,17 @@ export function FilePreviewContent({
                 />
               </button>
             ) : null}
+            {!showingChanges && canEdit && !editing ? (
+              <button
+                type="button"
+                className="file-preview-refresh"
+                title="Edit file"
+                aria-label="Edit file"
+                onClick={startEditing}
+              >
+                <Pencil size={13} aria-hidden="true" />
+              </button>
+            ) : null}
             {!showingChanges && hasPreviewText && !preview?.truncated ? (
               <button
                 type="button"
@@ -520,7 +732,7 @@ export function FilePreviewContent({
                 Copy
               </button>
             ) : null}
-            {!showingChanges && hasRichPreview ? (
+            {!showingChanges && hasRichPreview && !editing ? (
               <button
                 type="button"
                 className="file-preview-mode-toggle"
@@ -565,7 +777,82 @@ export function FilePreviewContent({
         {entry ? <span>{entry.path}</span> : null}
       </div>
 
-      {showingChanges ? (
+      {!showingChanges && editing && draft ? (
+        <div
+          className="file-preview-file-content file-editor-shell"
+          role="region"
+          aria-label={`Editing ${entry?.name ?? previewPath}`}
+        >
+          <div className="ui-bar file-editor-bar">
+            <span className="file-editor-path" title={previewPath}>
+              {previewPath}
+            </span>
+            <Token tone={dirty ? "warning" : "neutral"}>
+              {saving ? "Saving" : dirty ? "Unsaved" : "Saved"}
+            </Token>
+            <Button
+              variant="primary"
+              disabled={!dirty || saving}
+              title="Save (Ctrl+S / Cmd+S)"
+              onClick={() => void saveDraft()}
+            >
+              <Save size={13} aria-hidden="true" />
+              Save
+            </Button>
+            <Button
+              disabled={!dirty || saving}
+              title="Revert to the last loaded or saved content"
+              onClick={revertDraft}
+            >
+              <RotateCcw size={13} aria-hidden="true" />
+              Revert
+            </Button>
+            <Button
+              icon
+              title="Close editor"
+              aria-label="Close editor"
+              onClick={stopEditing}
+            >
+              <X size={14} aria-hidden="true" />
+            </Button>
+          </div>
+          {saveConflict ? (
+            <div className="file-editor-conflict" role="alert">
+              {saveConflict}.
+              <span className="file-editor-conflict-actions">
+                <Button variant="outline" onClick={reloadAfterConflict}>
+                  Reload
+                </Button>
+                <Button
+                  variant="outline"
+                  disabled={saving}
+                  onClick={() => void saveDraft(true)}
+                >
+                  Overwrite
+                </Button>
+              </span>
+            </div>
+          ) : null}
+          <Suspense
+            fallback={<div className="file-editor-loading">Loading editor</div>}
+          >
+            <FileEditor
+              path={previewPath}
+              value={draft.text}
+              theme={theme}
+              onChange={(text) => {
+                const current = editorDrafts.get(draftKey);
+                if (!current || current.text === text) return;
+                const wasDirty = current.text !== current.base;
+                editorDrafts.set(draftKey, { ...current, text });
+                if (wasDirty !== (text !== current.base))
+                  setDraftRevision((revision) => revision + 1);
+              }}
+              onSave={() => void saveDraft()}
+            />
+          </Suspense>
+        </div>
+      ) : showingChanges ? (
         <div
           className="file-preview-changes"
           role="region"

@@ -3,12 +3,15 @@ import { sshCommandArgv } from "../bridge/ssh-command";
 import {
   DELETE_TIMEOUT_MS,
   DOWNLOAD_TIMEOUT_MS,
+  FILE_WRITE_CONFLICT_MESSAGE,
+  FILE_WRITE_MAX_BYTES,
   LIST_LIMIT,
   LIST_TIMEOUT_MS,
   PREVIEW_IMAGE_MAX_BYTES,
   PREVIEW_MAX_BYTES,
   PREVIEW_TIMEOUT_MS,
   UPLOAD_TIMEOUT_MS,
+  WRITE_TIMEOUT_MS,
 } from "./file-constants";
 import { entrySort, relativeExplorerPath } from "./file-paths";
 import type {
@@ -18,6 +21,8 @@ import type {
   FileListResult,
   FilePreviewResult,
   FileUploadResult,
+  FileWriteOptions,
+  FileWriteResult,
   RunProcessWithCodeTimeout,
 } from "./file-types";
 import { runProcessWithInputTimeout } from "./process";
@@ -581,4 +586,118 @@ printf 'META\\t%s\\t%s\\n' "$(printf '%s' "$rel" | base64 | tr -d '\\n')" "$type
     );
   }
   return parseRemoteFileDelete(result.stdout);
+}
+
+export function parseRemoteFileWrite(
+  stdout: string,
+  requestedPath: string,
+): FileWriteResult {
+  const [kind, rawSize, rawMtime, created] = stdout.trim().split("\t");
+  if (kind !== "META") {
+    throw new Error(
+      (stdout || "invalid file write response").trim().slice(0, 1000),
+    );
+  }
+  return {
+    path: requestedPath,
+    size: Number(rawSize) || 0,
+    mtime_ms: (Number(rawMtime) || 0) * 1000,
+    created: created === "1",
+  };
+}
+
+/**
+ * Remote counterpart of writeLocalFile. The conflict check, temporary file,
+ * and rename run in one SSH script so no other round trip can interleave.
+ * Remote modification times have one-second resolution, matching previews.
+ */
+export async function writeRemoteFile({
+  host,
+  rootPath,
+  requestedPath,
+  body,
+  options = {},
+  shQuote,
+  runProcessWithInputTimeoutImpl = runProcessWithInputTimeout,
+}: {
+  host: string;
+  rootPath: string;
+  requestedPath: string;
+  body: Buffer;
+  options?: FileWriteOptions;
+  shQuote: (value: string) => string;
+  runProcessWithInputTimeoutImpl?: typeof runProcessWithInputTimeout;
+}): Promise<FileWriteResult> {
+  if (body.length > FILE_WRITE_MAX_BYTES) {
+    throw new Error("file is too large to save from the editor");
+  }
+  const expected =
+    options.expectedMtimeMs === undefined || options.force
+      ? ""
+      : String(Math.round(options.expectedMtimeMs));
+  const command = `
+set -euo pipefail
+root=${shQuote(rootPath)}
+request=${shQuote(requestedPath)}
+absolute=${options.absolute ? "1" : "0"}
+expected=${shQuote(expected)}
+limit=${FILE_WRITE_MAX_BYTES}
+root_real="$(cd "$root" && pwd -P)"
+case "$request" in
+  /*)
+    if [ "$absolute" != "1" ]; then echo "workspace writes require a checkout-relative path" >&2; exit 13; fi
+    target="$request"
+    ;;
+  *)
+    if [ "$absolute" = "1" ]; then echo "filesystem writes require an absolute path" >&2; exit 13; fi
+    case "$request" in ..|../*|*/../*|*/..) echo "file explorer path escaped the workspace checkout" >&2; exit 13 ;; esac
+    target="$root_real/$request"
+    ;;
+esac
+if [ -e "$target" ]; then
+  target_real="$(realpath "$target")"
+  if [ ! -f "$target_real" ]; then echo "only regular files can be edited" >&2; exit 14; fi
+  created=0
+else
+  if [ -L "$target" ]; then echo "cannot save through a broken symlink" >&2; exit 14; fi
+  parent="\${target%/*}"
+  if [ ! -d "$parent" ]; then echo "save target directory does not exist" >&2; exit 14; fi
+  target_real="$(cd "$parent" && pwd -P)/\${target##*/}"
+  created=1
+fi
+if [ -n "$expected" ]; then
+  if [ "$created" = "1" ]; then echo "${FILE_WRITE_CONFLICT_MESSAGE}: it no longer exists" >&2; exit 16; fi
+  current="$(stat -c %Y "$target_real" 2>/dev/null || stat -f %m "$target_real")"
+  if [ "$((current * 1000))" != "$expected" ]; then echo "${FILE_WRITE_CONFLICT_MESSAGE} since it was opened" >&2; exit 16; fi
+fi
+dir="\${target_real%/*}"
+name="\${target_real##*/}"
+tmp="$(mktemp "$dir/.$name.roamgate-XXXXXX")"
+trap 'rm -f "$tmp"' EXIT
+base64 -d > "$tmp"
+size="$(stat -c %s "$tmp" 2>/dev/null || stat -f %z "$tmp")"
+if [ "$size" -gt "$limit" ]; then echo "file is too large to save from the editor" >&2; exit 15; fi
+if [ "$created" = "1" ]; then
+  chmod "$(printf '%o' "$((0666 & ~$(umask)))")" "$tmp"
+else
+  chmod "$(stat -c %a "$target_real" 2>/dev/null || stat -f %Lp "$target_real")" "$tmp"
+fi
+mv -f "$tmp" "$target_real"
+trap - EXIT
+mtime="$(stat -c %Y "$target_real" 2>/dev/null || stat -f %m "$target_real")"
+printf 'META\\t%s\\t%s\\t%s\\n' "$size" "$mtime" "$created"
+`;
+  const result = await runProcessWithInputTimeoutImpl(
+    sshCommandArgv(host, `bash -lc ${shQuote(command)}`),
+    body.toString("base64"),
+    WRITE_TIMEOUT_MS,
+  );
+  if (result.code !== 0) {
+    throw new Error(
+      (result.stderr || result.stdout || `file write exited ${result.code}`)
+        .trim()
+        .slice(0, 1000),
+    );
+  }
+  return parseRemoteFileWrite(result.stdout, requestedPath);
 }

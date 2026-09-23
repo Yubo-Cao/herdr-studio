@@ -1,0 +1,49 @@
+.file-editor {
+  flex: 1 1 auto;
+  min-width: 0;
+  min-height: 0;
+  background: var(--viewer-content-bg);
+}
+
+.file-editor .monaco-editor {
+  --vscode-focusBorder: transparent;
+}
+
+.file-editor-bar {
+  border-top: 0;
+}
+
+.file-editor-path {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono-font);
+  font-size: var(--ui-font-size-xs);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-editor-conflict {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border);
+  background: var(--warning-soft);
+  color: var(--warning-text);
+  font-size: var(--ui-font-size-sm);
+}
+
+.file-editor-conflict-actions {
+  display: inline-flex;
+  gap: 4px;
+  margin-left: 8px;
+  vertical-align: middle;
+}
+
+.file-editor-loading {
+  flex: 1 1 auto;
+  display: grid;
+  place-items: center;
+  color: var(--muted);
+  font-size: var(--ui-font-size-sm);
+}
