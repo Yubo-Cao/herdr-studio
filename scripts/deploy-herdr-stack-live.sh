@@ -8,7 +8,8 @@ studio_candidate=
 build_id=
 stock_version=
 herdr_service=herdr.service
-studio_service=herdr-gui.service
+studio_service=roamgate.service
+legacy_studio_service=herdr-gui.service
 install_dir="$HOME/.local/bin"
 release_root=${HERDR_DEPLOY_RELEASE_ROOT:-"$HOME/.local/lib/herdr-deployments"}
 
@@ -25,7 +26,7 @@ usage() {
     "  --build-id ID              Versioned release directory name" \
     "  --stock-version VERSION    Require the exact version used by stock clients" \
     "  --herdr-service UNIT       Default: herdr.service" \
-    "  --studio-service UNIT      Default: herdr-gui.service" \
+    "  --studio-service UNIT      Default: roamgate.service" \
     "  --release-root DIR         Default: ~/.local/lib/herdr-deployments"
 }
 
@@ -101,6 +102,13 @@ systemd_version=$(systemctl --version | awk 'NR == 1 { print $2 }')
   fail "$herdr_service must use Type=simple"
 systemctl --user is-active --quiet "$herdr_service" ||
   fail "$herdr_service is not active; live handoff requires a running server"
+# Roamgate replaces the legacy herdr-gui service; migrate it first (see
+# docs/DEPLOYMENT.md#transition-from-herdr-studio--herdr-gui) so two services
+# never compete for the same port and configuration.
+if [[ $studio_service != "$legacy_studio_service" ]] &&
+  systemctl --user is-active --quiet "$legacy_studio_service"; then
+  fail "$legacy_studio_service is still active; migrate it to $studio_service first"
+fi
 studio_was_active=false
 if systemctl --user is-active --quiet "$studio_service"; then
   studio_was_active=true
@@ -118,6 +126,7 @@ fi
   fail "Herdr candidate does not include the collaboration API"
 
 studio_version=$("$studio_candidate" --version)
+studio_version=${studio_version#roamgate }
 studio_version=${studio_version#herdr-gui }
 [[ -n $studio_version ]] || fail "could not determine Studio candidate version"
 
@@ -131,7 +140,7 @@ release_dir=$release_root/$build_id
 [[ ! -e $release_dir ]] || fail "release already exists: $release_dir"
 install -d -m 0755 "$release_root" "$release_dir" "$install_dir"
 release_herdr=$release_dir/herdr
-release_studio=$release_dir/herdr-gui
+release_studio=$release_dir/roamgate
 install -m 0755 "$herdr_candidate" "$release_herdr"
 install -m 0755 "$studio_candidate" "$release_studio"
 
@@ -250,7 +259,7 @@ atomic_install() {
 }
 
 atomic_install "$release_herdr" "$install_dir/herdr"
-atomic_install "$release_studio" "$install_dir/herdr-gui"
+atomic_install "$release_studio" "$install_dir/roamgate"
 exec_start=$(systemctl --user show "$herdr_service" --property=ExecStart --value)
 [[ $exec_start == *"path=$install_dir/herdr ;"* ]] ||
   fail "$herdr_service cold-start command does not use $install_dir/herdr"

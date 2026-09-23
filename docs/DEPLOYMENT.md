@@ -549,23 +549,25 @@ Build versioned candidates on the build machine:
 ```bash
 build_id=$(date -u +%Y%m%dT%H%M%SZ)
 cd /path/to/herdr
-# Keep the stock release identity so stock 0.8.2 clients reuse the forked
-# remote binary instead of offering a destructive remote update.
+# Keep the stock release identity so stock clients of the same version reuse
+# the forked remote binary instead of offering a destructive remote update.
 HERDR_BUILD_CHANNEL=stable HERDR_BUILD_ID="$build_id" cargo build --release
 
 cd /path/to/herdr-studio
 bun run build:linux-x64
 ```
 
-Copy `target/release/herdr`, `server/herdr-gui-linux-x64`, this repository's
+Build Herdr on the target's distribution (or an older glibc) because the Rust
+binary links the build host's glibc; the Roamgate binary needs only glibc 2.17.
+Copy `target/release/herdr`, `server/roamgate-linux-x64`, this repository's
 `scripts/deploy-herdr-stack-live.sh`, and the `deploy/systemd/` directory to the
 target. Run the deployment script on that target host:
 
 ```bash
 ./scripts/deploy-herdr-stack-live.sh \
   --herdr ./artifacts/herdr \
-  --studio ./artifacts/herdr-gui-linux-x64 \
-  --stock-version 0.8.2 \
+  --studio ./artifacts/roamgate-linux-x64 \
+  --stock-version 0.9.1 \
   --build-id "$build_id"
 ```
 
@@ -574,7 +576,10 @@ candidate advertises the requested stock-client version and contains the
 collaboration API, installs a versioned release, applies the systemd drop-in,
 performs the live handoff, and verifies all pre-existing non-server PIDs remain
 in the cgroup. Only after that does it atomically update
-`~/.local/bin/herdr` and `~/.local/bin/herdr-gui`. If Studio was active, the
+`~/.local/bin/herdr` and `~/.local/bin/roamgate`. It refuses to run while the
+legacy `herdr-gui.service` is active; complete the
+[transition](#transition-from-herdr-studio--herdr-gui) first, then run
+`roamgate service install` once. If Roamgate was active, the
 script restarts it; if it was inactive, the new binary is installed without
 starting the service. Herdr itself is never restarted. Previous binaries are
 retained as `.previous` files.
