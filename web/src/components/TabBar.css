@@ -1,12 +1,17 @@
 .tabbar-change-count {
-  min-width: 17px;
-  padding: 1px 4px;
-  border-radius: 999px;
+  box-sizing: border-box;
+  min-width: var(--ui-token-height);
+  height: var(--ui-token-height);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 0 5px;
+  border-radius: var(--ui-radius-sm);
   background: var(--warning-soft);
   color: var(--warning-text);
-  font-size: 9px;
-  font-weight: 800;
-  text-align: center;
+  font-size: 10.5px;
+  font-weight: 600;
+  font-variant-numeric: tabular-nums;
 }
 
 .app.zen .tabbar {
@@ -14,47 +19,60 @@
 }
 
 /* ===== tab bar (top of main) ===== */
+/* Editor-style tabs: the active tab opens onto the terminal surface below
+   instead of floating as a card inside the bar. */
 .tabbar {
-  flex: 0 0 auto;
+  box-sizing: border-box;
+  height: var(--ui-bar-height);
+  min-height: var(--ui-bar-height);
+  flex: 0 0 var(--ui-bar-height);
   display: flex;
-  align-items: center;
-  gap: 4px;
-  padding: 4px;
+  align-items: stretch;
+  gap: 0;
+  padding: 0;
   background: var(--shell-panel);
-  border: 1px solid var(--shell-border);
-  border-radius: 10px;
+  border-bottom: 1px solid var(--shell-border);
   overflow-x: auto;
 }
 
 .tabbar-tab {
+  position: relative;
   display: inline-flex;
   align-items: center;
   gap: 6px;
-  white-space: nowrap;
-  border: 1px solid transparent;
-  border-radius: 7px;
-  padding: 5px 8px 5px 11px;
-  font-size: 13px;
+  max-width: 240px;
+  margin-bottom: -1px;
+  padding: 0 6px 0 12px;
+  border: 0;
+  border-right: 1px solid var(--shell-border);
+  border-radius: 0;
   background: transparent;
+  color: var(--muted);
+  font-size: var(--ui-font-size-sm);
+  white-space: nowrap;
   cursor: pointer;
 }
 
 .tabbar-tab:hover {
   background: var(--panel-2);
+  color: var(--text);
 }
 
 .tabbar-tab.is-active {
-  background: var(--accent-soft);
-  border-color: var(--accent);
+  background: var(--terminal-bg);
   color: var(--text-strong);
+  box-shadow: inset 0 2px 0 var(--accent);
 }
 
 .tabbar-name {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
   font-weight: 500;
 }
 
 .tabbar-agent-marker {
-  height: 21px;
+  height: 18px;
   flex: 0 0 auto;
   display: inline-flex;
   align-items: center;
@@ -63,7 +81,7 @@
 
 .tabbar-agent-more {
   color: var(--muted);
-  font-size: 9px;
+  font-size: 10px;
   line-height: 1;
 }
 
@@ -76,7 +94,8 @@
 }
 
 .tabbar-id {
-  font-size: 11px;
+  font-family: var(--mono-font);
+  font-size: 10.5px;
 }
 
 .tabbar-close {
@@ -84,7 +103,7 @@
   height: 18px;
   padding: 0;
   border: none;
-  border-radius: 50%;
+  border-radius: var(--ui-radius-sm);
   background: transparent;
   color: var(--muted);
   font-size: 14px;
@@ -92,6 +111,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
+  opacity: 0;
+}
+
+.tabbar-tab:hover .tabbar-close,
+.tabbar-tab.is-active .tabbar-close,
+.tabbar-close:focus-visible {
+  opacity: 1;
 }
 
 .tabbar-close:hover {
@@ -100,11 +126,11 @@
 }
 
 .tabbar-add {
-  width: 26px;
-  height: 26px;
+  width: var(--ui-bar-height);
+  height: auto;
   padding: 0;
   border: none;
-  border-radius: 7px;
+  border-radius: 0;
   background: transparent;
   color: var(--muted);
   font-size: 18px;
@@ -131,21 +157,22 @@
   display: inline-flex;
   align-items: center;
   gap: 2px;
-  padding-left: 6px;
-  border-left: 1px solid var(--border-soft);
+  padding: 0 6px;
   background: var(--shell-panel);
 }
 
 .tabbar-utilities button {
-  min-height: 28px;
+  height: var(--ui-control-height);
+  min-height: var(--ui-control-height);
   display: inline-flex;
   align-items: center;
   gap: 5px;
   padding: 0 8px;
   border-color: transparent;
+  border-radius: var(--ui-radius);
   background: transparent;
   color: var(--muted);
-  font-size: 11px;
+  font-size: var(--ui-font-size-sm);
 }
 
 .tabbar-utilities button:hover,
@@ -157,20 +184,15 @@
 
 /* Keep mobile styling in sync with the saved layout and URL override. */
 :where(html[data-layout="mobile"]) {
-  .tabbar {
-    min-height: 36px;
-    padding: 3px 4px;
-    border-top: none;
-    border-right: none;
-    border-left: none;
-    border-radius: 0;
-  }
-
   .tabbar-tab {
     max-width: min(48vw, 180px);
     gap: 4px;
-    padding: 4px 6px 4px 8px;
+    padding: 0 6px 0 10px;
     font-size: 12px;
+  }
+
+  .tabbar-close {
+    opacity: 1;
   }
 
   .tabbar-name {

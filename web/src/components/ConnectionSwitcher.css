@@ -9,26 +9,25 @@
   width: fit-content;
   min-width: 0;
   max-width: 100%;
-  height: 30px;
+  height: var(--ui-control-height);
   display: flex;
   align-items: center;
   gap: 6px;
   padding: 0 8px;
-  border-color: var(--topbar-control-border);
-  border-radius: 7px;
+  border-color: transparent;
+  border-radius: var(--ui-radius);
   background: var(--topbar-control-bg);
   color: var(--topbar-control-text);
 }
 
 .connection-switcher-trigger:hover,
 .connection-switcher-trigger.is-active {
-  border-color: var(--topbar-control-active-border);
+  border-color: transparent;
   background: var(--topbar-control-active-bg);
   color: var(--text-strong);
 }
 
 .connection-switcher-trigger.has-browser-warning {
-  border-color: rgba(240, 196, 83, 0.4);
   background: var(--warning-soft);
 }
 
@@ -51,8 +50,8 @@
 }
 
 .connection-switcher-meta {
-  color: var(--text);
-  font-size: 11px;
+  color: var(--muted);
+  font-size: var(--ui-font-size-xs);
 }
 
 .connection-runtime-dot,

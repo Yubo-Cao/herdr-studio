@@ -11,23 +11,32 @@
   flex: 1;
   min-height: 0;
   display: grid;
-  grid-template-columns: 284px 8px 1fr; /* overridden inline */
-  padding: 12px;
+  grid-template-columns: 284px 6px 1fr; /* overridden inline */
   overflow: hidden;
 }
 
+/* The sidebar and main surfaces sit flush; the resizer draws their one
+   shared divider and widens its highlight while dragging. */
 .resizer {
+  position: relative;
+  z-index: 2;
+  margin: 0 -2px;
   cursor: col-resize;
-  border-radius: 4px;
-  transition: background 0.15s;
+  background: linear-gradient(
+    90deg,
+    transparent calc(50% - 0.5px),
+    var(--shell-border) calc(50% - 0.5px) calc(50% + 0.5px),
+    transparent calc(50% + 0.5px)
+  );
+  transition: background-color 0.15s;
 }
 
 .resizer:hover {
-  background: var(--accent-hover);
+  background-color: var(--accent-hover);
 }
 
 .resizer:active {
-  background: var(--accent-active);
+  background-color: var(--accent-active);
 }
 
 .main {
@@ -35,13 +44,12 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
-  padding-left: 4px;
   overflow: hidden;
+  background: var(--terminal-bg);
 }
 
 .main-diff-mode {
-  gap: 8px;
+  gap: 0;
 }
 
 .main-view {
@@ -50,7 +58,7 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  gap: 10px;
+  gap: 0;
 }
 
 .main-view.is-hidden {
@@ -58,7 +66,7 @@
 }
 
 .main-diff-mode .main-view {
-  gap: 8px;
+  gap: 0;
 }
 
 .workspace-stage {
@@ -104,7 +112,7 @@
 }
 
 .sidebar-hidden .main {
-  padding-left: 0;
+  border-left: 0;
 }
 
 /* Zen mode leaves only the terminal on screen. The topbar keeps a thin edge
@@ -120,7 +128,7 @@
    other side, without its own border or corner radius. Split layouts keep
    their pane borders so the focused pane stays identifiable. */
 .app.zen .body {
-  padding: 6px 0 0;
+  padding-top: 6px;
 }
 
 /* Zen is easy to enter by accident through the shortcut, so a small tab
@@ -448,20 +456,38 @@
   min-height: 0;
   display: flex;
   flex-direction: column;
-  padding: 3px;
+  padding: 0;
 }
 
 .pane-layout-cell > .terminal-shell {
   flex: 1 1 auto;
 }
 
+/* Split handles double as the single 1px divider between panes. */
 .pane-resize-handle {
   position: absolute;
   z-index: 4;
-  opacity: 0;
-  transition:
-    opacity 120ms ease,
-    background 120ms ease;
+  transition: background 120ms ease;
+}
+
+.pane-resize-handle::before {
+  content: "";
+  position: absolute;
+  background: var(--border);
+}
+
+.pane-resize-handle.is-vertical::before {
+  top: 0;
+  bottom: 0;
+  left: calc(50% - 0.5px);
+  width: 1px;
+}
+
+.pane-resize-handle.is-horizontal::before {
+  right: 0;
+  left: 0;
+  top: calc(50% - 0.5px);
+  height: 1px;
 }
 
 .pane-resize-handle.is-vertical {
@@ -481,6 +507,8 @@
   position: absolute;
   border-radius: 999px;
   background: var(--accent);
+  opacity: 0;
+  transition: opacity 120ms ease;
 }
 
 .pane-resize-handle.is-vertical::after {
@@ -497,9 +525,8 @@
   height: 2px;
 }
 
-.pane-resize-handle:hover,
-.pane-resize-handle:active {
-  background: var(--accent-soft);
+.pane-resize-handle:hover::after,
+.pane-resize-handle:active::after {
   opacity: 1;
 }
 
@@ -793,6 +820,14 @@
   overflow: hidden;
 }
 
+.inspector-dock-right .workspace-inspector-slot {
+  border-left: 1px solid var(--shell-border);
+}
+
+.inspector-dock-bottom .workspace-inspector-slot {
+  border-top: 1px solid var(--shell-border);
+}
+
 .workspace-inspector-slot.is-closed {
   display: none;
 }
@@ -811,10 +846,14 @@
 .workspace-inspector-resizer {
   position: relative;
   z-index: 5;
-  flex: 0 0 7px;
-  border-radius: 4px;
+  flex: 0 0 5px;
+  margin: 0 -5px 0 0;
   background: transparent;
   transition: background 120ms ease;
+}
+
+.inspector-dock-bottom .workspace-inspector-resizer {
+  margin: 0 0 -5px;
 }
 
 .inspector-dock-right .workspace-inspector-resizer {

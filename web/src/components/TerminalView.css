@@ -3,16 +3,6 @@
   border-radius: 0;
 }
 
-.pane-layout-cell .terminal-view {
-  border-color: var(--border-soft);
-  border-radius: 8px;
-}
-
-.pane-layout-cell.is-active .terminal-view {
-  border-color: var(--accent);
-  box-shadow: inset 0 0 0 1px var(--accent-soft);
-}
-
 .terminal-view {
   /* xterm measures cells without CSS zoom; scale its font in TerminalView. */
   zoom: calc(1 / var(--ui-scale, 1));
@@ -21,8 +11,8 @@
   min-width: 0;
   min-height: 0;
   background: var(--terminal-bg);
-  border: 1px solid var(--border);
-  border-radius: 10px;
+  border: 0;
+  border-radius: 0;
   overflow: hidden;
   overscroll-behavior: contain;
   touch-action: none;
@@ -65,28 +55,21 @@
   color: var(--terminal-canvas-foreground, var(--terminal-fg));
 }
 
+/* Pane actions live in the pane header; they never float over output. */
 .terminal-pane-toolbar {
-  position: absolute;
-  top: 8px;
-  right: 8px;
-  z-index: 3;
   display: flex;
   align-items: center;
-  gap: 4px;
-  padding: 3px;
-  border: 1px solid var(--border-soft);
-  border-radius: 8px;
-  background: rgba(32, 35, 49, 0.88);
-  box-shadow: var(--shadow-lg);
-  opacity: 0.24;
-  transition:
-    opacity 120ms ease,
-    border-color 120ms ease;
+  gap: 0;
+  padding-left: 4px;
+  margin-left: 2px;
+  border-left: 1px solid var(--border);
+  opacity: 0.55;
+  transition: opacity 120ms ease;
 }
 
 .terminal-shell:hover .terminal-pane-toolbar,
+.terminal-pane-head.is-active .terminal-pane-toolbar,
 .terminal-pane-toolbar:focus-within {
-  border-color: var(--border);
   opacity: 1;
 }
 
@@ -94,17 +77,20 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  width: 26px;
-  height: 24px;
+  width: var(--ui-control-height);
+  height: var(--ui-control-height);
   padding: 0;
-  border-radius: 6px;
-  color: #c9cdd6;
+  border: 0;
+  border-radius: var(--ui-radius);
+  color: var(--muted);
   background: transparent;
   touch-action: manipulation;
 }
 
 .terminal-pane-action:hover:not(:disabled) {
-  background: var(--accent-soft);
+  border-color: transparent;
+  background: var(--panel-2);
+  color: var(--text-strong);
 }
 
 .terminal-pane-action.is-danger:hover:not(:disabled) {
@@ -508,61 +494,67 @@
   stroke-width: 2px;
 }
 
-/* Pane identity and collaboration control header. */
+/* Pane identity and collaboration control header (a .ui-bar). */
 .terminal-pane-head {
-  box-sizing: border-box;
-  min-width: 0;
-  min-height: var(--ui-header-height);
-  flex: 0 0 var(--ui-header-height);
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 3px 148px 3px 8px;
-  border: 1px solid var(--border-soft);
-  border-bottom: 0;
-  background: color-mix(in srgb, var(--panel) 92%, var(--terminal-bg));
+  gap: 6px;
+  padding: 0 4px 0 10px;
+  border-bottom-color: var(--border);
+  background: var(--shell-panel);
   color: var(--muted);
+}
+.terminal-pane-head.is-active {
+  box-shadow: inset 0 2px 0 var(--accent);
 }
 .terminal-pane-identity {
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   display: flex;
   align-items: center;
-  gap: 6px;
+  gap: 8px;
 }
-.terminal-pane-number {
-  width: 18px;
-  height: 18px;
-  flex: 0 0 18px;
-  display: inline-grid;
-  place-items: center;
-  border: 1px solid var(--border-soft);
-  background: var(--panel-2);
-  color: var(--text);
-  font: 700 9px / 1 var(--mono-font);
-  font-variant-numeric: tabular-nums;
+.terminal-pane-shell-icon {
+  flex: 0 0 auto;
+  color: var(--muted);
 }
 .terminal-pane-name {
   min-width: 0;
   overflow: hidden;
   color: var(--text);
-  font-size: 11px;
-  font-weight: 650;
+  font-size: var(--ui-font-size-sm);
+  font-weight: 600;
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.pane-layout-cell.is-active .terminal-pane-head {
-  border-color: var(--accent);
+.terminal-pane-head.is-active .terminal-pane-name {
+  color: var(--text-strong);
+}
+.terminal-pane-id {
+  cursor: copy;
+}
+.terminal-pane-status {
+  text-transform: capitalize;
+}
+.terminal-pane-id:hover,
+.terminal-pane-id:focus-visible {
+  --token-border: var(--border);
+  color: var(--text);
+  outline: none;
+}
+.terminal-pane-head .ui-button.is-active {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+@container workspace-stage (max-width: 720px) {
+  .pane-control .ui-button > span {
+    display: none;
+  }
 }
 @media (max-width: 768px) {
   .terminal-pane-head {
-    padding: 3px 6px;
-  }
-  .pane-control-status {
-    font-size: 10px;
+    padding: 0 2px 0 8px;
   }
   .pane-control .ui-button > span,
-  .terminal-pane-number {
+  .terminal-pane-id {
     display: none;
   }
 }

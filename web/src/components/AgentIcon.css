@@ -2,16 +2,20 @@
   margin: 0;
 }
 
+/* In rows the icon is the agent's identity, so it stands unboxed. */
 .agent-status-icon .agent-icon.is-compact {
-  width: 19px;
-  height: 19px;
-  flex-basis: 19px;
-  border-radius: 5px;
+  width: 18px;
+  height: 18px;
+  flex-basis: 18px;
+  border: 0;
+  border-radius: var(--ui-radius-sm);
+  background: transparent;
+  box-shadow: none;
 }
 
 .agent-status-icon .agent-icon.is-compact svg {
-  width: 14px;
-  height: 14px;
+  width: 16px;
+  height: 16px;
 }
 
 .agent-icon {
@@ -23,7 +27,7 @@
   align-items: center;
   justify-content: center;
   border: 1px solid var(--border-soft);
-  border-radius: 7px;
+  border-radius: var(--ui-radius);
   background: var(--input-bg);
   color: var(--muted);
 }

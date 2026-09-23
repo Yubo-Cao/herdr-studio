@@ -181,33 +181,36 @@ textarea:focus {
   }
 }
 
+/* Sidebar sections are flush regions separated by single dividers. */
 .panel {
-  background: var(--shell-panel);
-  border: 1px solid var(--shell-border);
-  border-radius: 12px;
-  padding: 14px;
-  overflow: auto;
   min-height: 0;
+  overflow: auto;
+  background: transparent;
+}
+
+.panel + .panel {
+  border-top: 1px solid var(--shell-border);
 }
 
 .panel h2 {
-  font-size: 13px;
-  text-transform: uppercase;
-  letter-spacing: 0.6px;
+  margin: 0;
   color: var(--muted);
-  margin: 0 0 10px;
+  font-size: var(--ui-font-size-xs);
+  font-weight: 600;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
 }
 
 .panel-head {
+  box-sizing: border-box;
+  height: var(--ui-bar-height);
+  min-height: var(--ui-bar-height);
+  flex: 0 0 var(--ui-bar-height);
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
-  margin-bottom: 10px;
-}
-
-.panel-head h2 {
-  margin: 0;
+  padding: 0 6px 0 12px;
 }
 
 .panel-actions {
@@ -218,10 +221,10 @@ textarea:focus {
 }
 
 .panel-action {
-  height: 24px;
+  height: var(--ui-control-height);
   padding: 0 7px;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--ui-radius);
   background: transparent;
   color: var(--muted);
   font-size: 12px;
@@ -236,11 +239,11 @@ textarea:focus {
 }
 
 .panel-add {
-  width: 24px;
-  height: 24px;
+  width: var(--ui-control-height);
+  height: var(--ui-control-height);
   padding: 0;
   border: none;
-  border-radius: 7px;
+  border-radius: var(--ui-radius);
   background: transparent;
   color: var(--muted);
   font-size: 18px;
@@ -290,17 +293,22 @@ textarea:focus {
 }
 
 .git-badge {
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  height: var(--ui-token-height);
   max-width: 84px;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
-  font-size: 10px;
-  line-height: 15px;
+  font-family: var(--mono-font);
+  font-size: 10.5px;
+  line-height: 1;
   padding: 0 5px;
-  border-radius: 5px;
-  border: 1px solid var(--border);
+  border-radius: var(--ui-radius-sm);
+  border: 0;
   color: var(--muted);
-  background: var(--panel-2);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
 }
 
 .git-branch {
@@ -320,19 +328,18 @@ textarea:focus {
 
 .git-dirty {
   color: var(--warning-text);
-  border-color: color-mix(in srgb, var(--yellow) 45%, var(--border));
+  background: var(--warning-soft);
 }
 
 .git-ahead,
 .git-behind {
-  color: var(--info-text);
-  border-color: color-mix(in srgb, var(--blue) 45%, var(--border));
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .git-badge-error {
   color: var(--danger-text);
-  border-color: var(--danger-border);
-  background: color-mix(in srgb, var(--panel) 86%, var(--red));
+  background: var(--danger-soft);
 }
 
 /* ===== modal ===== */
@@ -654,37 +661,41 @@ textarea:focus {
     inset 0 1px 0 color-mix(in srgb, white 8%, transparent);
 }
 
+/* Status badges share the Token geometry from ui.css. */
 .badge {
-  font-size: 11px;
-  padding: 1px 7px;
-  border-radius: 999px;
-  border: 1px solid var(--border);
-  color: var(--text);
+  box-sizing: border-box;
+  display: inline-flex;
+  align-items: center;
+  height: var(--ui-token-height);
+  padding: 0 6px;
+  border: 0;
+  border-radius: var(--ui-radius-sm);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--muted);
+  font-size: var(--ui-font-size-xs);
+  font-weight: 500;
+  line-height: 1;
   white-space: nowrap;
 }
 
 .badge-working {
   color: var(--warning-text);
-  border-color: var(--yellow);
-  background: color-mix(in srgb, var(--panel) 88%, var(--yellow));
+  background: var(--warning-soft);
 }
 
 .badge-done {
   color: var(--success-text);
-  border-color: var(--green);
-  background: color-mix(in srgb, var(--panel) 89%, var(--green));
+  background: var(--success-soft);
 }
 
 .badge-blocked {
   color: var(--danger-text);
-  border-color: var(--danger-border);
-  background: color-mix(in srgb, var(--panel) 86%, var(--red));
+  background: var(--danger-soft);
 }
 
 .badge-idle {
-  color: var(--info-text);
-  border-color: var(--accent);
-  background: color-mix(in srgb, var(--panel) 85%, var(--accent));
+  color: var(--accent);
+  background: var(--accent-soft);
 }
 
 .terminal-loading {

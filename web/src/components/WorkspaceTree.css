@@ -12,11 +12,6 @@
   overflow: hidden;
 }
 
-.workspace-tree-panel > .panel-head h2,
-.agents-panel > .panel-head h2 {
-  font-size: 12px;
-}
-
 .workspace-tree-panel:focus-visible {
   outline: 2px solid var(--accent);
   outline-offset: -2px;
@@ -25,18 +20,22 @@
 .workspace-tree-content {
   min-height: 0;
   flex: 1 1 auto;
-  margin: 0 -4px;
-  padding: 0 4px;
+  padding-bottom: 8px;
   overflow: auto;
 }
 
+/* Tree rows are full-bleed: selection and hover span the sidebar width and
+   depth is expressed only through left padding set inline. */
 .tree-row {
   position: relative;
+  box-sizing: border-box;
+  min-height: var(--ui-row-height);
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 4px 6px;
-  border-radius: 7px;
+  padding: 0 8px;
+  color: var(--text);
+  font-size: var(--ui-font-size);
   cursor: default;
   touch-action: pan-y;
   user-select: none;
@@ -56,14 +55,18 @@
   outline-offset: -2px;
 }
 
+.tree-row:hover {
+  background: var(--panel-2);
+}
+
 .tree-row.is-focused {
   background: var(--accent-soft);
-  box-shadow: inset 3px 0 0 var(--accent);
+  box-shadow: inset 2px 0 0 var(--accent);
 }
 
 .tree-row.is-focused.has-active-agent {
-  background: color-mix(in srgb, var(--accent-soft) 48%, transparent);
-  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 72%, transparent);
+  background: transparent;
+  box-shadow: inset 2px 0 0 color-mix(in srgb, var(--accent) 55%, transparent);
 }
 
 .tree-row.is-loading {
@@ -93,14 +96,17 @@
   min-width: 0;
 }
 
+.ws-label {
+  font-weight: 600;
+}
+
 .tree-row.is-focused > .ws-label {
   color: var(--text-strong);
-  font-weight: 700;
 }
 
 .workspace-group-toggle {
   width: 16px;
-  height: 24px;
+  height: 20px;
   flex: 0 0 16px;
   display: inline-flex;
   align-items: center;
@@ -137,8 +143,8 @@
 
 .workspace-tab-count {
   flex: 1 0 auto;
-  color: color-mix(in srgb, var(--muted) 55%, transparent);
-  font-size: 10px;
+  color: color-mix(in srgb, var(--muted) 70%, transparent);
+  font-size: var(--ui-font-size-xs);
   font-variant-numeric: tabular-nums;
   line-height: 1;
 }
@@ -155,10 +161,6 @@
   flex: 0 0 auto;
   color: var(--muted);
   transform: rotate(-18deg);
-}
-
-.tree-row.is-pinned:not(.is-focused) {
-  background: color-mix(in srgb, var(--panel-2) 62%, transparent);
 }
 
 .tree-row.is-dragging {
@@ -185,17 +187,58 @@
   bottom: -1px;
 }
 
-.wt-badge {
-  font-size: 10px;
-  padding: 0 5px;
-  border-radius: 5px;
-  border: 1px solid var(--border);
-  color: var(--muted);
-}
-
 .sidebar-content > .panel.tree {
   flex: 1 1 0;
   margin: 0;
+}
+
+/* A tab that holds several agent panes: a quiet heading plus a rail that
+   ties its panes together. */
+.tab-group-head {
+  box-sizing: border-box;
+  height: 22px;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding-right: 8px;
+  color: var(--muted);
+  font-size: var(--ui-font-size-xs);
+  cursor: pointer;
+}
+
+.tab-group-head:hover {
+  color: var(--text);
+  background: var(--panel-2);
+}
+
+.tab-group.is-current > .tab-group-head {
+  color: var(--text);
+}
+
+.tab-group-label {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.tab-group-panes {
+  position: relative;
+}
+
+.tab-group-panes::before {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 6px;
+  left: var(--tab-rail-left, 36px);
+  width: 1px;
+  background: var(--border);
+  pointer-events: none;
+}
+
+.tab-group.is-current > .tab-group-panes::before {
+  background: color-mix(in srgb, var(--accent) 45%, var(--border));
 }
 
 .agent-row.drop-before::after,
@@ -220,7 +263,7 @@
 
 /* ===== badges ===== */
 .tree-row > .badge {
-  max-width: 60px;
+  max-width: 72px;
   overflow: hidden;
   flex: 0 1 auto;
   text-overflow: ellipsis;

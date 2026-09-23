@@ -4,11 +4,12 @@
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
-  gap: 16px;
-  padding: 10px 16px;
+  gap: 12px;
+  height: var(--ui-bar-height);
+  padding: 0 6px 0 12px;
   border-bottom: 1px solid var(--shell-border);
   background: var(--shell-topbar);
-  box-shadow: inset 0 3px 0 var(--shell-topbar-mark);
+  box-shadow: inset 0 2px 0 var(--shell-topbar-mark);
 }
 
 .topbar-start,
@@ -31,11 +32,6 @@
   display: flex;
   align-items: center;
   gap: 2px;
-  padding: 3px;
-  border: 1px solid var(--topbar-control-border);
-  border-radius: 8px;
-  background: var(--topbar-control-bg);
-  box-shadow: 0 1px 2px color-mix(in srgb, var(--bg) 28%, transparent);
 }
 
 .brand {
@@ -44,8 +40,8 @@
   align-items: center;
   flex: 0 1 auto;
   gap: 8px;
-  font-weight: 700;
-  letter-spacing: 0.2px;
+  font-size: var(--ui-font-size);
+  font-weight: 650;
 }
 
 .brand-title {
@@ -55,37 +51,38 @@
 .brand-version {
   display: inline-flex;
   align-items: center;
-  height: 20px;
+  height: var(--ui-token-height);
   padding: 0 6px;
-  border: 1px solid var(--topbar-control-border);
-  border-radius: 5px;
-  background: var(--topbar-control-bg);
-  color: var(--topbar-control-text);
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 10px;
-  font-weight: 600;
+  border-radius: var(--ui-radius-sm);
+  background: color-mix(in srgb, var(--text) 7%, transparent);
+  color: var(--muted);
+  font-family: var(--mono-font);
+  font-size: 10.5px;
+  font-weight: 500;
   line-height: 1;
   white-space: nowrap;
 }
 
 .logo {
-  width: 24px;
-  height: 24px;
+  width: 20px;
+  height: 20px;
   display: block;
-  border-radius: 6px;
+  border-radius: var(--ui-radius-sm);
   background: #faf9f6;
 }
 
 .topbar-button {
-  height: 30px;
-  padding: 0 10px;
-  border-radius: 7px;
+  height: var(--ui-control-height);
+  padding: 0 8px;
+  border-color: transparent;
+  border-radius: var(--ui-radius);
   background: transparent;
   color: var(--topbar-control-text);
+  font-size: var(--ui-font-size-sm);
 }
 
 .topbar-button.icon-button {
-  width: 30px;
+  width: var(--ui-control-height);
   padding: 0;
   display: inline-flex;
   align-items: center;
@@ -108,7 +105,6 @@
 }
 
 .topbar-command-group .topbar-button.is-active {
-  border-color: var(--topbar-control-active-border);
   background: var(--topbar-control-active-bg);
 }
 

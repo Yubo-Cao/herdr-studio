@@ -1,19 +1,19 @@
 .agent-status-icon {
   position: relative;
-  width: 21px;
-  height: 21px;
-  flex: 0 0 21px;
+  width: 18px;
+  height: 18px;
+  flex: 0 0 18px;
   display: inline-flex;
-  align-items: flex-start;
+  align-items: center;
 }
 
 .agent-status-icon-dot {
   position: absolute;
-  right: -1px;
-  bottom: -1px;
-  width: 6px;
-  height: 6px;
-  border: 1px solid var(--panel);
+  right: -2px;
+  bottom: -2px;
+  width: 7px;
+  height: 7px;
+  border: 1.5px solid var(--shell-panel);
   border-radius: 999px;
   background: var(--muted);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--border) 55%, transparent);

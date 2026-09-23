@@ -89,6 +89,10 @@ export interface Pane {
   foreground_cwd?: string;
   agent?: string;
   agent_status: string;
+  /** User-assigned pane name from `herdr pane rename`. */
+  label?: string;
+  /** Terminal title with agent spinners and status glyphs stripped. */
+  terminal_title_stripped?: string;
   /**
    * Present while this pane's last process tree is known to have been killed
    * for exceeding its memory limit. A killed tree exits with no status and no

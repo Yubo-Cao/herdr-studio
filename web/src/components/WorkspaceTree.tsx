@@ -16,6 +16,7 @@ import {
   ArrowDownWideNarrow,
   ChevronDown,
   ChevronRight,
+  Columns2,
   GitBranch,
   Layers,
   Pin,
@@ -78,11 +79,14 @@ import {
   workspaceTreeItemIsTabStop,
 } from "./treeKeyboard";
 import { TREE_DEPTH_INDENT } from "./treeIndent";
+import { groupPanesByTab, shouldShowTabGroups } from "../paneIdentity";
+import { Token } from "./ui/Token";
 import "./WorkspaceTree.css";
 
 const LONG_PRESS_MS = 550;
 const LONG_PRESS_MOVE_PX = 10;
 const EMPTY_AGENT_PANES_BY_WORKSPACE = new Map<string, Pane[]>();
+const EMPTY_AGENT_PANES: Pane[] = [];
 
 function stringArraysEqual(left: readonly string[], right: readonly string[]) {
   return (
@@ -920,7 +924,7 @@ function WorkspaceRow({
   workspaceDrag?: WorkspaceDragProps;
 }) {
   const children = childrenByParent.get(w.workspace_id) ?? [];
-  const agents = agentsByWorkspace.get(w.workspace_id) ?? [];
+  const agents = agentsByWorkspace.get(w.workspace_id) ?? EMPTY_AGENT_PANES;
   const tabCount = tabCountsByWorkspace.get(w.workspace_id) ?? 0;
   const tabCountVisible = alwaysShowTabCount || tabCount > 1;
   const s = useStoreSelector(
@@ -929,6 +933,23 @@ function WorkspaceRow({
     }),
     shallowEqual,
   );
+  const workspaceTabs = useStoreSelector(
+    (state) => state.tabs.filter((tab) => tab.workspace_id === w.workspace_id),
+    (left, right) =>
+      left.length === right.length &&
+      left.every(
+        (tab, index) =>
+          tab.tab_id === right[index]?.tab_id &&
+          tab.label === right[index]?.label &&
+          tab.pane_count === right[index]?.pane_count &&
+          tab.focused === right[index]?.focused,
+      ),
+  );
+  const tabGroups = useMemo(
+    () => groupPanesByTab(agents, workspaceTabs),
+    [agents, workspaceTabs],
+  );
+  const showTabGroups = shouldShowTabGroups(tabGroups);
   const isChild = depth > 0;
   const hasChildren = children.length > 0;
   const hasNestedItems = hasChildren || agents.length > 0;
@@ -1010,7 +1031,7 @@ function WorkspaceRow({
             ? `drop-${workspaceDrag.dropPosition}`
             : ""
         }`}
-        style={{ paddingLeft: 6 + depth * TREE_DEPTH_INDENT }}
+        style={{ paddingLeft: 8 + depth * TREE_DEPTH_INDENT }}
         role="treeitem"
         draggable={!!workspaceDrag}
         onDragStart={workspaceDrag?.onDragStart}
@@ -1160,19 +1181,65 @@ function WorkspaceRow({
       </div>
       {!collapsed ? (
         <>
-          {agents.map((pane) => (
-            <AgentRow
-              key={pane.pane_id}
-              pane={pane}
-              depth={depth + 1}
-              showPaneId={agents.length > 1}
-              selected={
-                pane.pane_id === activePaneId || (!activePaneId && pane.focused)
-              }
-              onSelect={onSelectAgent}
-              onOpenMenu={(x, y) => onAgentContextMenu(pane, x, y)}
-            />
-          ))}
+          {tabGroups.map((group) => {
+            const rows = group.panes.map((pane) => (
+              <AgentRow
+                key={pane.pane_id}
+                pane={pane}
+                depth={depth + (showTabGroups ? 2 : 1)}
+                showPaneId
+                selected={
+                  pane.pane_id === activePaneId ||
+                  (!activePaneId && pane.focused)
+                }
+                onSelect={onSelectAgent}
+                onOpenMenu={(x, y) => onAgentContextMenu(pane, x, y)}
+              />
+            ));
+            if (!showTabGroups) return rows;
+            const tabFocused = workspaceTabs.some(
+              (tab) => tab.tab_id === group.tabId && tab.focused,
+            );
+            return (
+              <div
+                key={group.tabId}
+                className={`tab-group ${tabFocused && w.focused ? "is-current" : ""}`}
+                role="group"
+                aria-label={`${group.label}, ${group.paneCount} panes`}
+              >
+                <div
+                  className="tab-group-head"
+                  style={{
+                    paddingLeft: 18 + (depth + 1) * TREE_DEPTH_INDENT,
+                  }}
+                  title={`${group.label} · ${group.tabId}`}
+                  onClick={() => void store.focusTab(group.tabId)}
+                >
+                  {group.paneCount > 1 ? (
+                    <Columns2 size={12} aria-hidden="true" />
+                  ) : null}
+                  <span className="tab-group-label">{group.label}</span>
+                  {group.paneCount > 1 ? (
+                    <Token title={`${group.paneCount} panes in this tab`}>
+                      {group.paneCount}
+                    </Token>
+                  ) : null}
+                </div>
+                <div
+                  className="tab-group-panes"
+                  style={
+                    {
+                      "--tab-rail-left": `${
+                        18 + (depth + 1) * TREE_DEPTH_INDENT + 6
+                      }px`,
+                    } as React.CSSProperties
+                  }
+                >
+                  {rows}
+                </div>
+              </div>
+            );
+          })}
           {children.map((child) => (
             <WorkspaceRow
               key={child.workspace_id}

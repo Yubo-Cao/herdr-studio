@@ -6,11 +6,17 @@ import {
 } from "./treeKeyboard";
 import { store, useStoreSelector } from "../store";
 import type { Pane } from "../types";
-import { agentClass, basename, formatMemoryLimit, shortId } from "../utils";
+import { agentClass, formatMemoryLimit, shortId } from "../utils";
+import {
+  customTabLabel,
+  paneDisplayName,
+  paneLocationName,
+} from "../paneIdentity";
 import { shouldShowAgentStatusLabel } from "./agentSession";
 import { AgentStatusIcon } from "./AgentStatusIcon";
 import { observeClampedContextMenu } from "./contextMenuPosition";
 import { TREE_DEPTH_INDENT } from "./treeIndent";
+import { Token } from "./ui/Token";
 import "./WorkspaceAgentRows.css";
 
 const LONG_PRESS_MS = 550;
@@ -33,11 +39,6 @@ type AgentContextMenuGroup = {
   items: AgentContextMenuItem[];
   danger?: boolean;
 };
-
-function agentLocationName(pane: Pane): string {
-  const location = pane.foreground_cwd ?? pane.cwd;
-  return location ? basename(location.replace(/\\/g, "/")) : "";
-}
 
 export function AgentRow({
   pane,
@@ -67,15 +68,14 @@ export function AgentRow({
     onDragEnd: () => void;
   };
 }) {
-  const tabLabel = useStoreSelector((state) => {
-    const label = state.tabs
-      .find(
-        (tab) =>
-          tab.tab_id === pane.tab_id && tab.workspace_id === pane.workspace_id,
-      )
-      ?.label.trim();
-    return label && !/^(?:Tab )?\d+$/.test(label) ? label : "";
-  });
+  const tab = useStoreSelector((state) =>
+    state.tabs.find(
+      (candidate) =>
+        candidate.tab_id === pane.tab_id &&
+        candidate.workspace_id === pane.workspace_id,
+    ),
+  );
+  const tabLabel = customTabLabel(tab?.label);
   const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressStart = useRef<{ x: number; y: number } | null>(null);
   const longPressTriggered = useRef(false);
@@ -93,7 +93,12 @@ export function AgentRow({
   };
   const showStatus = shouldShowAgentStatusLabel(pane.agent_status);
   const nested = variant === "nested";
-  const locationName = agentLocationName(pane);
+  const locationName = paneLocationName(pane);
+  const name = paneDisplayName(pane, {
+    tabLabel,
+    tabPaneCount: tab?.pane_count,
+  });
+  const agentName = pane.agent ?? "Agent";
 
   return (
     <div
@@ -103,9 +108,7 @@ export function AgentRow({
         drag?.isDragging ? "is-dragging" : ""
       } ${drag?.dropPosition ? `drop-${drag.dropPosition}` : ""}`}
       style={
-        nested
-          ? { marginLeft: TREE_DEPTH_INDENT + depth * TREE_DEPTH_INDENT }
-          : undefined
+        nested ? { paddingLeft: 18 + depth * TREE_DEPTH_INDENT } : undefined
       }
       role={nested ? "treeitem" : "button"}
       draggable={!!drag}
@@ -197,23 +200,16 @@ export function AgentRow({
         e.preventDefault();
         openMenu(e.clientX, e.clientY);
       }}
-      title={[pane.pane_id, tabLabel, pane.cwd].filter(Boolean).join(" · ")}
-      aria-label={`${pane.agent ?? "Agent"} pane${tabLabel ? `, tab ${tabLabel}` : ""}, status ${pane.agent_status}`}
+      title={[name, agentName, pane.pane_id, tabLabel, pane.cwd]
+        .filter(Boolean)
+        .join(" · ")}
+      aria-label={`${name}, ${agentName} pane ${pane.pane_id}${tabLabel ? `, tab ${tabLabel}` : ""}, status ${pane.agent_status}`}
     >
       <AgentStatusIcon agent={pane.agent} status={pane.agent_status} />
       <div className="agent-info">
         <div className="agent-title">
           <span className="agent-title-label">
-            {nested
-              ? (pane.agent ?? "Agent")
-              : (workspaceLabel ?? pane.workspace_id)}
-            {tabLabel ? <span className="muted"> · {tabLabel}</span> : null}
-            {showPaneId ? (
-              <span className="muted"> · {shortId(pane.pane_id)}</span>
-            ) : null}
-            {nested && locationName ? (
-              <span className="muted"> · {locationName}</span>
-            ) : null}
+            {nested ? name : (workspaceLabel ?? pane.workspace_id)}
           </span>
           {pane.memory_incident ? (
             <span
@@ -234,11 +230,21 @@ export function AgentRow({
               {pane.agent_status}
             </span>
           ) : null}
+          {showPaneId ? (
+            <Token code className="agent-row-id" title={pane.pane_id}>
+              {shortId(pane.pane_id)}
+            </Token>
+          ) : null}
         </div>
         {!nested ? (
           <div className="agent-sub muted">
-            {pane.agent ?? "Agent"}
-            {pane.cwd ? ` · ${basename(pane.cwd)}` : ""}
+            {[
+              name,
+              tabLabel && tabLabel !== name ? tabLabel : "",
+              locationName !== name ? locationName : "",
+            ]
+              .filter(Boolean)
+              .join(" · ")}
           </div>
         ) : null}
       </div>
@@ -351,16 +357,19 @@ export function AgentContextMenu({
     zIndex: 1000,
   };
   const agentName = state.pane.agent ?? "Agent";
-  const locationName = agentLocationName(state.pane);
+  const paneName = paneDisplayName(state.pane);
+  const locationName = paneLocationName(state.pane);
 
   return (
     <div ref={ref} className="context-menu context-menu--grouped" style={style}>
       <div className="context-menu-header">
-        <span>Agent</span>
-        <strong title={agentName}>{agentName}</strong>
+        <span>{agentName}</span>
+        <strong title={paneName}>{paneName}</strong>
         <small>
-          {state.pane.agent_status}
-          {locationName ? ` · ${locationName}` : ""}
+          <code>{state.pane.pane_id}</code> · {state.pane.agent_status}
+          {locationName && locationName !== paneName
+            ? ` · ${locationName}`
+            : ""}
         </small>
       </div>
       {groups.map((group) => (

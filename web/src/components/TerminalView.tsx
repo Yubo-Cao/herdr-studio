@@ -32,7 +32,9 @@ import { Terminal } from "@xterm/xterm";
 import {
   Columns2,
   Eye,
+  EyeOff,
   Keyboard,
+  SquareTerminal,
   Grid2X2,
   Maximize2,
   Minimize2,
@@ -41,7 +43,12 @@ import {
   X,
 } from "lucide-react";
 import { usePaneControl } from "../usePaneControl";
+import { paneDisplayName } from "../paneIdentity";
+import { agentClass } from "../utils";
+import { shouldShowAgentStatusLabel } from "./agentSession";
+import { AgentStatusIcon } from "./AgentStatusIcon";
 import { Button } from "./ui/Button";
+import { Token } from "./ui/Token";
 import {
   type CSSProperties,
   useCallback,
@@ -335,6 +342,7 @@ export function TerminalView({
       status: state.status,
       terminalAttachEpoch: state.terminalAttachEpoch,
       endpointAvailability: state.endpointAvailability,
+      tabs: state.tabs,
       navigationLoading: terminalNavigationLoading(state),
       error: state.error,
     }),
@@ -501,11 +509,14 @@ export function TerminalView({
   const isActivePane = !!pane && (!paneId || pane.pane_id === activePaneId);
   const canShowAgentHistory = isActivePane && paneHasAgentHistory(pane);
   const canClosePane = !!pane && paneCanClose(s.panes, pane.pane_id);
-  const paneIndex = pane
-    ? s.panes.findIndex((item) => item.pane_id === pane.pane_id)
-    : -1;
-  const paneLabel = pane
-    ? `${pane.agent ?? "Agent"} · ${pane.pane_id.length > 8 ? pane.pane_id.slice(0, 8) : pane.pane_id}`
+  const paneTab = pane
+    ? s.tabs.find((tab) => tab.tab_id === pane.tab_id)
+    : undefined;
+  const paneName = pane
+    ? paneDisplayName(pane, {
+        tabLabel: paneTab?.label,
+        tabPaneCount: paneTab?.pane_count,
+      })
     : "Terminal";
   const paneZoomed =
     s.layout?.zoomed === true && s.layout.focused_pane_id === pane?.pane_id;
@@ -796,9 +807,26 @@ export function TerminalView({
     if (shouldAvoidVirtualKeyboard()) blurTerminalInput();
     e.currentTarget.blur();
   };
-  const preventPaneActionFocus = (e: React.PointerEvent<HTMLButtonElement>) => {
+  const preventPaneActionFocus = (e: React.PointerEvent<HTMLElement>) => {
     e.preventDefault();
     e.currentTarget.blur();
+  };
+  const copyPaneId = async (paneId: string) => {
+    try {
+      await copyTextFromUserGesture(paneId);
+      store.notify({
+        kind: "success",
+        message: "Pane ID copied",
+        detail: paneId,
+        autoDismissMs: 2500,
+      });
+    } catch (error) {
+      store.notify({
+        kind: "error",
+        message: "Could not copy pane ID",
+        detail: error instanceof Error ? error.message : String(error),
+      });
+    }
   };
 
   const openPathInInspector = useCallback(
@@ -3321,56 +3349,166 @@ export function TerminalView({
         }}
       />
       <div className="terminal-shell">
-        <div className="terminal-pane-head">
-          <div className="terminal-pane-identity" title={paneLabel}>
-            <span className="terminal-pane-number">{paneIndex + 1}</span>
-            <span className="terminal-pane-name">{paneLabel}</span>
-          </div>
-          <div className="pane-control" aria-label="Pane control">
-            <span
-              className="pane-control-status"
-              title={
-                control.access.ownerName
-                  ? `${control.access.ownerName} controls layout. Input is shared unless you choose View only.`
-                  : "Collaborators share input and layout."
-              }
+        <div
+          className={`terminal-pane-head ui-bar ${isActivePane ? "is-active" : ""}`}
+        >
+          <div className="terminal-pane-identity" title={pane.cwd ?? paneName}>
+            {pane.agent ? (
+              <AgentStatusIcon agent={pane.agent} status={pane.agent_status} />
+            ) : (
+              <SquareTerminal
+                className="terminal-pane-shell-icon"
+                size={14}
+                aria-hidden="true"
+              />
+            )}
+            <span className="terminal-pane-name">{paneName}</span>
+            <Token
+              code
+              className="terminal-pane-id"
+              role="button"
+              tabIndex={0}
+              title={`Pane ${pane.pane_id} - click to copy`}
+              aria-label={`Copy pane ID ${pane.pane_id}`}
+              onPointerDown={preventPaneActionFocus}
+              onClick={() => void copyPaneId(pane.pane_id)}
+              onKeyDown={(event) => {
+                if (event.key !== "Enter" && event.key !== " ") return;
+                event.preventDefault();
+                void copyPaneId(pane.pane_id);
+              }}
             >
-              {control.access.viewOnly ? (
-                <Eye size={13} />
-              ) : (
-                <MousePointer2 size={13} />
-              )}
-              {control.access.viewOnly
-                ? "Viewing"
-                : control.access.ownsLayout
-                  ? "You control layout"
-                  : "Shared input"}
-            </span>
+              {pane.pane_id}
+            </Token>
+            {pane.agent && shouldShowAgentStatusLabel(pane.agent_status) ? (
+              <span
+                className={`${agentClass(pane.agent_status)} terminal-pane-status`}
+              >
+                {pane.agent_status}
+              </span>
+            ) : null}
+          </div>
+          <span className="ui-bar-spacer" />
+          {s.endpointAvailability[pane.terminal_id] &&
+          store.terminalScrollReason(pane.terminal_id) ? (
+            <Token
+              tone="warning"
+              role="status"
+              title={store.terminalScrollReason(pane.terminal_id) ?? undefined}
+            >
+              No history
+            </Token>
+          ) : null}
+          <div className="pane-control" aria-label="Pane control">
+            {control.access.viewOnly ? (
+              <Token tone="info" icon={<Eye size={11} />}>
+                Viewing
+              </Token>
+            ) : control.access.ownsLayout ? (
+              <Token
+                tone="accent"
+                icon={<MousePointer2 size={11} />}
+                title="You control this pane's layout. Collaborators can still type."
+              >
+                Layout
+              </Token>
+            ) : null}
             {!control.access.ownsLayout || control.access.viewOnly ? (
               <Button
-                variant="outline"
                 disabled={
                   control.busy || control.access.protectedUntil > Date.now()
                 }
+                onPointerDown={preventPaneActionFocus}
                 onClick={control.takeControl}
                 title={
                   control.access.protectedUntil > Date.now()
                     ? "Another collaborator has protected layout control"
-                    : "Take layout control for 15 seconds; collaborators can still type"
+                    : control.access.ownerName
+                      ? `${control.access.ownerName} controls layout. Take layout control for 15 seconds; collaborators can still type`
+                      : "Take layout control for 15 seconds; collaborators can still type"
                 }
               >
-                Take control
+                <MousePointer2 size={13} />
+                <span>Take control</span>
               </Button>
             ) : null}
-            {!control.access.viewOnly ? (
-              <Button
-                onClick={control.watch}
-                disabled={control.busy}
-                title="Stop sending input and resizing this pane"
+            <Button
+              icon
+              className={control.access.viewOnly ? "is-active" : ""}
+              aria-pressed={control.access.viewOnly}
+              onPointerDown={preventPaneActionFocus}
+              onClick={
+                control.access.viewOnly ? control.takeControl : control.watch
+              }
+              disabled={control.busy}
+              title={
+                control.access.viewOnly
+                  ? "Stop viewing and take control"
+                  : "View only: stop sending input and resizing this pane"
+              }
+              aria-label={
+                control.access.viewOnly ? "Stop viewing" : "View only"
+              }
+            >
+              {control.access.viewOnly ? (
+                <EyeOff size={14} />
+              ) : (
+                <Eye size={14} />
+              )}
+            </Button>
+          </div>
+          <div className="terminal-pane-toolbar" aria-label="Pane actions">
+            {!paneZoomed ? (
+              <>
+                <button
+                  type="button"
+                  className="terminal-pane-action"
+                  disabled={control.access.viewOnly}
+                  title="Split pane right"
+                  aria-label="Split pane right"
+                  onPointerDown={preventPaneActionFocus}
+                  onClick={() => store.splitPane(pane.pane_id, "right")}
+                >
+                  <Columns2 size={14} />
+                </button>
+                <button
+                  type="button"
+                  className="terminal-pane-action"
+                  disabled={control.access.viewOnly}
+                  title="Split pane down"
+                  aria-label="Split pane down"
+                  onPointerDown={preventPaneActionFocus}
+                  onClick={() => store.splitPane(pane.pane_id, "down")}
+                >
+                  <Rows2 size={14} />
+                </button>
+              </>
+            ) : null}
+            {canClosePane || paneZoomed ? (
+              <button
+                type="button"
+                className="terminal-pane-action"
+                disabled={control.access.viewOnly}
+                title={paneZoomed ? "Restore pane" : "Maximize pane"}
+                aria-label={paneZoomed ? "Restore pane" : "Maximize pane"}
+                onPointerDown={preventPaneActionFocus}
+                onClick={() => store.zoomPane(pane.pane_id)}
               >
-                <Eye size={13} />
-                <span>View only</span>
-              </Button>
+                {paneZoomed ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
+              </button>
+            ) : null}
+            {canClosePane ? (
+              <button
+                type="button"
+                className="terminal-pane-action is-danger"
+                disabled={control.access.viewOnly}
+                title="Close pane"
+                aria-label="Close pane"
+                onPointerDown={preventPaneActionFocus}
+                onClick={() => setClosePaneRequested(true)}
+              >
+                <X size={14} />
+              </button>
             ) : null}
           </div>
         </div>
@@ -3540,70 +3678,6 @@ export function TerminalView({
             onError={notifyComposerError}
           />
         ) : null}
-        <div className="terminal-pane-toolbar" aria-label="Pane actions">
-          {s.endpointAvailability[pane.terminal_id] &&
-          store.terminalScrollReason(pane.terminal_id) ? (
-            <span
-              className="muted"
-              role="status"
-              title={store.terminalScrollReason(pane.terminal_id) ?? undefined}
-            >
-              History unavailable: pane.scroll not advertised
-            </span>
-          ) : null}
-          {!paneZoomed ? (
-            <>
-              <button
-                type="button"
-                className="terminal-pane-action"
-                disabled={control.access.viewOnly}
-                title="Split pane right"
-                aria-label="Split pane right"
-                onPointerDown={preventPaneActionFocus}
-                onClick={() => store.splitPane(pane.pane_id, "right")}
-              >
-                <Columns2 size={14} />
-              </button>
-              <button
-                type="button"
-                className="terminal-pane-action"
-                disabled={control.access.viewOnly}
-                title="Split pane down"
-                aria-label="Split pane down"
-                onPointerDown={preventPaneActionFocus}
-                onClick={() => store.splitPane(pane.pane_id, "down")}
-              >
-                <Rows2 size={14} />
-              </button>
-            </>
-          ) : null}
-          {canClosePane || paneZoomed ? (
-            <button
-              type="button"
-              className="terminal-pane-action"
-              disabled={control.access.viewOnly}
-              title={paneZoomed ? "Restore pane" : "Maximize pane"}
-              aria-label={paneZoomed ? "Restore pane" : "Maximize pane"}
-              onPointerDown={preventPaneActionFocus}
-              onClick={() => store.zoomPane(pane.pane_id)}
-            >
-              {paneZoomed ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-            </button>
-          ) : null}
-          {canClosePane ? (
-            <button
-              type="button"
-              className="terminal-pane-action is-danger"
-              disabled={control.access.viewOnly}
-              title="Close pane"
-              aria-label="Close pane"
-              onPointerDown={preventPaneActionFocus}
-              onClick={() => setClosePaneRequested(true)}
-            >
-              <X size={14} />
-            </button>
-          ) : null}
-        </div>
         {s.connectionPaused ? (
           <div className="terminal-loading" role="status" aria-live="polite">
             <span className="terminal-loading-dot" />
