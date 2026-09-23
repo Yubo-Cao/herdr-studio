@@ -2241,9 +2241,11 @@ export default function App() {
         );
       if (!workspace) return;
       const root = workspace.worktree?.checkout_path ?? workspace.cwd;
-      const initialDirectory = root
-        ? relativePathWithinCheckout(root, pane.foreground_cwd ?? pane.cwd)
-        : undefined;
+      const cwd = pane.foreground_cwd ?? pane.cwd;
+      // A cwd outside the checkout opens the explorer's Filesystem mode there.
+      const initialDirectory =
+        (root ? relativePathWithinCheckout(root, cwd) : undefined) ??
+        (cwd || undefined);
       openInspector("files", workspace.workspace_id, {
         originPaneId: pane.pane_id,
         initialDirectory,

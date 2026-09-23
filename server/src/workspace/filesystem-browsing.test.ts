@@ -9,11 +9,15 @@ import {
   writeFile,
 } from "node:fs/promises";
 import { join } from "node:path";
-import { tmpdir } from "node:os";
+import { homedir, tmpdir } from "node:os";
 import type { HerdrClient } from "../bridge/herdr-client";
 import { runProcessWithCode, shQuote } from "../utils/process-utils";
 import { createFileHandlers } from "./files";
-import { sanitizeFilesystemPath } from "./file-paths";
+import {
+  expandHomePath,
+  sanitizeFilesystemPath,
+  splitFilesystemPath,
+} from "./file-paths";
 import { listRemoteFiles } from "./remote-files";
 
 async function fixture(
@@ -59,8 +63,29 @@ function handlers(workspace: string) {
 test("filesystem paths must be explicit, absolute, and NUL-free", () => {
   expect(sanitizeFilesystemPath("/tmp/../refs")).toBe("/tmp/../refs");
   expect(sanitizeFilesystemPath("C:\\refs")).toBe("C:/refs");
-  for (const path of [undefined, "", "refs", "../refs", "/refs\0"]) {
+  expect(sanitizeFilesystemPath("~")).toBe("~");
+  expect(sanitizeFilesystemPath("~/src")).toBe("~/src");
+  for (const path of [undefined, "", "refs", "../refs", "/refs\0", "~other"]) {
     expect(() => sanitizeFilesystemPath(path)).toThrow("absolute path");
+  }
+});
+
+test("home expansion and entry splitting keep explicit host paths", () => {
+  expect(expandHomePath("~", "/home/me/")).toBe("/home/me");
+  expect(expandHomePath("~/a/b", "/home/me")).toBe("/home/me/a/b");
+  expect(expandHomePath("~/a", "/")).toBe("/a");
+  expect(expandHomePath("/etc", "/home/me")).toBe("/etc");
+  expect(splitFilesystemPath("/tmp/notes.md")).toEqual({
+    parent: "/tmp",
+    name: "notes.md",
+  });
+  expect(splitFilesystemPath("/etc/")).toEqual({ parent: "/", name: "etc" });
+  expect(splitFilesystemPath("C:/Users")).toEqual({
+    parent: "C:/",
+    name: "Users",
+  });
+  for (const path of ["/", "/tmp/..", "/tmp/."]) {
+    expect(() => splitFilesystemPath(path)).toThrow();
   }
 });
 
@@ -126,7 +151,7 @@ test("workspace listings stay lexically confined; opt-in browsing can leave the 
   });
 });
 
-test("external references preview and download without widening upload or delete targets", async () => {
+test("external references preview and download only with filesystem scope", async () => {
   await fixture(async (_root, workspace, refs) => {
     const files = handlers(workspace);
     const path = join(refs, "readme.md");
@@ -142,25 +167,175 @@ test("external references preview and download without widening upload or delete
     await expect(
       files.downloadWorkspaceFile({ workspace_id: "w1", path }),
     ).rejects.toThrow();
+  });
+});
+
+test("filesystem scope uploads, creates, and deletes explicit host paths", async () => {
+  await fixture(async (_root, workspace, refs) => {
+    const files = handlers(workspace);
+    const uploaded = await files.uploadWorkspaceFile(
+      {
+        workspace_id: "w1",
+        directory: refs,
+        filename: "notes.txt",
+        scope: "filesystem",
+      },
+      new Request("http://test", { method: "POST", body: "notes" }),
+    );
+    expect(uploaded).toMatchObject({
+      scope: "filesystem",
+      path: join(refs, "notes.txt"),
+      overwritten: false,
+    });
+    expect(await readFile(join(refs, "notes.txt"), "utf8")).toBe("notes");
+
+    const folder = await files.createWorkspaceEntry({
+      workspace_id: "w1",
+      path: join(refs, "drafts"),
+      kind: "directory",
+      scope: "filesystem",
+    });
+    expect(folder).toMatchObject({
+      path: join(refs, "drafts"),
+      type: "directory",
+    });
+    const empty = await files.createWorkspaceEntry({
+      workspace_id: "w1",
+      path: join(refs, "drafts", "todo.md"),
+      kind: "file",
+      scope: "filesystem",
+    });
+    expect(empty.type).toBe("file");
+    expect(await readFile(join(refs, "drafts", "todo.md"), "utf8")).toBe("");
+    await expect(
+      files.createWorkspaceEntry({
+        workspace_id: "w1",
+        path: join(refs, "drafts"),
+        kind: "directory",
+        scope: "filesystem",
+      }),
+    ).rejects.toThrow("already exists");
+    await expect(
+      files.createWorkspaceEntry({
+        workspace_id: "w1",
+        path: join(refs, "missing", "child"),
+        kind: "file",
+        scope: "filesystem",
+      }),
+    ).rejects.toThrow("parent directory");
+
+    const deleted = await files.deleteWorkspaceFile({
+      workspace_id: "w1",
+      path: join(refs, "drafts"),
+      scope: "filesystem",
+    });
+    expect(deleted).toMatchObject({
+      path: join(refs, "drafts"),
+      type: "directory",
+    });
     await expect(
       files.deleteWorkspaceFile({
         workspace_id: "w1",
-        path,
+        path: "/",
         scope: "filesystem",
       }),
     ).rejects.toThrow();
+  });
+});
+
+test("workspace scope mutations stay lexically confined", async () => {
+  await fixture(async (_root, workspace) => {
+    const files = handlers(workspace);
+    const created = await files.createWorkspaceEntry({
+      workspace_id: "w1",
+      path: "src",
+      kind: "directory",
+    });
+    expect(created).toMatchObject({ path: "src", type: "directory" });
+    for (const path of ["../escape", "src/../../escape"]) {
+      await expect(
+        files.createWorkspaceEntry({ workspace_id: "w1", path, kind: "file" }),
+      ).rejects.toThrow();
+    }
     await expect(
-      files.uploadWorkspaceFile(
-        {
-          workspace_id: "w1",
-          directory: refs,
-          filename: "readme.md",
-          scope: "filesystem",
-        },
-        new Request("http://test", { method: "POST", body: "changed" }),
-      ),
+      files.createWorkspaceEntry({
+        workspace_id: "w1",
+        path: "anything",
+        kind: "socket",
+      }),
+    ).rejects.toThrow("kind");
+    await expect(
+      files.deleteWorkspaceFile({ workspace_id: "w1", path: "" }),
     ).rejects.toThrow();
-    expect(await readFile(path, "utf8")).toBe("reference");
+  });
+});
+
+test("filesystem paths expand ~ against the local runtime home", async () => {
+  await fixture(async (_root, workspace) => {
+    const files = handlers(workspace);
+    const home = await realpath(homedir());
+    const list = await files.listWorkspaceFiles({
+      workspace_id: "w1",
+      scope: "filesystem",
+      path: "~",
+    });
+    expect(list.root).toBe(home);
+  });
+});
+
+test("SSH filesystem paths expand ~ with the remote shell's home", async () => {
+  await fixture(async (root, workspace) => {
+    const remoteHome = join(root, "remote home");
+    await mkdir(join(remoteHome, "projects"), { recursive: true });
+    const files = createFileHandlers({
+      herdr: {
+        call: async () => ({
+          workspace: { workspace_id: "w1", label: "Workspace", cwd: workspace },
+        }),
+      } as unknown as HerdrClient,
+      sshHost: () => "fixture",
+      shQuote,
+      // Execute the generated command locally with a distinct $HOME, standing
+      // in for the SSH host, so expansion cannot come from the bridge.
+      runProcessWithCodeTimeout: (argv) =>
+        runProcessWithCode([
+          "env",
+          `HOME=${remoteHome}`,
+          "bash",
+          "-c",
+          argv.at(-1)!,
+        ]),
+    });
+    const list = await files.listWorkspaceFiles({
+      workspace_id: "w1",
+      scope: "filesystem",
+      path: "~",
+    });
+    expect(list.root).toBe(remoteHome);
+    expect(list.entries.map((entry) => entry.path)).toEqual([
+      join(remoteHome, "projects"),
+    ]);
+    const created = await files.createWorkspaceEntry({
+      workspace_id: "w1",
+      path: "~/projects/plan.md",
+      kind: "file",
+      scope: "filesystem",
+    });
+    expect(created.path).toBe(join(remoteHome, "projects", "plan.md"));
+    expect(await readFile(created.path, "utf8")).toBe("");
+    const deleted = await files.deleteWorkspaceFile({
+      workspace_id: "w1",
+      path: "~/projects/plan.md",
+      scope: "filesystem",
+    });
+    expect(deleted).toMatchObject({ type: "file" });
+    await expect(
+      files.deleteWorkspaceFile({
+        workspace_id: "w1",
+        path: "~",
+        scope: "filesystem",
+      }),
+    ).rejects.toThrow();
   });
 });
 

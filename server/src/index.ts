@@ -806,6 +806,7 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     resolveWorkspaceFiles,
     readWorkspaceFile,
     writeWorkspaceFile,
+    createWorkspaceEntry,
     readGitDiffSummary,
     readGitDiffFile,
     runGitPull,
@@ -920,6 +921,15 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
       sendReply({ id, result }, "file-write");
     } catch (e) {
       sendError("file-write-error", e);
+    }
+    return;
+  }
+  if (method === "file.mkdir") {
+    try {
+      const result = await createWorkspaceEntry(params ?? {});
+      sendReply({ id, result }, "file-mkdir");
+    } catch (e) {
+      sendError("file-mkdir-error", e);
     }
     return;
   }
@@ -1249,6 +1259,7 @@ async function handleConnectionHttpRequest(
             workspace_id: url.searchParams.get("workspace_id"),
             directory: url.searchParams.get("directory"),
             filename: url.searchParams.get("filename"),
+            scope: url.searchParams.get("scope"),
           },
           req,
         );
@@ -1264,6 +1275,7 @@ async function handleConnectionHttpRequest(
         const result = await connection.files.deleteWorkspaceFile({
           workspace_id: url.searchParams.get("workspace_id"),
           path: url.searchParams.get("path"),
+          scope: url.searchParams.get("scope"),
         });
         response = Response.json(result);
       } catch (error) {

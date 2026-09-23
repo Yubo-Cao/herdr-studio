@@ -15,6 +15,7 @@ import {
 } from "./file-constants";
 import { entrySort, relativeExplorerPath } from "./file-paths";
 import type {
+  FileCreateResult,
   FileDeleteResult,
   FileDownloadResult,
   FileExplorerEntry,
@@ -559,6 +560,11 @@ root_real="$(cd "$root" && pwd -P)"
 case "$rel" in
   /*|..|../*|*/../*|*/..) echo "file explorer path escaped the workspace checkout" >&2; exit 13 ;;
 esac
+rel="\${rel%/}"
+if [ -z "$rel" ] || [ "$rel" = "." ]; then
+  echo "refusing to delete the root" >&2
+  exit 13
+fi
 target="$root_real/$rel"
 if [ ! -e "$target" ] && [ ! -L "$target" ]; then
   echo "file does not exist" >&2
@@ -700,4 +706,99 @@ printf 'META\\t%s\\t%s\\t%s\\n' "$size" "$mtime" "$created"
     );
   }
   return parseRemoteFileWrite(result.stdout, requestedPath);
+}
+
+/** Create one empty file or directory on the SSH host; the parent must exist. */
+export async function createRemoteEntry({
+  host,
+  rootPath,
+  requestedPath,
+  kind,
+  runProcessWithCodeTimeout,
+  shQuote,
+}: {
+  host: string;
+  rootPath: string;
+  requestedPath: string;
+  kind: FileCreateResult["type"];
+  runProcessWithCodeTimeout: RunProcessWithCodeTimeout;
+  shQuote: (value: string) => string;
+}): Promise<FileCreateResult> {
+  const command = `
+set -euo pipefail
+root=${shQuote(rootPath)}
+rel=${shQuote(requestedPath)}
+kind=${shQuote(kind)}
+if [ ! -d "$root" ]; then
+  echo "parent directory does not exist" >&2
+  exit 14
+fi
+root_real="$(cd "$root" && pwd -P)"
+case "$rel" in
+  ""|/*|..|../*|*/../*|*/..) echo "file explorer path escaped the workspace checkout" >&2; exit 13 ;;
+esac
+rel="\${rel%/}"
+target="$root_real/$rel"
+parent="\${target%/*}"
+if [ ! -d "$parent" ]; then
+  echo "parent directory does not exist" >&2
+  exit 14
+fi
+if [ -e "$target" ] || [ -L "$target" ]; then
+  echo "an entry with that name already exists" >&2
+  exit 17
+fi
+if [ "$kind" = directory ]; then
+  mkdir -- "$target"
+else
+  (set -C; : > "$target")
+fi
+printf 'META\\t%s\\n' "$(printf '%s' "$rel" | base64 | tr -d '\\n')"
+`;
+  const result = await runProcessWithCodeTimeout(
+    sshCommandArgv(host, `bash -lc ${shQuote(command)}`),
+    DELETE_TIMEOUT_MS,
+  );
+  if (result.code !== 0) {
+    throw new Error(
+      (result.stderr || result.stdout || `file create exited ${result.code}`)
+        .trim()
+        .slice(0, 1000),
+    );
+  }
+  const [marker, rawPath] = result.stdout.trim().split("\t");
+  if (marker !== "META") {
+    throw new Error(
+      (result.stdout || "invalid file create response").trim().slice(0, 1000),
+    );
+  }
+  return {
+    path: Buffer.from(rawPath ?? "", "base64").toString("utf8"),
+    type: kind,
+  };
+}
+
+/** The SSH user's home directory, resolved by the remote shell. */
+export async function readRemoteHome({
+  host,
+  runProcessWithCodeTimeout,
+  shQuote,
+}: {
+  host: string;
+  runProcessWithCodeTimeout: RunProcessWithCodeTimeout;
+  shQuote: (value: string) => string;
+}): Promise<string> {
+  const result = await runProcessWithCodeTimeout(
+    sshCommandArgv(host, `bash -lc ${shQuote('printf "%s" "$HOME"')}`),
+    LIST_TIMEOUT_MS,
+  );
+  const home = result.stdout.trim();
+  if (result.code !== 0 || !home.startsWith("/")) {
+    throw new Error(
+      (result.stderr || "unable to resolve the remote home directory")
+        .trim()
+        .slice(0, 1000),
+    );
+  }
+  return home;
 }

@@ -1,3 +1,4 @@
+/* Host filesystem explorer: stacked full-bleed bars over a flat row list. */
 .filesystem-browser {
   display: flex;
   flex-direction: column;
@@ -5,60 +6,284 @@
   min-height: 0;
   flex: 1;
 }
-.filesystem-mode,
-.filesystem-location {
+.filesystem-nav,
+.filesystem-tools {
+  gap: 2px;
+  padding: 0 4px;
+  background: transparent;
+}
+.filesystem-breadcrumbs,
+.filesystem-path-form {
+  min-width: 0;
+  height: var(--ui-control-height);
+  flex: 1 1 auto;
+  display: flex;
+  align-items: center;
+  margin: 0 4px;
+}
+.filesystem-breadcrumbs {
+  overflow: hidden;
+  cursor: text;
+  font-family: var(--mono-font);
+  font-size: var(--ui-font-size-xs);
+  white-space: nowrap;
+}
+.filesystem-breadcrumbs:hover {
+  background: var(--panel-2);
+}
+/* Long paths collapse their middle in the component; the rest may ellipsize. */
+.filesystem-crumb {
+  min-width: 0;
+  display: inline-flex;
+  align-items: center;
+  flex: 0 1 auto;
+}
+.filesystem-crumb:first-child,
+.filesystem-crumb:has(> button[aria-current="location"]) {
+  flex: 0 0 auto;
+}
+.filesystem-nav {
+  container-type: inline-size;
+}
+/* In a narrow Inspector keep only the root, the collapse, and the current. */
+@container (max-width: 300px) {
+  .filesystem-crumb.is-ancestor {
+    display: none;
+  }
+}
+.filesystem-crumb button {
+  min-width: 0;
+  height: var(--ui-token-height);
+  max-width: 180px;
+  padding: 0 4px;
+  white-space: nowrap;
+  overflow: hidden;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font: inherit;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.filesystem-crumb button:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--text-strong);
+}
+.filesystem-crumb button[aria-current="location"] {
+  color: var(--text-strong);
+  font-weight: 600;
+}
+.filesystem-crumb-separator {
+  color: color-mix(in srgb, var(--muted) 60%, transparent);
+}
+.filesystem-path-edit {
+  min-width: 24px;
+  height: 100%;
+  flex: 1 1 auto;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  cursor: text;
+}
+.filesystem-path-edit:hover:not(:disabled) {
+  background: transparent;
+}
+.filesystem-path-input {
+  width: 100%;
+  min-width: 0;
+  height: var(--ui-control-height);
+  padding: 0 8px;
+  font-family: var(--mono-font);
+  font-size: var(--ui-font-size-xs);
+}
+.filesystem-places {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 8px;
+  overflow-x: auto;
+  border-bottom: 1px solid var(--border);
+}
+.filesystem-place {
+  flex: 0 0 auto;
+  max-width: 160px;
+  font-size: var(--ui-font-size-xs);
+  font-weight: 500;
+  line-height: 1;
+}
+.filesystem-filter {
+  min-width: 0;
+  height: var(--ui-control-height);
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   gap: 6px;
-  margin-bottom: 8px;
-}
-.filesystem-mode {
-  justify-content: space-between;
-  font-size: 12px;
+  padding: 0 6px;
   color: var(--muted);
 }
-.filesystem-mode button {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-  font-size: 12px;
-}
-.filesystem-location input {
+.filesystem-filter input {
   min-width: 0;
-  width: 0;
-  flex: 1;
-  height: 32px;
-  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-  font-size: 12px;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  font-size: var(--ui-font-size-sm);
+  box-shadow: none;
+}
+.filesystem-filter input:focus {
+  box-shadow: none;
+}
+.filesystem-tools .ui-button[aria-pressed="true"] {
+  color: var(--accent);
+}
+.filesystem-message {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 0;
+  padding: 6px 10px;
+  color: var(--muted);
+  font-size: var(--ui-font-size-sm);
+}
+.filesystem-message.is-error {
+  color: var(--danger-text);
+  background: var(--danger-soft);
+}
+.filesystem-list {
+  min-height: 0;
+  flex: 1 1 auto;
+  overflow: auto;
+  padding: 2px 0;
+}
+.filesystem-list.is-drop-target {
+  background: var(--accent-soft);
 }
 .filesystem-entry {
   display: flex;
   align-items: center;
   min-width: 0;
 }
-.filesystem-entry > .file-row {
+.filesystem-entry:hover,
+.filesystem-entry:focus-within {
+  background: var(--panel-2);
+}
+.filesystem-entry.is-selected {
+  background: var(--accent-soft);
+}
+.filesystem-row {
+  min-width: 0;
+  height: var(--ui-row-height);
+  flex: 1 1 auto;
   display: flex;
   align-items: center;
   gap: 8px;
-  flex: 1;
-  min-width: 0;
+  padding: 0 4px 0 10px;
   border: 0;
   background: transparent;
+  color: var(--text);
+  font-size: var(--ui-font-size-sm);
   text-align: left;
 }
-.filesystem-entry > .file-row:hover {
-  background: var(--panel-2);
+.filesystem-row:hover:not(:disabled) {
+  background: transparent;
 }
-.filesystem-entry > .file-row.is-selected,
-.filesystem-entry > .file-row:focus-visible {
-  background: var(--accent-soft);
+.filesystem-row:focus-visible {
+  outline: none;
+  box-shadow: inset 2px 0 0 var(--accent);
 }
-.filesystem-entry .file-name {
-  flex: 1;
+.filesystem-entry.is-hidden-entry .filesystem-name {
+  color: var(--muted);
+}
+.filesystem-icon {
+  flex: 0 0 auto;
+  color: var(--muted);
+}
+.filesystem-icon.is-directory {
+  color: var(--accent);
+}
+.filesystem-name {
   min-width: 0;
+  flex: 1 1 auto;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+.filesystem-meta {
+  flex: 0 0 auto;
+  color: var(--muted);
+  font-size: var(--ui-font-size-xs);
+  font-variant-numeric: tabular-nums;
+}
+.filesystem-entry-action {
+  width: var(--ui-control-height);
+  height: var(--ui-control-height);
+  display: inline-grid;
+  place-items: center;
+  flex: 0 0 auto;
+  margin-right: 4px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  opacity: 0;
+}
+.filesystem-entry:hover .filesystem-entry-action,
+.filesystem-entry:focus-within .filesystem-entry-action {
+  opacity: 1;
+}
+.filesystem-entry-action:hover:not(:disabled) {
+  background: var(--accent-soft);
+  color: var(--text-strong);
+}
+@media (hover: none) {
+  .filesystem-entry-action {
+    opacity: 1;
+  }
+}
+
+/* Workspace / Filesystem switch shared by both explorer modes. */
+.file-explorer-modebar {
+  gap: 6px;
+  padding: 0 8px;
+  background: transparent;
+}
+.file-explorer-mode-switch {
+  display: inline-flex;
+  align-items: center;
+  gap: 2px;
+  padding: 2px;
+  background: color-mix(in srgb, var(--text) 6%, transparent);
+}
+.file-explorer-mode-switch button {
+  height: calc(var(--ui-control-height) - 4px);
+  padding: 0 10px;
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  font-size: var(--ui-font-size-sm);
+  font-weight: 500;
+}
+.file-explorer-mode-switch button:hover:not(:disabled) {
+  color: var(--text-strong);
+}
+.file-explorer-mode-switch button[aria-checked="true"] {
+  background: var(--panel);
+  color: var(--text-strong);
+  box-shadow: 0 0 0 1px var(--border);
+}
+.file-explorer-mode-root {
+  min-width: 0;
+  flex: 1 1 auto;
+  overflow: hidden;
+  color: var(--muted);
+  font-family: var(--mono-font);
+  font-size: var(--ui-font-size-xs);
+  text-align: right;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  direction: rtl;
 }
 
 .file-search {

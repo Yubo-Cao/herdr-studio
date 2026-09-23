@@ -223,15 +223,25 @@ mounted across Inspector changes; layout preferences and content caches are sepa
 
 ## Filesystem browsing
 
-`file.list` is checkout-relative with realpath/symlink escape checks. Each
-filesystem listing explicitly sends `scope: "filesystem"` and an absolute host
-directory; replies confirm scope and return absolute entries. The mode is
-view-local, not a persisted permission; retired responses cannot replace a new
-view. Search filters loaded entries only.
+Workspace scope is checkout-relative and lexically confined: `..` escapes are
+rejected, while explicit symlinks inside the checkout may be followed. Each
+filesystem request explicitly sends `scope: "filesystem"` with an absolute host
+path or `~`/`~/...`; the bridge expands `~` with the runtime host's home (the
+bridge user locally, the remote shell's `$HOME` over SSH, cached per host), and
+replies confirm scope and return absolute paths. The mode is view-local, not a
+persisted permission: each explorer remembers its mode and directory in memory
+for the page session only, and retired responses cannot replace a new view.
+Search filters loaded entries only.
+
+`file.list`, `file.read`, download, upload, delete, and `file.mkdir` accept both
+scopes. Upload targets an explicit directory; delete and `file.mkdir` target an
+entry inside an existing parent. `file.mkdir` takes `kind: "directory" | "file"`,
+creates one empty entry, and fails when the name exists. Deleting the checkout
+root, a filesystem root, or the host home directory itself is refused.
 
 Absolute previews use `scope=filesystem` download URLs; relative Markdown links
-and images resolve beside their source. Upload/delete remain checkout-scoped.
-Explorer caches are separate from lazy UI code. Mermaid previews share a lazy
+and images resolve beside their source. Explorer caches are separate from lazy
+UI code. Mermaid previews share a lazy
 renderer, strip wrappers/metadata only for detection, and retain original source.
 Images are inert elements; SVG is never inserted into the app DOM, and direct
 SVG responses carry a sandbox CSP blocking scripts and external resources.

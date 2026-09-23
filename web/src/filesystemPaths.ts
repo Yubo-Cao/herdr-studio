@@ -28,3 +28,28 @@ export function directoryPreviewPath(
 export function directoryPreviewName(path: string): string {
   return path.split("/").filter(Boolean).pop() ?? "";
 }
+
+export type FilesystemBreadcrumb = { label: string; path: string };
+
+/** Clickable ancestors of an absolute host path, starting at its root. */
+export function filesystemBreadcrumbs(value: string): FilesystemBreadcrumb[] {
+  const path = value.replace(/\\/g, "/");
+  const prefix = path.match(/^(?:[a-z]:\/|\/\/[^/]+\/[^/]+\/?|\/)/i)?.[0];
+  if (!prefix) return [];
+  const root = prefix.startsWith("//") ? prefix.replace(/\/$/, "") : prefix;
+  const crumbs: FilesystemBreadcrumb[] = [
+    { label: root === "/" ? "/" : root.replace(/\/$/, ""), path: root },
+  ];
+  let current = root.replace(/\/$/, "");
+  for (const part of path.slice(prefix.length).split("/").filter(Boolean)) {
+    current = `${current}/${part}`;
+    crumbs.push({ label: part, path: current });
+  }
+  return crumbs;
+}
+
+/** The final path component, or the root itself for a root path. */
+export function filesystemBaseName(value: string): string {
+  const crumbs = filesystemBreadcrumbs(value);
+  return crumbs[crumbs.length - 1]?.label ?? value;
+}

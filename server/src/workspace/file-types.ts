@@ -70,6 +70,11 @@ export type FileDeleteResult = {
   type: FileExplorerEntry["type"];
 };
 
+export type FileCreateResult = {
+  path: string;
+  type: "directory" | "file";
+};
+
 export type FileResolution = {
   candidate: string;
   path: string;
