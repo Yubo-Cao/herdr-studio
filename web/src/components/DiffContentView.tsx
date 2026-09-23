@@ -66,6 +66,8 @@ import {
   expandDiffEntryOnActivate,
 } from "./diffContentState";
 import { diffSyntaxLanguageForPath } from "./diffSyntaxHighlighting";
+import { Button } from "./ui/Button";
+import { SegmentedControl } from "./ui/SegmentedControl";
 import "./DiffContentView.css";
 
 type DiffViewMode = "split" | "unified";
@@ -1336,14 +1338,12 @@ export function DiffContentView({
           </div>
         )}
         {mobile ? (
-          <button
-            type="button"
-            className={`diff-wrap-toggle ${mobileWrap ? "is-active" : ""}`}
-            onClick={() => setMobileWrap((value) => !value)}
+          <Button
             aria-pressed={mobileWrap}
+            onClick={() => setMobileWrap((value) => !value)}
           >
             Wrap
-          </button>
+          </Button>
         ) : null}
         <div className="diff-content-actions">
           {hunkTargets.length ? (
@@ -1445,32 +1445,22 @@ export function DiffContentView({
         </div>
         {!mobile ? (
           <div className="diff-display-controls">
-            <div className="diff-view-toggle" aria-label="Diff view mode">
-              <button
-                type="button"
-                className={viewMode === "split" ? "is-active" : ""}
-                onClick={() => setViewMode("split")}
-                aria-pressed={viewMode === "split"}
-              >
-                Split
-              </button>
-              <button
-                type="button"
-                className={viewMode === "unified" ? "is-active" : ""}
-                onClick={() => setViewMode("unified")}
-                aria-pressed={viewMode === "unified"}
-              >
-                Unified
-              </button>
-            </div>
-            <button
-              type="button"
-              className={`diff-wrap-toggle ${desktopWrap ? "is-active" : ""}`}
-              onClick={() => setDesktopWrap((value) => !value)}
+            <SegmentedControl
+              className="diff-view-toggle"
+              aria-label="Diff view mode"
+              value={viewMode}
+              onChange={setViewMode}
+              options={[
+                { value: "split", label: "Split" },
+                { value: "unified", label: "Unified" },
+              ]}
+            />
+            <Button
               aria-pressed={desktopWrap}
+              onClick={() => setDesktopWrap((value) => !value)}
             >
               Wrap
-            </button>
+            </Button>
           </div>
         ) : null}
       </div>

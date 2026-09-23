@@ -57,6 +57,8 @@ import {
 import { keyboardContextMenuPoint, treeKeyboardAction } from "./treeKeyboard";
 import { ActionsMenu } from "./ActionsMenu";
 import { ConfirmDialog } from "./ModalDialogs";
+import { IconButton } from "./ui/IconButton";
+import { SegmentedControl } from "./ui/SegmentedControl";
 import "./DiffViewerPanel.css";
 
 export type ActiveDiffSelection = {
@@ -1721,74 +1723,78 @@ export const DiffViewerPanel = forwardRef<
   return (
     <aside className="diff-viewer-side" aria-label="Diff Viewer">
       <div className="diff-panel-toolbar">
-        <div className="diff-scope-toggle" aria-label="Diff scope">
-          <button
-            type="button"
-            className={diffScope === "last-step" ? "is-active" : ""}
-            onClick={() => setDiffScope("last-step")}
-            aria-pressed={diffScope === "last-step"}
-            aria-label="Last step"
-            title="Last step"
-          >
-            <span className="diff-scope-label-full" aria-hidden="true">
-              Last step
-            </span>
-            <span className="diff-scope-label-short" aria-hidden="true">
-              Last
-            </span>
-          </button>
-          <button
-            type="button"
-            className={diffScope === "working" ? "is-active" : ""}
-            onClick={() => setDiffScope("working")}
-            aria-pressed={diffScope === "working"}
-            aria-label="Working tree"
-            title="Working tree"
-          >
-            <span className="diff-scope-label-full" aria-hidden="true">
-              Working tree
-            </span>
-            <span className="diff-scope-label-short" aria-hidden="true">
-              Working
-            </span>
-          </button>
-          <button
-            type="button"
-            className={diffScope === "branch-main" ? "is-active" : ""}
-            onClick={() => setDiffScope("branch-main")}
-            aria-pressed={diffScope === "branch-main"}
-            aria-label="Against main"
-            title="Against main"
-          >
-            <span className="diff-scope-label-full" aria-hidden="true">
-              Against main
-            </span>
-            <span className="diff-scope-label-short" aria-hidden="true">
-              Main
-            </span>
-          </button>
-        </div>
+        <SegmentedControl
+          className="diff-scope-toggle"
+          stretch
+          aria-label="Diff scope"
+          value={diffScope}
+          onChange={setDiffScope}
+          options={[
+            {
+              value: "last-step",
+              ariaLabel: "Last step",
+              title: "Last step",
+              label: (
+                <>
+                  <span className="diff-scope-label-full" aria-hidden="true">
+                    Last step
+                  </span>
+                  <span className="diff-scope-label-short" aria-hidden="true">
+                    Last
+                  </span>
+                </>
+              ),
+            },
+            {
+              value: "working",
+              ariaLabel: "Working tree",
+              title: "Working tree",
+              label: (
+                <>
+                  <span className="diff-scope-label-full" aria-hidden="true">
+                    Working tree
+                  </span>
+                  <span className="diff-scope-label-short" aria-hidden="true">
+                    Working
+                  </span>
+                </>
+              ),
+            },
+            {
+              value: "branch-main",
+              ariaLabel: "Against main",
+              title: "Against main",
+              label: (
+                <>
+                  <span className="diff-scope-label-full" aria-hidden="true">
+                    Against main
+                  </span>
+                  <span className="diff-scope-label-short" aria-hidden="true">
+                    Main
+                  </span>
+                </>
+              ),
+            },
+          ]}
+        />
         <div
           className="diff-toolbar-actions"
           role="group"
           aria-label="Diff actions"
         >
-          <button
-            type="button"
+          <IconButton
             className="diff-refresh"
-            title={summaryLoading ? "Refreshing..." : "Refresh"}
-            aria-label={
-              summaryLoading ? "Refreshing changes" : "Refresh changes"
-            }
+            label={summaryLoading ? "Refreshing changes" : "Refresh changes"}
             aria-busy={summaryLoading}
             disabled={summaryLoading}
             onClick={() => void loadSummary(cache.selected, true)}
-          >
-            <RefreshCw
-              className={summaryLoading ? "is-spinning" : ""}
-              size={15}
-            />
-          </button>
+            icon={
+              <RefreshCw
+                className={summaryLoading ? "is-spinning" : ""}
+                size={15}
+              />
+            }
+          />
         </div>
       </div>
 

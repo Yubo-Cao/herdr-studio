@@ -12,30 +12,6 @@
   font-size: var(--ui-font-size-xs);
 }
 
-.workspace-agent-layout-control > div {
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.workspace-agent-layout-control button {
-  height: 22px;
-  padding: 0 7px;
-  border: 0;
-  background: transparent;
-  color: var(--muted);
-  font-size: var(--ui-font-size-xs);
-}
-
-.workspace-agent-layout-control button:hover {
-  color: var(--text);
-}
-
-.workspace-agent-layout-control button.is-active {
-  background: var(--accent-soft);
-  color: var(--text-strong);
-}
-
 .agent-row:focus-visible {
   outline: 2px solid color-mix(in srgb, var(--accent) 72%, transparent);
   outline-offset: -2px;

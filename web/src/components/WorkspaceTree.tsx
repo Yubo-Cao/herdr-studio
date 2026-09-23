@@ -80,6 +80,7 @@ import {
 } from "./treeKeyboard";
 import { TREE_DEPTH_INDENT } from "./treeIndent";
 import { groupPanesByTab, shouldShowTabGroups } from "../paneIdentity";
+import { SegmentedControl } from "./ui/SegmentedControl";
 import { Token } from "./ui/Token";
 import "./WorkspaceTree.css";
 
@@ -125,32 +126,16 @@ function AgentLayoutControl({
   return (
     <div className="workspace-agent-layout-control">
       <span>Agents</span>
-      <div role="group" aria-label="Agent list layout">
-        <button
-          type="button"
-          className={value === "compact" ? "is-active" : ""}
-          aria-pressed={value === "compact"}
-          onClick={() => onChange("compact")}
-        >
-          Compact
-        </button>
-        <button
-          type="button"
-          className={value === "nested" ? "is-active" : ""}
-          aria-pressed={value === "nested"}
-          onClick={() => onChange("nested")}
-        >
-          Nested
-        </button>
-        <button
-          type="button"
-          className={value === "separate" ? "is-active" : ""}
-          aria-pressed={value === "separate"}
-          onClick={() => onChange("separate")}
-        >
-          Separate
-        </button>
-      </div>
+      <SegmentedControl
+        aria-label="Agent list layout"
+        value={value}
+        onChange={onChange}
+        options={[
+          { value: "compact", label: "Compact" },
+          { value: "nested", label: "Nested" },
+          { value: "separate", label: "Separate" },
+        ]}
+      />
     </div>
   );
 }

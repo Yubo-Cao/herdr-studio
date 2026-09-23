@@ -21,9 +21,6 @@
 }
 
 .diff-scope-toggle {
-  display: grid;
-  grid-template-columns: repeat(3, minmax(0, 1fr));
-  gap: 2px;
   margin-bottom: 0;
 }
 
@@ -70,35 +67,6 @@
 
 .diff-panel-toolbar .diff-toolbar-actions {
   margin-bottom: 0;
-}
-
-.diff-scope-toggle button,
-.diff-toolbar-actions button {
-  white-space: nowrap;
-  min-width: 0;
-  height: var(--ui-control-height);
-  min-height: var(--ui-control-height);
-  padding: 0 7px;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  font-size: var(--ui-font-size-sm);
-}
-
-.diff-scope-toggle button:hover,
-.diff-toolbar-actions button:hover {
-  background: var(--panel-2);
-  color: var(--text);
-}
-
-.diff-scope-toggle button.is-active {
-  background: var(--accent-soft);
-  color: var(--accent);
-}
-
-.diff-toolbar-actions .diff-refresh {
-  width: var(--ui-control-height);
-  padding: 0;
 }
 
 .diff-list {
@@ -383,47 +351,6 @@
 .diff-search-button:disabled {
   cursor: not-allowed;
   opacity: 0.45;
-}
-
-.diff-view-toggle {
-  flex: 0 0 auto;
-  display: inline-flex;
-  align-items: center;
-  gap: 2px;
-}
-
-.diff-view-toggle button {
-  min-width: 0;
-  height: var(--ui-control-height);
-  padding: 0 8px;
-  border: none;
-  background: transparent;
-  color: var(--muted);
-  font-size: 12px;
-}
-
-.diff-view-toggle button:hover,
-.diff-view-toggle button.is-active {
-  background: var(--accent-soft);
-  color: var(--text-strong);
-}
-
-.diff-wrap-toggle {
-  flex: 0 0 auto;
-  width: max-content;
-  height: var(--ui-control-height);
-  padding: 0 8px;
-  border-color: transparent;
-  color: var(--muted);
-  background: transparent;
-  font-size: var(--ui-font-size-sm);
-}
-
-.diff-wrap-toggle:hover,
-.diff-wrap-toggle.is-active {
-  border-color: transparent;
-  background: var(--accent-soft);
-  color: var(--text-strong);
 }
 
 .diff-file-section {

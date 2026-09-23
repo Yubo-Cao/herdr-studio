@@ -48,6 +48,7 @@ import { agentClass } from "../utils";
 import { shouldShowAgentStatusLabel } from "./agentSession";
 import { AgentStatusIcon } from "./AgentStatusIcon";
 import { Button } from "./ui/Button";
+import { IconButton } from "./ui/IconButton";
 import { Token } from "./ui/Token";
 import {
   type CSSProperties,
@@ -3460,55 +3461,46 @@ export function TerminalView({
           <div className="terminal-pane-toolbar" aria-label="Pane actions">
             {!paneZoomed ? (
               <>
-                <button
-                  type="button"
+                <IconButton
                   className="terminal-pane-action"
                   disabled={control.access.viewOnly}
-                  title="Split pane right"
-                  aria-label="Split pane right"
+                  label="Split pane right"
                   onPointerDown={preventPaneActionFocus}
                   onClick={() => store.splitPane(pane.pane_id, "right")}
-                >
-                  <Columns2 size={14} />
-                </button>
-                <button
-                  type="button"
+                  icon={<Columns2 size={14} />}
+                />
+                <IconButton
                   className="terminal-pane-action"
                   disabled={control.access.viewOnly}
-                  title="Split pane down"
-                  aria-label="Split pane down"
+                  label="Split pane down"
                   onPointerDown={preventPaneActionFocus}
                   onClick={() => store.splitPane(pane.pane_id, "down")}
-                >
-                  <Rows2 size={14} />
-                </button>
+                  icon={<Rows2 size={14} />}
+                />
               </>
             ) : null}
             {canClosePane || paneZoomed ? (
-              <button
-                type="button"
+              <IconButton
                 className="terminal-pane-action"
                 disabled={control.access.viewOnly}
-                title={paneZoomed ? "Restore pane" : "Maximize pane"}
-                aria-label={paneZoomed ? "Restore pane" : "Maximize pane"}
+                label={paneZoomed ? "Restore pane" : "Maximize pane"}
                 onPointerDown={preventPaneActionFocus}
                 onClick={() => store.zoomPane(pane.pane_id)}
-              >
-                {paneZoomed ? <Minimize2 size={14} /> : <Maximize2 size={14} />}
-              </button>
+                icon={
+                  paneZoomed ? <Minimize2 size={14} /> : <Maximize2 size={14} />
+                }
+              />
             ) : null}
             {canClosePane ? (
-              <button
-                type="button"
-                className="terminal-pane-action is-danger"
+              <IconButton
+                className="terminal-pane-action"
+                tone="danger"
                 disabled={control.access.viewOnly}
-                title="Close pane"
-                aria-label="Close pane"
+                label="Close pane"
                 onPointerDown={preventPaneActionFocus}
                 onClick={() => setClosePaneRequested(true)}
-              >
-                <X size={14} />
-              </button>
+                icon={<X size={14} />}
+              />
             ) : null}
           </div>
         </div>
