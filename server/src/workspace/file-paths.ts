@@ -1,4 +1,4 @@
-import { relative, sep } from "node:path";
+import { isAbsolute, relative, sep } from "node:path";
 import type { FileExplorerEntry } from "./file-types";
 
 export function sanitizeExplorerPath(value: unknown): string {
@@ -9,6 +9,19 @@ export function sanitizeExplorerPath(value: unknown): string {
     throw new Error("invalid file explorer path");
   }
   return parts.join("/");
+}
+
+/** Filesystem browsing requires an explicit absolute directory on the host. */
+export function sanitizeFilesystemPath(value: unknown): string {
+  const path =
+    typeof value === "string" ? value.trim().replace(/\\/g, "/") : "";
+  if (
+    (!path.startsWith("/") && !/^[a-z]:\//i.test(path)) ||
+    path.includes("\0")
+  ) {
+    throw new Error("filesystem browsing requires an absolute path");
+  }
+  return path;
 }
 
 export function sanitizePreviewPath(value: unknown): string {
@@ -59,10 +72,7 @@ export function relativeExplorerPath(parentPath: string, name: string) {
 
 export function assertInsideRoot(rootReal: string, targetReal: string) {
   const rel = relative(rootReal, targetReal);
-  if (
-    rel &&
-    (rel.startsWith("..") || rel === ".." || rel.startsWith(`..${sep}`))
-  ) {
+  if (rel && (isAbsolute(rel) || rel === ".." || rel.startsWith(`..${sep}`))) {
     throw new Error("file explorer path escaped the workspace checkout");
   }
 }

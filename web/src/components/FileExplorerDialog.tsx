@@ -1,3 +1,4 @@
+import { roamgateLocalStorage } from "../browserStorage";
 import {
   type DragEvent,
   type KeyboardEvent as ReactKeyboardEvent,
@@ -20,15 +21,14 @@ import {
   Search,
   Upload,
 } from "lucide-react";
-import type { ConnectionClient } from "../api";
+import { FilesystemBrowser } from "./FilesystemBrowser";
+import { createFileSearchMatcher } from "../fileSearch";
 import { connectionHttpPath } from "../connectionHttp";
 import { connectionStorageKey } from "../connectionStorage";
 import { downloadFileFromUrl } from "../downloadFile";
-import { gitDiffCode, type GitDiffCode } from "../gitDiffStatus";
 import { lazyWithReload } from "../lazyWithReload";
 import {
   refreshGitDiffSummary,
-  retireGitDiffSummaryResource,
   useGitDiffSummaryState,
 } from "../gitDiffSummaryStore";
 import {
@@ -37,17 +37,13 @@ import {
   subscribeFileExplorerRefresh,
 } from "../fileExplorerRefresh";
 import { store, useStoreSelector } from "../store";
-import {
-  connectionClientScopeKey,
-  useConnectionClient,
-} from "../useConnectionClient";
+import { copyTextFromUserGesture } from "../terminalClipboard";
+import { useConnectionClient } from "../useConnectionClient";
 import type {
   FileExplorerEntry,
   FileExplorerList,
   FilePreview,
   GitDiffEntry,
-  GitDiffKind,
-  GitDiffSummary,
 } from "../types";
 import { CloseButton } from "./CloseButton";
 import { ConfirmDialog } from "./ModalDialogs";
@@ -61,6 +57,33 @@ import type {
   FilePreviewSelectionMeta,
 } from "./FilePreviewContent";
 
+import {
+  workspaceName,
+  displaySize,
+  absolutePath,
+  initialWorkspacePath,
+  type FileExplorerCache,
+  FILE_SHOW_HIDDEN_PREFIX,
+  explorerRuntimeContextKey,
+  explorerCacheKey,
+  advanceExplorerCacheRevision,
+  readExplorerCache,
+  writeExplorerCache,
+  filePreviewCacheKey,
+  readCachedPreview,
+  invalidateFilePreviewCache,
+  parentDirectoryPaths,
+  parentDirectoryPath,
+  directoryPaths,
+  isWorkspaceRelativePath,
+  buildGitStatusMaps,
+  requestFilePreview,
+  uploadExplorerFile,
+  deleteExplorerEntry,
+  isExplorerDirectoryEntry,
+} from "./fileExplorerResources";
+import "./FileExplorerDialog.css";
+
 const FilePreviewContent = lazyWithReload("file-preview", () =>
   import("./FilePreviewContent").then((module) => ({
     default: module.FilePreviewContent,
@@ -70,702 +93,9 @@ const FilePreviewContent = lazyWithReload("file-preview", () =>
 const LONG_PRESS_MS = 550;
 const LONG_PRESS_MOVE_PX = 10;
 
-function workspaceName(workspace?: { label?: string; workspace_id?: string }) {
-  return workspace?.label || workspace?.workspace_id || "";
-}
-
-export function isExplorerDirectoryEntry(entry: FileExplorerEntry) {
-  return (
-    entry.type === "directory" ||
-    (entry.type === "symlink" &&
-      entry.symlink_status !== "broken" &&
-      entry.symlink_target_type === "directory")
-  );
-}
-
-function displaySize(entry: FileExplorerEntry) {
-  if (isExplorerDirectoryEntry(entry)) return "";
-  if (entry.size < 1024) return `${entry.size} B`;
-  if (entry.size < 1024 * 1024) return `${Math.round(entry.size / 1024)} KB`;
-  return `${(entry.size / 1024 / 1024).toFixed(1)} MB`;
-}
-
-function absolutePath(root: string, entry: FileExplorerEntry) {
-  return `${root.replace(/\/+$/, "")}/${entry.path}`;
-}
-
-function initialWorkspacePath(workspace?: {
-  worktree?: { checkout_path: string };
-  cwd?: string;
-}) {
-  return workspace?.worktree?.checkout_path ?? workspace?.cwd ?? "";
-}
-
-type FileExplorerCache = {
-  search: string;
-  rootInfo: FileExplorerList | null;
-  children: Record<string, FileExplorerEntry[]>;
-  expanded: Set<string>;
-  error: string | null;
-};
-
-type FileGitStatus = {
-  label: string;
-  title: string;
-  tone: string;
-  priority: number;
-  count?: number;
-  entry?: GitDiffEntry;
-  entries?: GitDiffEntry[];
-  codes: GitDiffCode[];
-};
-
-const explorerCache = new Map<string, FileExplorerCache>();
-const explorerCacheRevisions = new Map<string, number>();
-const explorerPrefetches = new Map<string, Promise<void>>();
-const previewCache = new Map<string, FilePreview>();
-const previewRequests = new Map<string, Promise<FilePreview>>();
-const previewRequestRevisions = new Map<string, number>();
-const MAX_PREVIEW_CACHE_BYTES = 16 * 1024 * 1024;
-let previewCacheBytes = 0;
-let previewResourceRevision = 0;
+export { isExplorerDirectoryEntry };
 const FILE_TREE_INDENT = 10;
 const FILE_TREE_BASE_INDENT = 6;
-const FILE_SHOW_HIDDEN_PREFIX = "fileExplorerShowHidden:";
-
-export function explorerRuntimeContextKey(
-  client: Pick<ConnectionClient, "connectionId" | "generation">,
-  workspaceId?: string,
-  resourceKey = workspaceId,
-) {
-  return connectionClientScopeKey(
-    client,
-    "explorer-runtime",
-    resourceKey ?? "focused",
-    workspaceId ?? "missing",
-  );
-}
-
-export function explorerCacheKey(
-  client: Pick<ConnectionClient, "connectionId" | "generation">,
-  workspaceId?: string,
-  showHidden = false,
-  resourceKey = workspaceId,
-) {
-  return connectionClientScopeKey(
-    client,
-    "explorer",
-    resourceKey ?? "focused",
-    showHidden,
-  );
-}
-
-function explorerCacheRevision(key: string): number {
-  return explorerCacheRevisions.get(key) ?? 0;
-}
-
-function advanceExplorerCacheRevision(key: string): number {
-  const next = explorerCacheRevision(key) + 1;
-  explorerCacheRevisions.set(key, next);
-  explorerPrefetches.delete(key);
-  return next;
-}
-
-function retireExplorerCache(key: string) {
-  advanceExplorerCacheRevision(key);
-  explorerCache.delete(key);
-}
-
-export function clearFileExplorerResourceCache(
-  client: Pick<ConnectionClient, "connectionId" | "generation">,
-  resourceKey: string,
-  storage: Pick<Storage, "removeItem"> = localStorage,
-) {
-  for (const showHidden of [false, true]) {
-    const key = explorerCacheKey(client, undefined, showHidden, resourceKey);
-    retireExplorerCache(key);
-  }
-  retireGitDiffSummaryResource(client, resourceKey);
-  storage.removeItem(
-    connectionStorageKey(
-      client.connectionId,
-      `${FILE_SHOW_HIDDEN_PREFIX}${resourceKey}`,
-    ),
-  );
-}
-
-function emptyExplorerCache(): FileExplorerCache {
-  return {
-    search: "",
-    rootInfo: null,
-    children: {},
-    expanded: new Set([""]),
-    error: null,
-  };
-}
-
-function readExplorerCache(
-  client: Pick<ConnectionClient, "connectionId" | "generation">,
-  workspaceId?: string,
-  showHidden = false,
-  resourceKey = workspaceId,
-) {
-  const key = explorerCacheKey(client, workspaceId, showHidden, resourceKey);
-  const cached = explorerCache.get(key);
-  if (cached) {
-    return {
-      ...cached,
-      children: { ...cached.children },
-      expanded: new Set(cached.expanded),
-    };
-  }
-  const next = emptyExplorerCache();
-  explorerCache.set(key, {
-    ...next,
-    children: { ...next.children },
-    expanded: new Set(next.expanded),
-  });
-  return next;
-}
-
-function writeExplorerCache(
-  client: Pick<ConnectionClient, "connectionId" | "generation">,
-  workspaceId: string | undefined,
-  showHidden: boolean,
-  patch: Partial<FileExplorerCache>,
-  resourceKey = workspaceId,
-) {
-  const key = explorerCacheKey(client, workspaceId, showHidden, resourceKey);
-  const current = explorerCache.get(key) ?? emptyExplorerCache();
-  explorerCache.set(key, {
-    ...current,
-    ...patch,
-    children: patch.children ? { ...patch.children } : { ...current.children },
-    expanded: patch.expanded
-      ? new Set(patch.expanded)
-      : new Set(current.expanded),
-  });
-}
-
-export function filePreviewCacheKey(
-  client: Pick<ConnectionClient, "connectionId" | "generation">,
-  workspaceId: string | undefined,
-  path: string,
-) {
-  return connectionClientScopeKey(
-    client,
-    "preview",
-    workspaceId ?? "focused",
-    path,
-  );
-}
-
-function estimatedPreviewBytes(preview: FilePreview) {
-  return (
-    ((preview.text?.length ?? 0) + (preview.image_data_url?.length ?? 0)) * 2 +
-    256
-  );
-}
-
-function readCachedPreview(key: string) {
-  const preview = previewCache.get(key);
-  if (!preview) return undefined;
-  previewCache.delete(key);
-  previewCache.set(key, preview);
-  return preview;
-}
-
-function removeCachedPreview(key: string, retireRequest = false) {
-  const existing = previewCache.get(key);
-  if (existing) {
-    previewCacheBytes = Math.max(
-      0,
-      previewCacheBytes - estimatedPreviewBytes(existing),
-    );
-  }
-  previewCache.delete(key);
-  if (retireRequest) {
-    const running = previewRequests.has(key);
-    previewRequests.delete(key);
-    if (running) {
-      previewRequestRevisions.set(
-        key,
-        (previewRequestRevisions.get(key) ?? 0) + 1,
-      );
-    } else {
-      previewRequestRevisions.delete(key);
-    }
-  } else if (!previewRequests.has(key)) {
-    previewRequestRevisions.delete(key);
-  }
-}
-
-function previewCacheKeyParts(key: string) {
-  try {
-    const parts = JSON.parse(key) as unknown[];
-    if (
-      typeof parts[0] !== "string" ||
-      typeof parts[1] !== "number" ||
-      parts[2] !== "preview" ||
-      typeof parts[3] !== "string" ||
-      typeof parts[4] !== "string"
-    ) {
-      return null;
-    }
-    return {
-      connectionId: parts[0],
-      generation: parts[1],
-      workspaceId: parts[3],
-      path: parts[4],
-    };
-  } catch {
-    return null;
-  }
-}
-
-export function invalidateFilePreviewCache(
-  client: Pick<ConnectionClient, "connectionId" | "generation">,
-  workspaceId: string,
-  path: string,
-  recursive = false,
-) {
-  const keys = new Set([...previewCache.keys(), ...previewRequests.keys()]);
-  for (const key of keys) {
-    const parts = previewCacheKeyParts(key);
-    if (
-      !parts ||
-      parts.connectionId !== client.connectionId ||
-      parts.generation !== client.generation ||
-      parts.workspaceId !== workspaceId
-    ) {
-      continue;
-    }
-    if (
-      parts.path === path ||
-      (recursive && parts.path.startsWith(`${path}/`))
-    ) {
-      removeCachedPreview(key, true);
-    }
-  }
-}
-
-function writeCachedPreview(key: string, preview: FilePreview) {
-  removeCachedPreview(key);
-  previewCache.set(key, preview);
-  previewCacheBytes += estimatedPreviewBytes(preview);
-
-  while (previewCacheBytes > MAX_PREVIEW_CACHE_BYTES && previewCache.size > 1) {
-    const oldestKey = previewCache.keys().next().value;
-    if (typeof oldestKey !== "string") break;
-    removeCachedPreview(oldestKey);
-  }
-}
-
-function parentDirectoryPaths(path: string) {
-  const parts = path.split("/").filter(Boolean);
-  const directories: string[] = [""];
-  for (let i = 1; i < parts.length; i += 1) {
-    directories.push(parts.slice(0, i).join("/"));
-  }
-  return directories;
-}
-
-function parentDirectoryPath(path: string) {
-  const parts = path.split("/").filter(Boolean);
-  parts.pop();
-  return parts.join("/");
-}
-
-function directoryPaths(path: string) {
-  const parts = path.split("/").filter(Boolean);
-  return ["", ...parts.map((_, index) => parts.slice(0, index + 1).join("/"))];
-}
-
-function isWorkspaceRelativePath(path: string) {
-  return Boolean(path) && !path.startsWith("/");
-}
-
-function normalizeDisplayPath(path: string) {
-  return path.replace(/\\/g, "/").replace(/\/+$/, "");
-}
-
-function relativeDisplayPath(from: string, to: string) {
-  const base = normalizeDisplayPath(from);
-  const target = normalizeDisplayPath(to);
-  if (!base || !target) return null;
-  if (base === target) return "";
-  return target.startsWith(`${base}/`) ? target.slice(base.length + 1) : null;
-}
-
-function mapGitPathToExplorerPath(
-  gitRoot: string,
-  explorerRoot: string,
-  gitPath: string,
-) {
-  const normalizedGitPath = normalizeDisplayPath(gitPath).replace(/^\/+/, "");
-  const explorerWithinGit = relativeDisplayPath(gitRoot, explorerRoot);
-  if (explorerWithinGit !== null) {
-    if (!explorerWithinGit) return normalizedGitPath;
-    return normalizedGitPath === explorerWithinGit ||
-      normalizedGitPath.startsWith(`${explorerWithinGit}/`)
-      ? normalizedGitPath.slice(explorerWithinGit.length).replace(/^\/+/, "")
-      : null;
-  }
-  const gitWithinExplorer = relativeDisplayPath(explorerRoot, gitRoot);
-  if (gitWithinExplorer !== null) {
-    return gitWithinExplorer
-      ? `${gitWithinExplorer}/${normalizedGitPath}`
-      : normalizedGitPath;
-  }
-  return normalizedGitPath;
-}
-
-function gitStatusTone(entry: Pick<GitDiffEntry, "kind" | "status">) {
-  if (entry.kind === "conflicted") return "conflict";
-  if (entry.kind === "untracked") return "untracked";
-  switch (entry.status) {
-    case "added":
-      return "added";
-    case "deleted":
-      return "deleted";
-    case "renamed":
-    case "copied":
-      return "added";
-    case "type changed":
-      return "modified";
-    default:
-      return entry.kind === "staged" ? "staged" : "modified";
-  }
-}
-
-function gitStatusLabel(entry: Pick<GitDiffEntry, "kind" | "status">) {
-  if (entry.kind === "conflicted") return "Conflict";
-  if (entry.kind === "untracked") return "Untracked";
-  switch (entry.status) {
-    case "added":
-      return "Added";
-    case "deleted":
-      return "Deleted";
-    case "renamed":
-      return "Renamed";
-    case "copied":
-      return "Copied";
-    case "type changed":
-      return "Type changed";
-    case "modified":
-    default:
-      return "Modified";
-  }
-}
-
-function gitStatusPriority(entry: Pick<GitDiffEntry, "kind" | "status">) {
-  if (entry.kind === "conflicted") return 100;
-  if (entry.status === "deleted") return 90;
-  if (entry.kind === "untracked") return 80;
-  if (entry.status === "added") return 70;
-  if (entry.kind === "staged") return 60;
-  return 50;
-}
-
-function gitKindLabel(kind: GitDiffKind) {
-  switch (kind) {
-    case "staged":
-      return "staged";
-    case "unstaged":
-      return "unstaged";
-    case "untracked":
-      return "untracked";
-    case "conflicted":
-      return "conflicted";
-    case "branch":
-      return "branch";
-    default:
-      return kind;
-  }
-}
-
-export function buildGitStatusMaps(
-  summary: GitDiffSummary | null,
-  explorerRoot?: string,
-) {
-  const fileStatuses = new Map<string, FileGitStatus>();
-  const directoryChangedFiles = new Map<string, Set<string>>();
-  const directoryCodes = new Map<string, Set<GitDiffCode>>();
-  if (!summary || !explorerRoot)
-    return {
-      fileStatuses,
-      directoryStatuses: new Map<string, FileGitStatus>(),
-    };
-
-  const descriptions = new Map<string, string[]>();
-  for (const entry of summary.entries) {
-    const mappedPath = mapGitPathToExplorerPath(
-      summary.root,
-      explorerRoot,
-      entry.path,
-    );
-    if (!mappedPath) continue;
-    const existing = fileStatuses.get(mappedPath);
-    const codes = Array.from(
-      new Set([...(existing?.codes ?? []), gitDiffCode(entry)]),
-    ).sort();
-    const entries = [...(existing?.entries ?? []), entry];
-    const next: FileGitStatus = {
-      label: gitStatusLabel(entry),
-      title: `${gitKindLabel(entry.kind)} ${entry.status}`,
-      tone: gitStatusTone(entry),
-      priority: gitStatusPriority(entry),
-      entry,
-      entries,
-      codes,
-    };
-    const currentDescriptions = descriptions.get(mappedPath) ?? [];
-    currentDescriptions.push(next.title);
-    descriptions.set(mappedPath, currentDescriptions);
-    const preferred =
-      !existing || next.priority > existing.priority ? next : existing;
-    const orderedEntries = [
-      ...entries.filter((candidate) => candidate !== preferred.entry),
-      ...(preferred.entry ? [preferred.entry] : []),
-    ];
-    if (preferred === next) {
-      fileStatuses.set(mappedPath, { ...next, entries: orderedEntries });
-    } else if (existing) {
-      existing.codes = codes;
-      existing.entries = orderedEntries;
-    }
-
-    const parts = mappedPath.split("/").filter(Boolean);
-    for (let i = 0; i < parts.length - 1; i += 1) {
-      const directory = parts.slice(0, i + 1).join("/");
-      const changedFiles =
-        directoryChangedFiles.get(directory) ?? new Set<string>();
-      changedFiles.add(mappedPath);
-      directoryChangedFiles.set(directory, changedFiles);
-      const codesBelow =
-        directoryCodes.get(directory) ?? new Set<GitDiffCode>();
-      codesBelow.add(gitDiffCode(entry));
-      directoryCodes.set(directory, codesBelow);
-    }
-  }
-
-  for (const [path, status] of fileStatuses) {
-    const statusDescriptions = descriptions.get(path);
-    if (statusDescriptions?.length) {
-      status.title = Array.from(new Set(statusDescriptions)).join(", ");
-    }
-  }
-
-  const directoryStatuses = new Map<string, FileGitStatus>();
-  for (const [path, changedFiles] of directoryChangedFiles) {
-    const count = changedFiles.size;
-    directoryStatuses.set(path, {
-      label: `${count} ${count === 1 ? "change" : "changes"}`,
-      title: `${count} changed ${count === 1 ? "file" : "files"} below this directory`,
-      tone: "directory",
-      priority: 10,
-      count,
-      codes: Array.from(directoryCodes.get(path) ?? []).sort(),
-    });
-  }
-
-  return { fileStatuses, directoryStatuses };
-}
-
-export function requestFilePreview(
-  workspaceId: string,
-  path: string,
-  options: { refresh?: boolean; client: ConnectionClient },
-) {
-  const client = options.client;
-  if (!client.isCurrent()) {
-    return Promise.reject(new Error("connection changed during file preview"));
-  }
-  const key = filePreviewCacheKey(client, workspaceId, path);
-  const cached = readCachedPreview(key);
-  if (cached && !options.refresh) return Promise.resolve(cached);
-  const running = previewRequests.get(key);
-  if (running) return running;
-
-  const revision = (previewRequestRevisions.get(key) ?? 0) + 1;
-  previewRequestRevisions.set(key, revision);
-  const task = client.call("file.read", {
-    workspace_id: workspaceId,
-    path,
-  }) as Promise<FilePreview>;
-  const scopedTask = task
-    .then((preview) => {
-      if (!client.isCurrent()) {
-        throw new Error("connection changed during file preview");
-      }
-      if (previewRequestRevisions.get(key) !== revision) {
-        throw new Error("file preview request superseded");
-      }
-      previewResourceRevision += 1;
-      const versionedPreview = {
-        ...preview,
-        resource_revision: previewResourceRevision,
-      };
-      writeCachedPreview(key, versionedPreview);
-      return versionedPreview;
-    })
-    .finally(() => {
-      if (previewRequests.get(key) === scopedTask) {
-        previewRequests.delete(key);
-      }
-      if (!previewCache.has(key) && !previewRequests.has(key)) {
-        previewRequestRevisions.delete(key);
-      }
-    });
-  previewRequests.set(key, scopedTask);
-  return scopedTask;
-}
-
-async function uploadExplorerFile(
-  client: ConnectionClient,
-  workspaceId: string,
-  directory: string,
-  file: File,
-) {
-  if (!client.isCurrent()) throw new Error("connection changed during upload");
-  const url = new URL(
-    connectionHttpPath(
-      client.connectionId,
-      "/file/upload",
-      client.serverRuntimeGeneration,
-    ),
-    window.location.origin,
-  );
-  if (url.origin !== window.location.origin)
-    throw new Error("invalid upload origin");
-  url.searchParams.set("workspace_id", workspaceId);
-  url.searchParams.set("directory", directory);
-  url.searchParams.set("filename", file.name);
-  const response = await fetch(url, {
-    method: "POST",
-    body: file,
-  });
-  const text = await response.text();
-  if (!client.isCurrent()) throw new Error("connection changed during upload");
-  let payload: any;
-  try {
-    payload = text ? JSON.parse(text) : {};
-  } catch {
-    payload = { error: text };
-  }
-  if (!response.ok) {
-    throw new Error(
-      payload?.error || text || `upload failed ${response.status}`,
-    );
-  }
-  return payload as {
-    path: string;
-    size: number;
-    overwritten: boolean;
-  };
-}
-
-async function deleteExplorerEntry(
-  client: ConnectionClient,
-  workspaceId: string,
-  path: string,
-) {
-  if (!client.isCurrent()) throw new Error("connection changed during delete");
-  const url = new URL(
-    connectionHttpPath(
-      client.connectionId,
-      "/file/delete",
-      client.serverRuntimeGeneration,
-    ),
-    window.location.origin,
-  );
-  if (url.origin !== window.location.origin)
-    throw new Error("invalid delete origin");
-  url.searchParams.set("workspace_id", workspaceId);
-  url.searchParams.set("path", path);
-  const response = await fetch(url, { method: "POST" });
-  const text = await response.text();
-  if (!client.isCurrent()) throw new Error("connection changed during delete");
-  let payload: any;
-  try {
-    payload = text ? JSON.parse(text) : {};
-  } catch {
-    payload = { error: text };
-  }
-  if (!response.ok) {
-    throw new Error(
-      payload?.error || text || `delete failed ${response.status}`,
-    );
-  }
-  return payload as {
-    path: string;
-    type: FileExplorerEntry["type"];
-  };
-}
-
-export function prefetchFileExplorerWorkspace(
-  workspaceId: string | undefined,
-  client: ConnectionClient,
-  resourceKey = workspaceId,
-) {
-  if (!workspaceId || !client.isCurrent()) return Promise.resolve();
-  const showHidden = false;
-  const key = explorerCacheKey(client, workspaceId, showHidden, resourceKey);
-  const running = explorerPrefetches.get(key);
-  if (running) return running;
-  const revision = explorerCacheRevision(key);
-
-  const task = (async () => {
-    const cached = readExplorerCache(
-      client,
-      workspaceId,
-      showHidden,
-      resourceKey,
-    );
-    const paths = Array.from(cached.expanded);
-    if (!paths.includes("")) paths.unshift("");
-
-    for (const path of paths) {
-      const list = (await client.call("file.list", {
-        workspace_id: workspaceId,
-        path,
-        show_hidden: showHidden,
-      })) as FileExplorerList;
-      if (!client.isCurrent() || explorerCacheRevision(key) !== revision) {
-        return;
-      }
-      const latest = readExplorerCache(
-        client,
-        workspaceId,
-        showHidden,
-        resourceKey,
-      );
-      writeExplorerCache(
-        client,
-        workspaceId,
-        showHidden,
-        {
-          rootInfo: list,
-          children: { ...latest.children, [path]: list.entries },
-          expanded: latest.expanded,
-          error: null,
-        },
-        resourceKey,
-      );
-    }
-  })()
-    .catch(() => {
-      // Background warmups should never surface transient bridge errors.
-    })
-    .finally(() => {
-      if (explorerPrefetches.get(key) === task) {
-        explorerPrefetches.delete(key);
-      }
-    });
-
-  explorerPrefetches.set(key, task);
-  return task;
-}
 
 export function FileExplorerDialog({
   open,
@@ -804,6 +134,7 @@ export function FileExplorerPanel({
   resourceKey,
   initialDirectory,
   activePath,
+  previewRequestRef,
   keyboardActive = false,
   onClose,
   onPreviewChange,
@@ -814,6 +145,7 @@ export function FileExplorerPanel({
   resourceKey?: string;
   initialDirectory?: string;
   activePath?: string;
+  previewRequestRef?: React.MutableRefObject<number>;
   keyboardActive?: boolean;
   onClose: () => void;
   onPreviewChange?: (
@@ -835,6 +167,7 @@ export function FileExplorerPanel({
         showCloseButton={false}
         previewPlacement="external"
         activePath={activePath}
+        previewRequestRef={previewRequestRef}
         keyboardActive={keyboardActive}
         onPreviewChange={onPreviewChange}
         onActiveDiffEntriesChange={onActiveDiffEntriesChange}
@@ -866,7 +199,7 @@ function FileExplorerEntryMenu({
   onClose: () => void;
   onDownload: (entry: FileExplorerEntry) => void;
   onCopy: (entry: FileExplorerEntry) => void;
-  onDelete: (entry: FileExplorerEntry) => void;
+  onDelete?: (entry: FileExplorerEntry) => void;
 }) {
   const ref = useRef<HTMLDivElement>(null);
   const onCloseRef = useRef(onClose);
@@ -935,16 +268,20 @@ function FileExplorerEntryMenu({
       label: "Copy absolute path",
       action: () => onCopy(entry),
     },
-    {
-      label:
-        entry.type === "symlink"
-          ? "Delete symlink"
-          : isDirectory
-            ? "Delete directory"
-            : "Delete file",
-      danger: true,
-      action: () => onDelete(entry),
-    },
+    ...(onDelete
+      ? [
+          {
+            label:
+              entry.type === "symlink"
+                ? "Delete symlink"
+                : isDirectory
+                  ? "Delete directory"
+                  : "Delete file",
+            danger: true,
+            action: () => onDelete(entry),
+          },
+        ]
+      : []),
   ];
   const menuMargin = 8;
   const menuWidth = ENTRY_MENU_WIDTH;
@@ -989,6 +326,7 @@ function FileExplorerContent({
   onClose,
   showCloseButton,
   previewPlacement = "inline",
+  previewRequestRef,
   activePath,
   keyboardActive = false,
   onPreviewChange,
@@ -1001,6 +339,7 @@ function FileExplorerContent({
   onClose: () => void;
   showCloseButton: boolean;
   previewPlacement?: "inline" | "external";
+  previewRequestRef?: React.MutableRefObject<number>;
   activePath?: string;
   keyboardActive?: boolean;
   onPreviewChange?: (
@@ -1022,7 +361,7 @@ function FileExplorerContent({
     `${FILE_SHOW_HIDDEN_PREFIX}${cacheResourceKey ?? "focused"}`,
   );
   const [showHidden, setShowHidden] = useState(
-    () => localStorage.getItem(showHiddenStorageKey) === "true",
+    () => roamgateLocalStorage.getItem(showHiddenStorageKey) === "true",
   );
   const [cache, setCache] = useState<FileExplorerCache>(() =>
     readExplorerCache(
@@ -1053,6 +392,7 @@ function FileExplorerContent({
   const [preview, setPreview] = useState<FilePreview | null>(null);
   const [previewLoading, setPreviewLoading] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
+  const [previewFragment, setPreviewFragment] = useState<string>();
   const [focusedTreePath, setFocusedTreePath] = useState<string | null>(
     activePath ?? null,
   );
@@ -1062,6 +402,7 @@ function FileExplorerContent({
   const longPressTriggered = useRef(false);
   const previewRequestKeyRef = useRef<string | null>(null);
   const previewRequestSequenceRef = useRef(0);
+  const navigationRequestRef = previewRequestRef ?? previewRequestSequenceRef;
   const previousCacheResourceKeyRef = useRef<string | undefined>(undefined);
   const fileTreeRef = useRef<HTMLDivElement | null>(null);
   const treeAutoFocusAppliedRef = useRef(false);
@@ -1070,6 +411,13 @@ function FileExplorerContent({
     cacheWorkspaceId,
     cacheResourceKey,
   );
+  const [filesystemContext, setFilesystemContext] = useState<string | null>(
+    null,
+  );
+  const filesystem = filesystemContext === runtimeContext;
+  useEffect(() => {
+    setFilesystemContext(null);
+  }, [runtimeContext]);
   const runtimeContextRef = useRef(runtimeContext);
   runtimeContextRef.current = runtimeContext;
   const { search, rootInfo, children, expanded, error } = cache;
@@ -1100,7 +448,7 @@ function FileExplorerContent({
     connectionClient.isCurrent() && runtimeContextRef.current === context;
 
   useEffect(() => {
-    localStorage.setItem(showHiddenStorageKey, String(showHidden));
+    roamgateLocalStorage.setItem(showHiddenStorageKey, String(showHidden));
   }, [showHidden, showHiddenStorageKey]);
 
   useEffect(() => {
@@ -1470,14 +818,7 @@ function FileExplorerContent({
     [children],
   );
   const searchEntries = useMemo(
-    () =>
-      query
-        ? loadedEntries.filter((entry) =>
-            [entry.name, entry.path].some((value) =>
-              value.toLowerCase().includes(query),
-            ),
-          )
-        : [],
+    () => (query ? loadedEntries.filter(createFileSearchMatcher(query)) : []),
     [loadedEntries, query],
   );
 
@@ -1558,66 +899,68 @@ function FileExplorerContent({
     updateCache({ expanded: next });
   };
 
-  const loadPreview = async (entry: FileExplorerEntry) => {
+  const loadPreview = async (
+    entry: FileExplorerEntry,
+    fragment?: string,
+    refresh = false,
+  ) => {
     if (!workspace?.workspace_id || isExplorerDirectoryEntry(entry)) return;
     onActiveDiffEntriesChange?.(
       gitStatusMaps.fileStatuses.get(entry.path)?.entries ?? [],
     );
     const workspaceId = workspace.workspace_id;
     const key = filePreviewCacheKey(connectionClient, workspaceId, entry.path);
-    const requestKey = `${key}:${++previewRequestSequenceRef.current}`;
+    // Links, quick-open and tree selections must retire each other at start,
+    // before either the cached preview or a deferred response can be published.
+    const requestId = ++navigationRequestRef.current;
+    const requestKey = `${key}:${requestId}`;
     previewRequestKeyRef.current = requestKey;
+    const requestIsCurrent = () =>
+      connectionClient.isCurrent() &&
+      navigationRequestRef.current === requestId &&
+      previewRequestKeyRef.current === requestKey;
     setPreviewEntry(entry);
+    setPreviewFragment(fragment);
     setPreviewError(null);
-    const cached = readCachedPreview(key);
+    const cached = refresh ? null : readCachedPreview(key);
     if (cached) {
       setPreview(cached);
       setPreviewLoading(false);
       emitPreviewChange(
-        { entry, preview: cached, loading: false, error: null },
+        { entry, fragment, preview: cached, loading: false, error: null },
         { userInitiated: true },
       );
     } else {
       setPreview(null);
       setPreviewLoading(true);
       emitPreviewChange(
-        { entry, preview: null, loading: true, error: null },
+        { entry, fragment, preview: null, loading: true, error: null },
         { userInitiated: true },
       );
     }
     try {
       const next = await requestFilePreview(workspaceId, entry.path, {
-        refresh: Boolean(cached),
+        refresh: refresh || Boolean(cached),
         client: connectionClient,
       });
-      if (
-        connectionClient.isCurrent() &&
-        previewRequestKeyRef.current === requestKey
-      ) {
+      if (requestIsCurrent()) {
         setPreview(next);
         emitPreviewChange(
-          { entry, preview: next, loading: false, error: null },
+          { entry, fragment, preview: next, loading: false, error: null },
           { userInitiated: true },
         );
       }
     } catch (e) {
-      if (
-        connectionClient.isCurrent() &&
-        previewRequestKeyRef.current === requestKey &&
-        !cached
-      ) {
+      if (requestIsCurrent() && !cached) {
         const message = (e as Error).message;
         setPreviewError(message);
         emitPreviewChange(
-          { entry, preview: null, loading: false, error: message },
+          { entry, fragment, preview: null, loading: false, error: message },
           { userInitiated: true },
         );
       }
     } finally {
-      if (
-        connectionClient.isCurrent() &&
-        previewRequestKeyRef.current === requestKey
-      ) {
+      if (requestIsCurrent()) {
         setPreviewLoading(false);
       }
     }
@@ -1627,7 +970,7 @@ function FileExplorerContent({
     const root = rootInfo?.root || initialWorkspacePath(workspace);
     const value = root ? absolutePath(root, entry) : entry.path;
     try {
-      await navigator.clipboard.writeText(value);
+      await copyTextFromUserGesture(value);
       if (!connectionClient.isCurrent()) return;
       store.notify({
         kind: "success",
@@ -1658,6 +1001,8 @@ function FileExplorerContent({
     );
     url.searchParams.set("workspace_id", workspace.workspace_id);
     url.searchParams.set("path", entry.path);
+    if (/^(?:\/|[a-z]:[\\/])/i.test(entry.path))
+      url.searchParams.set("scope", "filesystem");
     const filename = isExplorerDirectoryEntry(entry)
       ? `${entry.name || "download"}.tar.gz`
       : entry.name || "download";
@@ -1734,6 +1079,7 @@ function FileExplorerContent({
       isExplorerDirectoryEntry(entry),
     );
     if (!deletedSelection) return;
+    navigationRequestRef.current += 1;
     setPreviewEntry(null);
     setPreview(null);
     setPreviewLoading(false);
@@ -2283,97 +1629,143 @@ function FileExplorerContent({
 
       <div className="file-explorer-content">
         <div className="file-explorer-browser">
-          <div className="file-explorer-toolbar">
-            <label className="file-search">
-              <Search size={14} />
-              <input
-                value={search}
-                onChange={(e) => updateCache({ search: e.currentTarget.value })}
-                placeholder="Search loaded files"
-              />
-            </label>
-            <label className="file-hidden-toggle">
-              <input
-                type="checkbox"
-                checked={showHidden}
-                onChange={(e) => setShowHidden(e.currentTarget.checked)}
-              />
-              Hidden
-            </label>
-            <button
-              type="button"
-              className="ghost file-action"
-              title="Refresh"
-              disabled={!workspace}
-              onClick={() => {
-                const pathsToRefresh = Array.from(expanded);
-                if (!pathsToRefresh.includes("")) pathsToRefresh.unshift("");
-                for (const path of pathsToRefresh) {
-                  void loadDirectory(path, true);
-                }
-                void loadGitStatus(true);
-                if (previewEntry) void loadPreview(previewEntry);
+          {filesystem && workspace ? (
+            <FilesystemBrowser
+              key={runtimeContext}
+              client={connectionClient}
+              workspaceId={workspace.workspace_id}
+              initialPath={rootInfo?.root || initialWorkspacePath(workspace)}
+              showHidden={showHidden}
+              onShowHiddenChange={setShowHidden}
+              activePath={activePath ?? previewEntry?.path}
+              onSelect={(entry) => {
+                void loadPreview(entry);
               }}
-            >
-              <RefreshCw
-                className={gitSummaryState.loading ? "is-spinning" : ""}
-                size={15}
-              />
-            </button>
-          </div>
-
-          {error ? <p className="modal-error">{error}</p> : null}
-          {rootInfo?.truncated ? (
-            <p className="modal-error">
-              This directory is truncated at 1000 entries.
-            </p>
-          ) : null}
-
-          <div
-            ref={fileTreeRef}
-            className={`file-tree ${dropTargetPath === "" ? "is-drop-target" : ""}`}
-            role="tree"
-            onFocusCapture={() => setTreeHasFocus(true)}
-            onBlurCapture={(event) => {
-              if (!event.currentTarget.contains(event.relatedTarget as Node)) {
-                setTreeHasFocus(false);
-              }
-            }}
-            onDragOver={handleRootDragOver}
-            onDragLeave={(e) => {
-              if (!e.currentTarget.contains(e.relatedTarget as Node | null)) {
-                setDropTargetPath(null);
-              }
-            }}
-            onDrop={handleRootDrop}
-          >
-            {uploadingPaths.has("") ? (
-              <div className="file-upload-status">
-                <span className="row-spinner" />
-                Uploading to workspace root
+              onMenu={openEntryMenu}
+              onExit={() => {
+                setEntryMenu(null);
+                setFilesystemContext(null);
+              }}
+            />
+          ) : (
+            <>
+              <div className="file-explorer-toolbar">
+                <label className="file-search">
+                  <Search size={14} />
+                  <input
+                    value={search}
+                    onChange={(e) =>
+                      updateCache({ search: e.currentTarget.value })
+                    }
+                    placeholder="Search loaded files"
+                    aria-label="Search loaded files"
+                    title="Search loaded names or paths. Globs: r*md, ?.txt, **/*.md, *.{md,txt}"
+                    maxLength={512}
+                  />
+                </label>
+                <label className="file-hidden-toggle">
+                  <input
+                    type="checkbox"
+                    checked={showHidden}
+                    onChange={(e) => setShowHidden(e.currentTarget.checked)}
+                  />
+                  Hidden
+                </label>
+                <button
+                  type="button"
+                  className="ghost file-action"
+                  aria-label="Browse filesystem"
+                  title="Browse filesystem: allow navigation outside this workspace"
+                  disabled={!workspace}
+                  onClick={() => {
+                    setEntryMenu(null);
+                    setPendingDeleteEntry(null);
+                    setFilesystemContext(runtimeContext);
+                  }}
+                >
+                  <FolderOpen size={15} />
+                </button>
+                <button
+                  type="button"
+                  className="ghost file-action"
+                  title="Refresh"
+                  disabled={!workspace}
+                  onClick={() => {
+                    const pathsToRefresh = Array.from(expanded);
+                    if (!pathsToRefresh.includes(""))
+                      pathsToRefresh.unshift("");
+                    for (const path of pathsToRefresh) {
+                      void loadDirectory(path, true);
+                    }
+                    void loadGitStatus(true);
+                    if (previewEntry) void loadPreview(previewEntry);
+                  }}
+                >
+                  <RefreshCw
+                    className={gitSummaryState.loading ? "is-spinning" : ""}
+                    size={15}
+                  />
+                </button>
               </div>
-            ) : dropTargetPath === "" ? (
-              <div className="file-upload-status">
-                <Upload size={14} />
-                Drop files to upload to workspace root
+
+              {error ? <p className="modal-error">{error}</p> : null}
+              {rootInfo?.truncated ? (
+                <p className="modal-error">
+                  This directory is truncated at 1000 entries.
+                </p>
+              ) : null}
+
+              <div
+                ref={fileTreeRef}
+                className={`file-tree ${dropTargetPath === "" ? "is-drop-target" : ""}`}
+                role="tree"
+                onFocusCapture={() => setTreeHasFocus(true)}
+                onBlurCapture={(event) => {
+                  if (
+                    !event.currentTarget.contains(event.relatedTarget as Node)
+                  ) {
+                    setTreeHasFocus(false);
+                  }
+                }}
+                onDragOver={handleRootDragOver}
+                onDragLeave={(e) => {
+                  if (
+                    !e.currentTarget.contains(e.relatedTarget as Node | null)
+                  ) {
+                    setDropTargetPath(null);
+                  }
+                }}
+                onDrop={handleRootDrop}
+              >
+                {uploadingPaths.has("") ? (
+                  <div className="file-upload-status">
+                    <span className="row-spinner" />
+                    Uploading to workspace root
+                  </div>
+                ) : dropTargetPath === "" ? (
+                  <div className="file-upload-status">
+                    <Upload size={14} />
+                    Drop files to upload to workspace root
+                  </div>
+                ) : null}
+                {query ? (
+                  searchEntries.length ? (
+                    searchEntries.map((entry, index) =>
+                      renderEntry(entry, 0, index === 0),
+                    )
+                  ) : (
+                    <div className="file-row file-row-muted">
+                      No loaded files match.
+                    </div>
+                  )
+                ) : !children[""] && loadingPaths.has("") ? (
+                  renderInitialLoading()
+                ) : (
+                  renderDirectory("", 0)
+                )}
               </div>
-            ) : null}
-            {query ? (
-              searchEntries.length ? (
-                searchEntries.map((entry, index) =>
-                  renderEntry(entry, 0, index === 0),
-                )
-              ) : (
-                <div className="file-row file-row-muted">
-                  No loaded files match.
-                </div>
-              )
-            ) : !children[""] && loadingPaths.has("") ? (
-              renderInitialLoading()
-            ) : (
-              renderDirectory("", 0)
-            )}
-          </div>
+            </>
+          )}
         </div>
         {previewPlacement === "inline" ? (
           <Suspense fallback={<div role="status">Loading preview...</div>}>
@@ -2382,6 +1774,24 @@ function FileExplorerContent({
               preview={preview}
               loading={previewLoading}
               error={previewError}
+              onRefresh={() => {
+                if (previewEntry)
+                  void loadPreview(previewEntry, previewFragment, true);
+              }}
+              fragment={previewFragment}
+              onOpenFile={(path, fragment) =>
+                void loadPreview(
+                  {
+                    name: path.split("/").pop() ?? path,
+                    path,
+                    type: "file",
+                    size: 0,
+                    mtime_ms: 0,
+                    hidden: false,
+                  },
+                  fragment,
+                )
+              }
             />
           </Suspense>
         ) : null}
@@ -2393,7 +1803,7 @@ function FileExplorerContent({
         onCopy={(entry) => {
           void copyEntryPath(entry);
         }}
-        onDelete={setPendingDeleteEntry}
+        onDelete={filesystem ? undefined : setPendingDeleteEntry}
       />
       <ConfirmDialog
         open={!!pendingDeleteEntry}

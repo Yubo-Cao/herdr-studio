@@ -1,3 +1,5 @@
+import type { Pane } from "./types";
+
 export const AGENT_ORDER_STORAGE_KEY = "agentOrder.v1";
 
 const MAX_AGENT_ORDER_ENTRIES = 512;
@@ -114,8 +116,66 @@ export function agentAttentionPriority(status: string): number {
   return index < 0 ? ATTENTION_STATUSES.length - 1 : index;
 }
 
+/** Join server activity metadata; no activity history is tracked in the browser. */
+export function withAgentActivity(
+  panes: readonly Pane[],
+  result: unknown,
+): Pane[] {
+  const agents =
+    result && typeof result === "object" && "agents" in result
+      ? result.agents
+      : null;
+  if (!Array.isArray(agents)) return [...panes];
+  const byPane = new Map<string, Record<string, unknown>>();
+  for (const agent of agents) {
+    if (
+      !agent ||
+      typeof agent !== "object" ||
+      typeof agent.pane_id !== "string"
+    )
+      continue;
+    byPane.set(agent.pane_id, agent);
+  }
+  return panes.map((pane) => {
+    const agent = byPane.get(pane.pane_id);
+    // Done and Idle share Herdr's underlying Idle state and sequence; only
+    // the seen flag changes. The list calls can straddle an acknowledgement.
+    const sameCompletedState =
+      (pane.agent_status === "idle" || pane.agent_status === "done") &&
+      (agent?.agent_status === "idle" || agent?.agent_status === "done");
+    // Still reject metadata from a replacement or an actual state transition.
+    if (
+      !agent ||
+      agent.terminal_id !== pane.terminal_id ||
+      agent.agent !== pane.agent ||
+      (agent.agent_status !== pane.agent_status && !sameCompletedState)
+    )
+      return pane;
+    const sequence = agent.state_change_seq;
+    const activity = agent.last_activity_at;
+    return {
+      ...pane,
+      ...(typeof sequence === "number" &&
+      Number.isSafeInteger(sequence) &&
+      sequence >= 0
+        ? { state_change_seq: sequence }
+        : {}),
+      ...(typeof activity === "number" &&
+      Number.isFinite(activity) &&
+      activity > 0
+        ? { last_activity_at: activity }
+        : {}),
+    };
+  });
+}
+
 export function sortAgentPanes<
-  T extends { pane_id: string; agent_status: string },
+  T extends {
+    pane_id: string;
+    agent_status: string;
+    state_change_seq?: number;
+    last_activity_at?: number;
+  },
 >(
   panes: readonly T[],
   preferredPaneIds: readonly string[],
@@ -124,11 +184,17 @@ export function sortAgentPanes<
   if (sort === "workspace") return [...panes];
   const ordered = orderAgentPanes(panes, preferredPaneIds);
   return sort === "attention"
-    ? ordered.sort(
-        (left, right) =>
+    ? ordered.sort((left, right) => {
+        const priority =
           agentAttentionPriority(left.agent_status) -
-          agentAttentionPriority(right.agent_status),
-      )
+          agentAttentionPriority(right.agent_status);
+        if (priority || left.agent_status.toLowerCase() !== "idle")
+          return priority;
+        return (
+          (right.last_activity_at ?? 0) - (left.last_activity_at ?? 0) ||
+          (right.state_change_seq ?? 0) - (left.state_change_seq ?? 0)
+        );
+      })
     : ordered;
 }
 

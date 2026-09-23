@@ -11,7 +11,7 @@ import {
   isExplorerDirectoryEntry,
   prefetchFileExplorerWorkspace,
   requestFilePreview,
-} from "./FileExplorerDialog";
+} from "./fileExplorerResources";
 
 function preview(label: string): FilePreview {
   return {

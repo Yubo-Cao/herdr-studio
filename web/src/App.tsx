@@ -1,3 +1,27 @@
+import { createPortal } from "react-dom";
+import { listenForTaskNotificationActivation } from "./taskNotifications";
+import { useReviewAnnotationDraft } from "./useReviewAnnotationDraft";
+import {
+  annotationDraftStorageKey,
+  compileReviewFeedback,
+  createReviewAnnotation,
+  moveReviewAnnotation,
+  parseReviewAnnotation,
+  removeDeliveredReviewAnnotations,
+  reanchorDiffReviewAnnotations,
+  reanchorFileReviewAnnotations,
+  reviewAgentPanes,
+  type NewReviewAnnotation,
+  type ReviewAnnotation,
+} from "./annotations";
+import { roamgateLocalStorage } from "./browserStorage";
+import { LAYOUT_CHANGE_EVENT, useLayoutPreferences } from "./layoutPreferences";
+import {
+  shortcutMatches,
+  shortcutTitle,
+  useShortcutPreferences,
+} from "./shortcutPreferences";
+import { SHORTCUT_NUMBERS } from "./shortcutBindings";
 import {
   CheckCircle2,
   ChevronLeft,
@@ -8,6 +32,8 @@ import {
   History,
   Info,
   LoaderCircle,
+  MessageSquareText,
+  Minimize2,
   MoreHorizontal,
   PanelTop,
   SquarePen,
@@ -31,6 +57,8 @@ import {
   normalizeAccentColor,
   normalizeThemePreference,
   normalizeUiScale,
+  normalizeZenMode,
+  serializeZenMode,
   UI_SCALE_DEFAULT,
   type ResolvedTheme,
   resolveSystemTheme,
@@ -55,8 +83,9 @@ import {
   clearFileExplorerResourceCache,
   prefetchFileExplorerWorkspace,
   requestFilePreview,
-} from "./components/FileExplorerDialog";
+} from "./components/fileExplorerResources";
 import { type ActiveFilePreviewSelection } from "./components/FilePreviewContent";
+import { AnnotationPanel } from "./components/AnnotationPanel";
 import { GlobalTooltip } from "./components/GlobalTooltip";
 import { MobileTabSheet } from "./components/MobileTabSheet";
 import { requestClosePane, requestCloseTab, TabBar } from "./components/TabBar";
@@ -91,6 +120,7 @@ import {
   type PaneJumpEntry,
   paneJumpEntries,
   paneJumpTargetId,
+  paneSearchEntries,
 } from "./paneJump";
 import { paneLayoutNeedsSwitcher } from "./paneLayoutSizing";
 import {
@@ -102,17 +132,20 @@ import {
   TASK_NOTIFICATION_ACTIVATE_EVENT,
   type TaskNotificationTarget,
   taskNotificationTargetFromNotice,
+  taskNotificationTargetIsCurrent,
   useStoreSelector,
   WORKTREE_REMOVED_EVENT,
   type WorktreeRemovedTarget,
 } from "./store";
 import { paneShortcutAction } from "./paneShortcuts";
+import { pluginActionShortcut } from "./pluginActionShortcuts";
 import {
   adjacentTabId,
   closeShortcutTarget,
   tabShortcutAction,
 } from "./tabShortcuts";
 import { copyTextFromUserGesture } from "./terminalClipboard";
+import { terminalPasteRequest } from "./terminalPaste";
 import {
   activateTerminalComposerDraftScope,
   readTerminalComposerDraft,
@@ -120,7 +153,7 @@ import {
   terminalComposerDraftKey,
 } from "./terminalComposer";
 import { terminalMountKey } from "./terminalConnection";
-import type { FileExplorerEntry, Pane } from "./types";
+import type { FileExplorerEntry, GitDiffEntry, Pane } from "./types";
 import {
   connectionClientScopeKey,
   useConnectionClient,
@@ -142,11 +175,19 @@ import {
   resourceStateKey,
   sameResourceOwner,
   WORKSPACE_INSPECTOR_REQUEST_EVENT,
+  type ResourceScope,
+  WORKSPACE_ANNOTATION_REQUEST_EVENT,
+  type WorkspaceAnnotationRequest,
   type WorkspaceInspectorRequest,
   type WorkspaceInspectorState,
   writeInspectorPreferences,
   writeResourceFileSelection,
 } from "./workspaceResource";
+import "./styles/layout/app.css";
+import "./styles/layout/topbar.css";
+import "./styles/layout/sidebar.css";
+import "./styles/layout/toast.css";
+import "./styles/layout/mobile-nav.css";
 
 const WorkspaceInspectorHost = lazyWithReload("workspace-inspector", () =>
   import("./components/WorkspaceInspectorHost").then((module) => ({
@@ -160,6 +201,7 @@ const DEFAULT_SIDEBAR = 284;
 const THEME_KEY = "theme";
 const ACCENT_COLOR_KEY = "accentColor";
 const UI_SCALE_KEY = "uiScale";
+const ZEN_MODE_KEY = "zenMode";
 const LazyTerminalView = lazyWithReload("terminal-view", () =>
   import("./components/TerminalView").then((module) => ({
     default: module.TerminalView,
@@ -170,6 +212,26 @@ const LazyCollaborationBar = lazyWithReload("collaboration-bar", () =>
     default: module.CollaborationBar,
   })),
 );
+
+// xterm.js is heavy; keep the overlay's own copy out of the initial bundle the
+// same way LazyTerminalView does, since most sessions never open a popup.
+const LazyPopupOverlay = lazyWithReload("popup-overlay", () =>
+  import("./components/PopupOverlay").then((module) => ({
+    default: module.PopupOverlay,
+  })),
+);
+
+function PopupOverlay({ terminalTheme }: { terminalTheme: ITheme }) {
+  // Gate the dynamic import on popup presence, not just its content, so a
+  // session that never opens one never fetches xterm.js for it.
+  const hasPopup = useStoreSelector((s) => s.popup !== null);
+  if (!hasPopup) return null;
+  return (
+    <Suspense fallback={null}>
+      <LazyPopupOverlay terminalTheme={terminalTheme} />
+    </Suspense>
+  );
+}
 
 type TerminalViewProps = {
   paneId?: string;
@@ -184,13 +246,19 @@ type TerminalViewProps = {
   agentHistoryOpen?: boolean;
   onAgentHistoryOpenChange?: (open: boolean) => void;
   onOpenWorkspaceFile?: (request: TerminalWorkspaceFileRequest) => void;
+  zenMode?: boolean;
+  onExitZenMode?: () => void;
 };
 
-function TerminalLoadingFallback() {
+function TerminalLoadingFallback({
+  label = "Loading terminal",
+}: {
+  label?: string;
+}) {
   return (
-    <div className="terminal-loading">
+    <div className="terminal-loading" role="status">
       <span className="terminal-loading-dot" />
-      Loading terminal
+      {label}
     </div>
   );
 }
@@ -241,10 +309,11 @@ function ToastMark({
 }
 
 export type Theme = ThemePreference;
-type MobileView = "workspaces" | "session" | InspectorView;
+type MobileView = "workspaces" | "session" | "annotations" | InspectorView;
 type OpenInspectorOptions = {
   entry?: FileExplorerEntry;
   path?: string;
+  fragment?: string;
   initialDirectory?: string;
   originPaneId?: string;
   focusInspector?: boolean;
@@ -257,11 +326,13 @@ function normalizeSidebarWidth(value: number): number {
 }
 
 function loadSidebarWidth(): number {
-  return normalizeSidebarWidth(Number(localStorage.getItem("sidebarWidth")));
+  return normalizeSidebarWidth(
+    Number(roamgateLocalStorage.getItem("sidebarWidth")),
+  );
 }
 
 function loadTheme(): Theme {
-  return normalizeThemePreference(localStorage.getItem(THEME_KEY));
+  return normalizeThemePreference(roamgateLocalStorage.getItem(THEME_KEY));
 }
 
 function loadSystemTheme(): ResolvedTheme {
@@ -269,7 +340,7 @@ function loadSystemTheme(): ResolvedTheme {
 }
 
 function loadAccentColor(): AccentColor {
-  return normalizeAccentColor(localStorage.getItem(ACCENT_COLOR_KEY));
+  return normalizeAccentColor(roamgateLocalStorage.getItem(ACCENT_COLOR_KEY));
 }
 
 function loadTerminalFontFamily(): string {
@@ -277,30 +348,36 @@ function loadTerminalFontFamily(): string {
 }
 
 function loadUiScale(): number {
-  return normalizeUiScale(localStorage.getItem(UI_SCALE_KEY));
+  return normalizeUiScale(roamgateLocalStorage.getItem(UI_SCALE_KEY));
+}
+
+function loadZenMode(): boolean {
+  return normalizeZenMode(roamgateLocalStorage.getItem(ZEN_MODE_KEY));
 }
 
 function loadTerminalThemeSelection(): TerminalThemeSelection {
   return parseTerminalThemeSelection(
-    localStorage.getItem(TERMINAL_THEME_SELECTION_STORAGE_KEY),
+    roamgateLocalStorage.getItem(TERMINAL_THEME_SELECTION_STORAGE_KEY),
   );
 }
 
 function loadCustomTerminalThemes(): CustomTerminalTheme[] {
   return parseCustomTerminalThemes(
-    localStorage.getItem(CUSTOM_TERMINAL_THEMES_STORAGE_KEY),
+    roamgateLocalStorage.getItem(CUSTOM_TERMINAL_THEMES_STORAGE_KEY),
   );
 }
 
 function loadMobileTerminalShortcuts(): MobileTerminalShortcutRows {
-  const current = localStorage.getItem(MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY);
+  const current = roamgateLocalStorage.getItem(
+    MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY,
+  );
   if (current !== null) return parseMobileTerminalShortcutRows(current);
-  const legacy = localStorage.getItem(
+  const legacy = roamgateLocalStorage.getItem(
     LEGACY_MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY,
   );
   const migrated = parseMobileTerminalShortcutRows(legacy);
   if (legacy !== null) {
-    localStorage.setItem(
+    roamgateLocalStorage.setItem(
       MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY,
       serializeMobileTerminalShortcutRows(migrated),
     );
@@ -310,7 +387,7 @@ function loadMobileTerminalShortcuts(): MobileTerminalShortcutRows {
 
 function loadMobileTerminalSideShortcuts(): MobileTerminalSideShortcuts {
   return parseMobileTerminalSideShortcuts(
-    localStorage.getItem(MOBILE_TERMINAL_SIDE_SHORTCUTS_STORAGE_KEY),
+    roamgateLocalStorage.getItem(MOBILE_TERMINAL_SIDE_SHORTCUTS_STORAGE_KEY),
   );
 }
 
@@ -334,24 +411,6 @@ function emptyActiveFilePreviewSelection(): ActiveFilePreviewSelection {
     loading: false,
     error: null,
   };
-}
-
-function useMobileLayout() {
-  const [mobile, setMobile] = useState(() =>
-    typeof window !== "undefined"
-      ? window.matchMedia("(max-width: 768px)").matches
-      : false,
-  );
-
-  useEffect(() => {
-    const query = window.matchMedia("(max-width: 768px)");
-    const onChange = () => setMobile(query.matches);
-    onChange();
-    query.addEventListener("change", onChange);
-    return () => query.removeEventListener("change", onChange);
-  }, []);
-
-  return mobile;
 }
 
 const viewportDebugEnabled =
@@ -557,10 +616,8 @@ function blurActiveInput(event: React.PointerEvent<HTMLButtonElement>) {
 }
 
 function tabShortcutIndex(e: KeyboardEvent) {
-  if (!e.ctrlKey || e.metaKey || e.altKey || e.shiftKey) return null;
-  if (/^[1-9]$/.test(e.key)) return Number(e.key) - 1;
-  const match = /^Digit([1-9])$/.exec(e.code);
-  return match ? Number(match[1]) - 1 : null;
+  const number = SHORTCUT_NUMBERS.find((n) => shortcutMatches(e, `tab.${n}`));
+  return number === undefined ? null : number - 1;
 }
 
 // Herdr reports pane rectangles in terminal-cell coordinates. The GUI maps
@@ -584,39 +641,86 @@ function paneTitle(
 function PaneJumpOverlay({
   entries,
   selectedIndex,
+  search,
+  onSearchChange,
   onSelectIndex,
   onCommit,
+  onClose,
 }: {
   entries: PaneJumpEntry[];
   selectedIndex: number;
+  search: string | null;
+  onSearchChange: (value: string) => void;
   onSelectIndex: (index: number) => void;
   onCommit: (index: number) => void;
+  onClose: () => void;
 }) {
   const selectedItemRef = useRef<HTMLButtonElement>(null);
+  const searchInputRef = useRef<HTMLInputElement>(null);
+  const searching = search !== null;
   const selectedPaneId = entries[selectedIndex]?.paneId;
 
   useEffect(() => {
     selectedItemRef.current?.scrollIntoView({ block: "nearest" });
   }, [selectedIndex, selectedPaneId]);
+  useEffect(() => {
+    if (searching) searchInputRef.current?.focus();
+  }, [searching]);
 
-  if (entries.length === 0) return null;
+  if (entries.length === 0 && !searching) return null;
+  const listId = "pane-jump-list";
   return (
     <div className="pane-jump-backdrop">
-      <div
-        className="pane-jump-popover"
-        role="listbox"
-        aria-label="Recent panes"
-      >
+      <div className="pane-jump-popover">
         <div className="pane-jump-head">
-          <strong>Switch Pane</strong>
-          <span>Hold Ctrl, use Tab / Up / Down, release Ctrl</span>
+          <strong>{searching ? "Find Pane" : "Switch Pane"}</strong>
+          <span>
+            {searching
+              ? "Filters every open pane. Use Up / Down and Enter"
+              : "K to search; Enter or release modifier to switch"}
+          </span>
         </div>
-        <div className="pane-jump-list">
+        {searching ? (
+          <input
+            ref={searchInputRef}
+            className="pane-jump-search"
+            type="text"
+            value={search}
+            spellCheck={false}
+            autoComplete="off"
+            placeholder="Workspace, tab, directory, or agent"
+            role="combobox"
+            aria-label="Search panes"
+            aria-expanded={true}
+            aria-autocomplete="list"
+            aria-controls={listId}
+            aria-activedescendant={
+              selectedPaneId
+                ? `${listId}-${encodeURIComponent(selectedPaneId)}`
+                : undefined
+            }
+            onChange={(event) => onSearchChange(event.target.value)}
+            onBlur={() => onClose()}
+          />
+        ) : null}
+        {entries.length === 0 ? (
+          <p className="pane-jump-empty" role="status">
+            No panes match this search.
+          </p>
+        ) : null}
+        <div
+          className="pane-jump-list"
+          id={listId}
+          role="listbox"
+          aria-label={searching ? "Matching panes" : "Recent panes"}
+        >
           {entries.map((entry, index) => (
             <button
               key={entry.paneId}
+              id={`${listId}-${encodeURIComponent(entry.paneId)}`}
               ref={index === selectedIndex ? selectedItemRef : undefined}
               type="button"
+              tabIndex={-1}
               className={`pane-jump-item ${
                 index === selectedIndex ? "is-selected" : ""
               } ${entry.current ? "is-current" : ""}`}
@@ -654,10 +758,22 @@ function PaneJumpOverlay({
                       <span className="pane-jump-agent-name">
                         {entry.agent}
                       </span>
-                      {entry.subtitle ? " · " : ""}
+                      {" · "}
                     </>
                   ) : null}
-                  {entry.subtitle}
+                  <span className="pane-jump-tab" title={entry.tabLabel}>
+                    {entry.tabLabel}
+                  </span>
+                  <span className="pane-jump-id" title={entry.paneId}>
+                    {" · "}
+                    {entry.paneLabel}
+                  </span>
+                  {entry.cwd ? (
+                    <span className="pane-jump-cwd" title={entry.cwd}>
+                      {" · "}
+                      {entry.cwd}
+                    </span>
+                  ) : null}
                 </span>
               </span>
             </button>
@@ -818,6 +934,8 @@ function TerminalPaneLayout({
   agentHistoryOpen,
   onAgentHistoryOpenChange,
   onOpenWorkspaceFile,
+  zenMode,
+  onExitZenMode,
 }: {
   terminalTheme: ITheme;
   uiScale: number;
@@ -829,6 +947,8 @@ function TerminalPaneLayout({
   agentHistoryOpen: boolean;
   onAgentHistoryOpenChange: (open: boolean) => void;
   onOpenWorkspaceFile: (request: TerminalWorkspaceFileRequest) => void;
+  zenMode: boolean;
+  onExitZenMode: () => void;
 }) {
   const s = useStoreSelector(
     (state) => ({
@@ -840,7 +960,7 @@ function TerminalPaneLayout({
     }),
     shallowEqual,
   );
-  const mobile = useMobileLayout();
+  const { mobile } = useLayoutPreferences();
   const layoutRef = useRef<HTMLDivElement | null>(null);
   const [layoutElement, setLayoutElement] = useState<HTMLDivElement | null>(
     null,
@@ -899,6 +1019,8 @@ function TerminalPaneLayout({
         agentHistoryOpen={agentHistoryOpen}
         onAgentHistoryOpenChange={onAgentHistoryOpenChange}
         onOpenWorkspaceFile={onOpenWorkspaceFile}
+        zenMode={zenMode}
+        onExitZenMode={onExitZenMode}
       />
     );
   }
@@ -960,6 +1082,8 @@ function TerminalPaneLayout({
           agentHistoryOpen={agentHistoryOpen}
           onAgentHistoryOpenChange={onAgentHistoryOpenChange}
           onOpenWorkspaceFile={onOpenWorkspaceFile}
+          zenMode={zenMode}
+          onExitZenMode={onExitZenMode}
         />
       </div>
     );
@@ -1071,6 +1195,8 @@ function TerminalPaneLayout({
               agentHistoryOpen={isActive ? agentHistoryOpen : false}
               onAgentHistoryOpenChange={onAgentHistoryOpenChange}
               onOpenWorkspaceFile={onOpenWorkspaceFile}
+              zenMode={isActive ? zenMode : false}
+              onExitZenMode={onExitZenMode}
             />
           </div>
         );
@@ -1106,6 +1232,7 @@ function TerminalPaneLayout({
 }
 
 export default function App() {
+  useShortcutPreferences();
   const s = useStoreSelector(
     (state) => ({
       activeConnectionId: state.activeConnectionId,
@@ -1126,7 +1253,7 @@ export default function App() {
     shallowEqual,
   );
   const connectionClient = useConnectionClient();
-  const mobile = useMobileLayout();
+  const { mobile, preferences: layoutPreferences } = useLayoutPreferences();
   useEffect(() => {
     activateTerminalComposerDraftScope(
       s.activeConnectionId,
@@ -1174,7 +1301,10 @@ export default function App() {
       ),
     [resolvedTheme, terminalThemeSelection, customTerminalThemes],
   );
-  const [sidebarHidden, setSidebarHidden] = useState(false);
+  const [zenMode, setZenMode] = useState(loadZenMode);
+  const [sidebarHidden, setSidebarHidden] = useState(loadZenMode);
+  // What the sidebar was doing before Zen hid it, restored when Zen ends.
+  const sidebarBeforeZenRef = useRef(false);
   const [mobileControlsCollapsed, setMobileControlsCollapsed] = useState(false);
   const [mobileTabSheetOpen, setMobileTabSheetOpen] = useState(false);
   const terminalComposerScopeKey = JSON.stringify([
@@ -1187,11 +1317,59 @@ export default function App() {
     useState(false);
   const [paneJumpOpen, setPaneJumpOpen] = useState(false);
   const [paneJumpIndex, setPaneJumpIndex] = useState(0);
-  const paneJumpCtrlDownRef = useRef(false);
+  // null keeps the most-recently-used list; a string switches to typed search.
+  const [paneJumpSearch, setPaneJumpSearch] = useState<string | null>(null);
+  const paneJumpModifierRef = useRef<"ctrlKey" | "altKey" | "metaKey" | null>(
+    null,
+  );
   const paneJumpIndexRef = useRef(0);
+  const paneJumpReturnFocusRef = useRef<HTMLElement | null>(null);
   const [inspectorState, setInspectorState] =
     useState<WorkspaceInspectorState | null>(null);
   const inspectorStateRef = useRef<WorkspaceInspectorState | null>(null);
+  const resourceUiKey = connectionClientScopeKey(
+    connectionClient,
+    "resource-ui",
+  );
+  const {
+    annotations,
+    scope: annotationScope,
+    scopeRef: annotationScopeRef,
+    sessionRef: annotationSessionRef,
+    read: readAnnotationDraft,
+    select: selectAnnotationDraft,
+    update: updateAnnotationDraft,
+  } = useReviewAnnotationDraft(resourceUiKey);
+  const [annotationsOpen, setAnnotationsOpen] = useState(false);
+  const [annotationsFloating, setAnnotationsFloating] = useState(
+    () => roamgateLocalStorage.getItem("annotationPanelMode") !== "fixed",
+  );
+  const annotationsDocked = annotationsOpen && (mobile || !annotationsFloating);
+  const toggleAnnotationsFloating = () => {
+    const next = !annotationsFloating;
+    setAnnotationsFloating(next);
+    try {
+      roamgateLocalStorage.setItem(
+        "annotationPanelMode",
+        next ? "floating" : "fixed",
+      );
+    } catch {
+      store.notify({
+        kind: "error",
+        message: "Annotation layout could not be saved",
+        detail: "The layout applies until this page reloads.",
+      });
+    }
+  };
+  const [focusedAnnotationId, setFocusedAnnotationId] = useState<string | null>(
+    null,
+  );
+  const [annotationPreferredPaneId, setAnnotationPreferredPaneId] = useState<
+    string | undefined
+  >();
+  const [deliveredPaneId, setDeliveredPaneId] = useState<string | null>(null);
+  const [annotationDeliveryBusy, setAnnotationDeliveryBusy] = useState(false);
+  const annotationAwaitingFocusRef = useRef<ResourceScope | null>(null);
   const inspectorFocusRequestRef = useRef<{
     state: WorkspaceInspectorState;
     source: Element | null;
@@ -1222,10 +1400,6 @@ export default function App() {
   const [activeFilePreview, setActiveFilePreview] =
     useState<ActiveFilePreviewSelection>(emptyActiveFilePreviewSelection);
   const fileQuickOpenRequestRef = useRef(0);
-  const resourceUiKey = connectionClientScopeKey(
-    connectionClient,
-    "resource-ui",
-  );
   const resourceRuntimeKeyRef = useRef(resourceUiKey);
   const focusedWorkspace = s.workspaces.find((w) => w.focused);
   const focusedWorkspaceTabCount = focusedWorkspace
@@ -1279,20 +1453,26 @@ export default function App() {
       update,
     );
   }, [activeTerminalComposerDraftKey]);
-  const paneJumpOptions = useMemo(
-    () =>
-      paneJumpEntries(
-        {
-          layout: s.layout,
-          panes: s.panes,
-          recentPaneIds: s.recentPaneIds,
-          tabs: s.tabs,
-          workspaces: s.workspaces,
-        },
-        activePaneId,
-      ),
-    [activePaneId, s.layout, s.panes, s.recentPaneIds, s.tabs, s.workspaces],
-  );
+  const paneJumpOptions = useMemo(() => {
+    const snapshot = {
+      layout: s.layout,
+      panes: s.panes,
+      recentPaneIds: s.recentPaneIds,
+      tabs: s.tabs,
+      workspaces: s.workspaces,
+    };
+    return paneJumpSearch === null
+      ? paneJumpEntries(snapshot, activePaneId)
+      : paneSearchEntries(snapshot, paneJumpSearch, activePaneId);
+  }, [
+    activePaneId,
+    paneJumpSearch,
+    s.layout,
+    s.panes,
+    s.recentPaneIds,
+    s.tabs,
+    s.workspaces,
+  ]);
   const activePaneHasAgent = paneHasAgentHistory(activePane);
   const historyInspectorOpen =
     inspectorState?.open === true && inspectorState.view === "history";
@@ -1319,6 +1499,47 @@ export default function App() {
   const inspectorResourceStateKey = inspectorState
     ? resourceStateKey(inspectorState.scope)
     : null;
+  const annotationStorageKey = annotationScope
+    ? annotationDraftStorageKey(annotationScope)
+    : null;
+  const annotationWorkspace = annotationScope
+    ? resolveWorkspaceForScope(annotationScope, s.workspaces)
+    : undefined;
+  const annotationAgentPanes = useMemo(
+    () =>
+      reviewAgentPanes(
+        s.panes,
+        annotationWorkspace?.workspace_id ?? "",
+        annotationPreferredPaneId,
+      ),
+    [annotationPreferredPaneId, annotationWorkspace?.workspace_id, s.panes],
+  );
+  const commitAnnotations = useCallback(
+    (
+      update:
+        | ReviewAnnotation[]
+        | ((current: ReviewAnnotation[]) => ReviewAnnotation[]),
+    ) => {
+      if (!annotationScope) return;
+      updateAnnotationDraft(annotationScope, update);
+    },
+    [annotationScope, updateAnnotationDraft],
+  );
+  const setAnnotationDraftScope = useCallback(
+    (scope: ResourceScope, open = false, preferredPaneId?: string) => {
+      const changed = selectAnnotationDraft(scope);
+      setAnnotationsOpen(open);
+      if (changed) {
+        setFocusedAnnotationId(null);
+        setAnnotationPreferredPaneId(preferredPaneId);
+        setDeliveredPaneId(null);
+        setAnnotationDeliveryBusy(false);
+      } else if (preferredPaneId !== undefined) {
+        setAnnotationPreferredPaneId(preferredPaneId);
+      }
+    },
+    [selectAnnotationDraft],
+  );
 
   const commitInspectorState = useCallback(
     (next: WorkspaceInspectorState | null) => {
@@ -1341,8 +1562,9 @@ export default function App() {
   );
   const activateTerminalSurface = useCallback(() => {
     updateInspectorState((current) =>
-      current ? { ...current, open: false, expanded: false } : current,
+      current ? { ...current, open: false } : current,
     );
+    setAnnotationsOpen(false);
     setMobileView("session");
     if (!mobile) {
       requestAnimationFrame(() => {
@@ -1354,10 +1576,25 @@ export default function App() {
       });
     }
   }, [mobile, updateInspectorState]);
-  const toggleSidebar = () => {
+  const toggleSidebar = useCallback(() => {
     setMobileView("session");
     setSidebarHidden((value) => !value);
-  };
+  }, []);
+  // Entering Zen hides the sidebar; leaving Zen puts it back as it was. In
+  // between, the sidebar toggles on its own without disturbing Zen.
+  const applyZenMode = useCallback(
+    (next: boolean) => {
+      if (next === zenMode) return;
+      if (next) sidebarBeforeZenRef.current = sidebarHidden;
+      setSidebarHidden(next ? true : sidebarBeforeZenRef.current);
+      setZenMode(next);
+    },
+    [sidebarHidden, zenMode],
+  );
+  const toggleZenMode = useCallback(
+    () => applyZenMode(!zenMode),
+    [applyZenMode, zenMode],
+  );
   const openWorkspaces = useCallback(() => {
     setSidebarHidden(false);
     if (mobile) {
@@ -1369,11 +1606,12 @@ export default function App() {
     });
   }, [mobile]);
   const loadInspectorFilePreview = useCallback(
-    (workspaceId: string, entry: FileExplorerEntry) => {
+    (workspaceId: string, entry: FileExplorerEntry, fragment?: string) => {
       const requestId = fileQuickOpenRequestRef.current + 1;
       fileQuickOpenRequestRef.current = requestId;
       setActiveFilePreview({
         entry,
+        fragment,
         preview: null,
         loading: true,
         error: null,
@@ -1391,6 +1629,7 @@ export default function App() {
           }
           setActiveFilePreview({
             entry,
+            fragment,
             preview,
             loading: false,
             error: null,
@@ -1405,6 +1644,7 @@ export default function App() {
           }
           setActiveFilePreview({
             entry,
+            fragment,
             preview: null,
             loading: false,
             error: error instanceof Error ? error.message : String(error),
@@ -1449,12 +1689,23 @@ export default function App() {
         connectionClient.connectionId,
         workspace,
       );
+      if (
+        !annotationScopeRef.current ||
+        annotationScopeRef.current.workspaceId !== scope.workspaceId ||
+        !sameResourceOwner(annotationScopeRef.current, scope)
+      ) {
+        setAnnotationDraftScope(scope, annotationsOpen);
+      }
       const current = inspectorStateRef.current;
       const sameOwner = !!current && sameResourceOwner(current.scope, scope);
       const stageWidth = inspectorStageRef.current?.clientWidth ?? 0;
-      const preferences = readInspectorPreferences(localStorage, scope, {
-        rightSize: stageWidth > 0 ? stageWidth * 0.42 : undefined,
-      });
+      const preferences = readInspectorPreferences(
+        roamgateLocalStorage,
+        scope,
+        {
+          rightSize: stageWidth > 0 ? stageWidth * 0.42 : undefined,
+        },
+      );
       const dock = sameOwner ? current.dock : preferences.dock;
       const preferredSize = sameOwner
         ? current.size
@@ -1485,7 +1736,7 @@ export default function App() {
         view,
         dock,
         size,
-        expanded: sameOwner ? current.expanded : false,
+        expanded: sameOwner ? current.expanded : preferences.expanded,
         returnTabId,
         originPaneId: options.originPaneId,
         initialDirectory: options.initialDirectory,
@@ -1501,17 +1752,17 @@ export default function App() {
         ? { state: nextState, source: document.activeElement }
         : null;
       commitInspectorState(nextState);
-      writeInspectorPreferences(localStorage, nextState);
-      setSidebarHidden(false);
+      writeInspectorPreferences(roamgateLocalStorage, nextState);
       if (mobile) setMobileView(view);
       if (focusInspector) requestAnimationFrame(finishInspectorFocus);
 
       const selectedPath =
         options.path ??
         (view === "files" && options.initialDirectory === undefined
-          ? readResourceFileSelection(localStorage, scope)
+          ? readResourceFileSelection(roamgateLocalStorage, scope)
           : undefined);
       if (view === "files" && !selectedPath) {
+        fileQuickOpenRequestRef.current += 1;
         setActiveFilePreview(emptyActiveFilePreviewSelection());
       }
       if (view !== "files" || !selectedPath) return;
@@ -1527,7 +1778,7 @@ export default function App() {
             selectedPath.split("/").filter(Boolean).pop()?.startsWith(".") ??
             false,
         } satisfies FileExplorerEntry);
-      loadInspectorFilePreview(workspace.workspace_id, entry);
+      loadInspectorFilePreview(workspace.workspace_id, entry, options.fragment);
     },
     [
       commitInspectorState,
@@ -1535,19 +1786,231 @@ export default function App() {
       finishInspectorFocus,
       loadInspectorFilePreview,
       mobile,
+      annotationsOpen,
+      annotationScopeRef,
+      setAnnotationDraftScope,
     ],
   );
+  const openAnnotations = useCallback(
+    (workspaceId?: string, preferredPaneId?: string) => {
+      const snapshot = store.get();
+      const workspace = workspaceId
+        ? snapshot.workspaces.find(
+            (candidate) => candidate.workspace_id === workspaceId,
+          )
+        : snapshot.workspaces.find((candidate) => candidate.focused);
+      if (!workspace) return;
+      const scope = resourceScopeForWorkspace(
+        connectionClient.connectionId,
+        workspace,
+      );
+      setAnnotationDraftScope(scope, true, preferredPaneId);
+      annotationAwaitingFocusRef.current = workspace.focused ? null : scope;
+      if (!workspace.focused) void store.focusWorkspace(workspace.workspace_id);
+      if (mobile) setMobileView("annotations");
+    },
+    [connectionClient.connectionId, mobile, setAnnotationDraftScope],
+  );
+  const toggleAnnotations = useCallback(() => {
+    if (annotationsOpen && (!mobile || mobileView === "annotations")) {
+      setAnnotationsOpen(false);
+      if (mobile)
+        setMobileView(
+          inspectorStateRef.current?.open
+            ? inspectorStateRef.current.view
+            : "session",
+        );
+      return;
+    }
+    openAnnotations();
+  }, [annotationsOpen, mobile, mobileView, openAnnotations]);
+  const reanchorFileAnnotations = useCallback(
+    (path: string, text: string) => {
+      if (!inspectorState || !connectionClient.isCurrent()) return;
+      updateAnnotationDraft(inspectorState.scope, (current) =>
+        reanchorFileReviewAnnotations(current, path, text),
+      );
+    },
+    [connectionClient, inspectorState, updateAnnotationDraft],
+  );
+  const reanchorDiffAnnotations = useCallback(
+    (path: string, kind: GitDiffEntry["kind"], patch: string) => {
+      if (!inspectorState || !connectionClient.isCurrent()) return;
+      updateAnnotationDraft(inspectorState.scope, (current) =>
+        reanchorDiffReviewAnnotations(current, path, kind, patch),
+      );
+    },
+    [connectionClient, inspectorState, updateAnnotationDraft],
+  );
+  const addAnnotation = useCallback(
+    (input: NewReviewAnnotation) => {
+      if (!inspectorState || !connectionClient.isCurrent()) return;
+      const annotation = createReviewAnnotation(input);
+      setAnnotationDraftScope(inspectorState.scope, true);
+      updateAnnotationDraft(inspectorState.scope, (current) => [
+        ...current,
+        annotation,
+      ]);
+      setFocusedAnnotationId(annotation.id);
+      setAnnotationsOpen(true);
+      if (mobile) setMobileView("annotations");
+    },
+    [
+      connectionClient,
+      inspectorState,
+      mobile,
+      setAnnotationDraftScope,
+      updateAnnotationDraft,
+    ],
+  );
+  const closeAnnotations = useCallback(() => {
+    setAnnotationsOpen(false);
+    if (mobile) {
+      setMobileView(
+        inspectorStateRef.current?.open
+          ? inspectorStateRef.current.view
+          : "session",
+      );
+      return;
+    }
+    document
+      .querySelector<HTMLElement>(
+        ".pane-layout-cell.is-active .xterm-helper-textarea, .pane-switcher-layout .xterm-helper-textarea, .workspace-terminal-surface > .terminal-shell .xterm-helper-textarea",
+      )
+      ?.focus();
+  }, [mobile]);
+  const clearAnnotations = useCallback(() => {
+    commitAnnotations([]);
+    setFocusedAnnotationId(null);
+    closeAnnotations();
+  }, [closeAnnotations, commitAnnotations]);
+  const copyFeedback = useCallback(
+    async (fallback = false) => {
+      const message = compileReviewFeedback(annotations);
+      if (!message) {
+        store.notify({
+          kind: "error",
+          message: "Add text to a review comment before delivery",
+        });
+        return;
+      }
+      const deliverySession = annotationSessionRef.current;
+      setAnnotationDeliveryBusy(true);
+      try {
+        await copyTextFromUserGesture(message);
+        store.notify({
+          kind: "success",
+          message: fallback
+            ? "No agent pane found; feedback copied"
+            : "Review feedback copied",
+          autoDismissMs: 3000,
+        });
+      } catch (error) {
+        store.notify({
+          kind: "error",
+          message: "Failed to copy review feedback",
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        if (annotationSessionRef.current === deliverySession)
+          setAnnotationDeliveryBusy(false);
+      }
+    },
+    [annotations, annotationSessionRef],
+  );
+  const sendFeedback = useCallback(
+    async (paneId: string | null) => {
+      const target = annotationAgentPanes.find(
+        (pane) => pane.pane_id === paneId,
+      );
+      if (!target) {
+        await copyFeedback(true);
+        return;
+      }
+      const message = compileReviewFeedback(annotations);
+      if (!message) {
+        store.notify({
+          kind: "error",
+          message: "Add text to a review comment before delivery",
+        });
+        return;
+      }
+      const deliverySession = annotationSessionRef.current;
+      setAnnotationDeliveryBusy(true);
+      try {
+        const request = terminalPasteRequest(target.pane_id, message);
+        await connectionClient.call(request.method, request.params);
+        if (!connectionClient.isCurrent()) return;
+        const draftActive =
+          deliverySession !== null &&
+          annotationSessionRef.current === deliverySession;
+        if (draftActive) {
+          setDeliveredPaneId(target.pane_id);
+          commitAnnotations((current) =>
+            removeDeliveredReviewAnnotations(current, annotations),
+          );
+        }
+        store.notify({
+          kind: "success",
+          message: "Feedback pre-filled in the agent pane",
+          detail: draftActive
+            ? "Review the message there, then press Enter to submit it."
+            : "Original draft retained because its workspace was left or unloaded, or its connection changed. Review the message in the agent pane, then press Enter.",
+          autoDismissMs: 6000,
+        });
+      } catch (error) {
+        if (!connectionClient.isCurrent()) return;
+        store.notify({
+          kind: "error",
+          message: "Failed to pre-fill review feedback",
+          detail: error instanceof Error ? error.message : String(error),
+        });
+      } finally {
+        if (annotationSessionRef.current === deliverySession)
+          setAnnotationDeliveryBusy(false);
+      }
+    },
+    [
+      annotationAgentPanes,
+      annotationSessionRef,
+      annotations,
+      commitAnnotations,
+      connectionClient,
+      copyFeedback,
+    ],
+  );
+  const goToDeliveredAgent = useCallback(() => {
+    if (!deliveredPaneId || !connectionClient.isCurrent()) return;
+    const pane = store
+      .get()
+      .panes.find((candidate) => candidate.pane_id === deliveredPaneId);
+    if (!pane || pane.workspace_id !== annotationWorkspace?.workspace_id)
+      return;
+    activateTerminalSurface();
+    void store.focusPane(deliveredPaneId);
+  }, [
+    activateTerminalSurface,
+    annotationWorkspace?.workspace_id,
+    connectionClient,
+    deliveredPaneId,
+  ]);
   const openFileExplorer = useCallback(
     (workspaceId?: string, focusInspector = true) =>
       openInspector("files", workspaceId, { focusInspector }),
     [openInspector],
   );
   const openFileExplorerFile = useCallback(
-    (workspaceId: string, entry: FileExplorerEntry, originPaneId?: string) =>
+    (
+      workspaceId: string,
+      entry: FileExplorerEntry,
+      originPaneId?: string,
+      fragment?: string,
+    ) =>
       openInspector("files", workspaceId, {
         entry,
         path: entry.path,
         originPaneId,
+        fragment,
       }),
     [openInspector],
   );
@@ -1561,7 +2024,7 @@ export default function App() {
     if (!current) return;
     const returnFocus = inspectorReturnFocusRef.current;
     inspectorReturnFocusRef.current = null;
-    commitInspectorState({ ...current, open: false, expanded: false });
+    commitInspectorState({ ...current, open: false });
     setMobileView("session");
     const snapshot = store.get();
     const returnTab = current.returnTabId
@@ -1631,7 +2094,7 @@ export default function App() {
     const sameOwner = !!current && sameResourceOwner(current.scope, scope);
     const view = sameOwner
       ? current.view
-      : readInspectorPreferences(localStorage, scope).view;
+      : readInspectorPreferences(roamgateLocalStorage, scope).view;
     const historyPaneId =
       sameOwner && current.originPaneId
         ? current.originPaneId
@@ -1651,6 +2114,18 @@ export default function App() {
       originPaneId: view === "history" ? historyPane?.pane_id : undefined,
     });
   }, [closeInspector, connectionClient.connectionId, openInspector]);
+  const setInspectorExpanded = useCallback(
+    (expanded: boolean) => {
+      const current = inspectorStateRef.current;
+      if (!current) return;
+      const next = { ...current, expanded };
+      if (inspectorFocusRequestRef.current?.state === current)
+        inspectorFocusRequestRef.current.state = next;
+      commitInspectorState(next);
+      writeInspectorPreferences(roamgateLocalStorage, next);
+    },
+    [commitInspectorState],
+  );
   const keepInspectorForWorkspace = useCallback(
     (workspaceId: string, originPane?: Pane) => {
       const current = inspectorStateRef.current;
@@ -1852,10 +2327,19 @@ export default function App() {
     },
     [openNotificationTarget],
   );
+  const pendingNotificationRef = useRef<TaskNotificationTarget | null>(null);
   useEffect(() => {
-    const handleSystemNotification = (event: Event) => {
-      const target = (event as CustomEvent<unknown>).detail;
-      if (!isTaskNotificationTarget(target)) return;
+    const activatePending = () => {
+      const target = pendingNotificationRef.current;
+      const snapshot = store.get();
+      if (
+        !target ||
+        snapshot.status !== "connected" ||
+        !snapshot.connections.length
+      )
+        return;
+      pendingNotificationRef.current = null;
+      if (!taskNotificationTargetIsCurrent(snapshot, target)) return;
       openNotificationTarget(target);
       const notice = store.get().notice;
       if (
@@ -1866,15 +2350,30 @@ export default function App() {
         store.clearNotice();
       }
     };
+    const receive = (target: TaskNotificationTarget) => {
+      pendingNotificationRef.current = target;
+      activatePending();
+    };
+    const handleSystemNotification = (event: Event) => {
+      const target = (event as CustomEvent<unknown>).detail;
+      if (isTaskNotificationTarget(target)) receive(target);
+    };
+    const unsubscribe = store.subscribe(activatePending);
+    const stopWorkerNotifications =
+      listenForTaskNotificationActivation(receive);
+    activatePending();
     window.addEventListener(
       TASK_NOTIFICATION_ACTIVATE_EVENT,
       handleSystemNotification,
     );
-    return () =>
+    return () => {
+      unsubscribe();
+      stopWorkerNotifications();
       window.removeEventListener(
         TASK_NOTIFICATION_ACTIVATE_EVENT,
         handleSystemNotification,
       );
+    };
   }, [openNotificationTarget]);
   useEffect(() => {
     const handleInspectorRequest = (event: Event) => {
@@ -1887,12 +2386,12 @@ export default function App() {
       ) {
         return;
       }
-      const workspaceOpen = store
+      const workspace = store
         .get()
-        .workspaces.some(
-          (workspace) => workspace.workspace_id === detail.workspaceId,
+        .workspaces.find(
+          (candidate) => candidate.workspace_id === detail.workspaceId,
         );
-      if (!workspaceOpen) {
+      if (!workspace) {
         pendingInspectorRequestRef.current = detail;
         return;
       }
@@ -1909,6 +2408,65 @@ export default function App() {
         handleInspectorRequest,
       );
   }, [connectionClient, openInspector]);
+  useEffect(() => {
+    const handleAnnotationRequest = (event: Event) => {
+      const detail = (event as CustomEvent<WorkspaceAnnotationRequest>).detail;
+      if (
+        !detail ||
+        detail.connectionId !== connectionClient.connectionId ||
+        detail.generation !== connectionClient.generation ||
+        !connectionClient.isCurrent()
+      )
+        return;
+      const annotation = parseReviewAnnotation(detail.annotation);
+      const workspace = store
+        .get()
+        .workspaces.find(
+          (candidate) => candidate.workspace_id === detail.workspaceId,
+        );
+      if (
+        !annotation ||
+        annotation.source !== "terminal" ||
+        !workspace ||
+        !store
+          .get()
+          .panes.some(
+            (pane) =>
+              pane.pane_id === annotation.paneId &&
+              pane.workspace_id === detail.workspaceId,
+          )
+      )
+        return;
+      const scope = resourceScopeForWorkspace(
+        connectionClient.connectionId,
+        workspace,
+      );
+      setAnnotationDraftScope(scope, true, annotation.paneId);
+      updateAnnotationDraft(scope, (current) =>
+        current.some((item) => item.id === annotation.id)
+          ? current
+          : [...current, annotation],
+      );
+      setFocusedAnnotationId(annotation.id);
+      annotationAwaitingFocusRef.current = workspace.focused ? null : scope;
+      if (!workspace.focused) void store.focusWorkspace(workspace.workspace_id);
+      if (mobile) setMobileView("annotations");
+    };
+    window.addEventListener(
+      WORKSPACE_ANNOTATION_REQUEST_EVENT,
+      handleAnnotationRequest,
+    );
+    return () =>
+      window.removeEventListener(
+        WORKSPACE_ANNOTATION_REQUEST_EVENT,
+        handleAnnotationRequest,
+      );
+  }, [
+    connectionClient,
+    mobile,
+    setAnnotationDraftScope,
+    updateAnnotationDraft,
+  ]);
   useEffect(() => {
     const pending = pendingInspectorRequestRef.current;
     if (!pending) return;
@@ -1948,11 +2506,15 @@ export default function App() {
       clearFileExplorerResourceCache(
         connectionClient,
         resourceKey,
-        localStorage,
+        roamgateLocalStorage,
       );
       clearDiffContentResourceState(resourceStateKey(scope));
-      clearDiffViewerResourceCache(connectionClient, resourceKey, localStorage);
-      writeResourceFileSelection(localStorage, scope, null);
+      clearDiffViewerResourceCache(
+        connectionClient,
+        resourceKey,
+        roamgateLocalStorage,
+      );
+      writeResourceFileSelection(roamgateLocalStorage, scope, null);
       const current = inspectorStateRef.current;
       if (!current || !sameResourceOwner(current.scope, scope)) return;
       fileQuickOpenRequestRef.current += 1;
@@ -1966,9 +2528,19 @@ export default function App() {
     return () =>
       window.removeEventListener(WORKTREE_REMOVED_EVENT, handleWorktreeRemoved);
   }, [commitInspectorState, connectionClient]);
-  const closePaneJump = useCallback(() => {
-    paneJumpCtrlDownRef.current = false;
+  const closePaneJump = useCallback((restoreFocus = false) => {
+    const target = paneJumpReturnFocusRef.current;
+    const source = document.activeElement;
+    paneJumpReturnFocusRef.current = null;
+    paneJumpModifierRef.current = null;
+    setPaneJumpSearch(null);
     setPaneJumpOpen(false);
+    if (restoreFocus && target) {
+      // Wait for unmount, without stealing focus from a new user selection.
+      requestAnimationFrame(() => {
+        if (target.isConnected) focusIfUnchanged(target, source);
+      });
+    }
   }, []);
   const selectPaneJumpIndex = useCallback(
     (index: number) => {
@@ -1982,7 +2554,7 @@ export default function App() {
   const commitPaneJump = useCallback(
     (index = paneJumpIndexRef.current) => {
       const targetPaneId = paneJumpTargetId(paneJumpOptions, index);
-      closePaneJump();
+      closePaneJump(!targetPaneId);
       if (!targetPaneId) return;
       if (!inspectorStateRef.current?.open) setMobileView("session");
       void store.focusPane(targetPaneId);
@@ -2001,6 +2573,25 @@ export default function App() {
     );
     return previousPaneIndex >= 0 ? previousPaneIndex : 0;
   }, [paneJumpOptions]);
+  // Typed search drops the held modifier: releasing it must keep the list open
+  // instead of committing the way the recent switcher does.
+  const openPaneJumpSearch = useCallback(() => {
+    if (store.get().panes.length === 0) return;
+    paneJumpReturnFocusRef.current =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    paneJumpModifierRef.current = null;
+    paneJumpIndexRef.current = 0;
+    setPaneJumpIndex(0);
+    setPaneJumpSearch("");
+    setPaneJumpOpen(true);
+  }, []);
+  const changePaneJumpSearch = useCallback((value: string) => {
+    paneJumpIndexRef.current = 0;
+    setPaneJumpIndex(0);
+    setPaneJumpSearch(value);
+  }, []);
 
   useLayoutEffect(() => {
     if (resourceRuntimeKeyRef.current === resourceUiKey) return;
@@ -2011,8 +2602,16 @@ export default function App() {
     commitInspectorState(null);
     setActiveDiff(emptyActiveDiffSelection());
     setActiveFilePreview(emptyActiveFilePreviewSelection());
+    annotationAwaitingFocusRef.current = null;
+    setAnnotationPreferredPaneId(undefined);
+    setAnnotationDeliveryBusy(false);
+    setDeliveredPaneId(null);
+    setAnnotationsOpen(false);
+    setFocusedAnnotationId(null);
+    paneJumpReturnFocusRef.current = null;
     setPaneJumpOpen(false);
     setPaneJumpIndex(0);
+    setPaneJumpSearch(null);
     setMobileView("session");
   }, [commitInspectorState, resourceUiKey]);
 
@@ -2020,10 +2619,68 @@ export default function App() {
     store.init();
   }, []);
   useEffect(() => {
+    if (mobile && mobileView === "annotations")
+      setMobileControlsCollapsed(false);
+  }, [mobile, mobileView]);
+  useEffect(() => {
     if (!mobile) return;
     const current = inspectorStateRef.current;
-    setMobileView(current?.open ? current.view : "session");
-  }, [mobile]);
+    if (!annotationsOpen)
+      setMobileView(current?.open ? current.view : "session");
+  }, [annotationsOpen, mobile]);
+  useLayoutEffect(() => {
+    if (!annotationScope || annotationWorkspace) return;
+    selectAnnotationDraft(null);
+    annotationAwaitingFocusRef.current = null;
+    setAnnotationsOpen(false);
+    setFocusedAnnotationId(null);
+    setAnnotationPreferredPaneId(undefined);
+    setDeliveredPaneId(null);
+    setAnnotationDeliveryBusy(false);
+    if (mobileView === "annotations") setMobileView("session");
+  }, [annotationScope, annotationWorkspace, mobileView, selectAnnotationDraft]);
+  useEffect(() => {
+    if (!focusedWorkspace) return;
+    const scope = resourceScopeForWorkspace(
+      connectionClient.connectionId,
+      focusedWorkspace,
+    );
+    const pending = annotationAwaitingFocusRef.current;
+    if (
+      pending &&
+      (pending.workspaceId !== scope.workspaceId ||
+        !sameResourceOwner(pending, scope)) &&
+      s.pendingFocusWorkspaceId === pending.workspaceId
+    )
+      return;
+    annotationAwaitingFocusRef.current = null;
+    const current = annotationScopeRef.current;
+    const sameOwner = current && sameResourceOwner(current, scope);
+    if (sameOwner && current.workspaceId === scope.workspaceId) return;
+    setAnnotationDraftScope(scope, !!sameOwner && annotationsOpen);
+  }, [
+    annotationsOpen,
+    annotationScopeRef,
+    connectionClient.connectionId,
+    focusedWorkspace,
+    s.pendingFocusWorkspaceId,
+    resourceUiKey,
+    setAnnotationDraftScope,
+  ]);
+  useEffect(() => {
+    if (!annotationScope || !annotationWorkspace) return;
+    commitAnnotations((current) =>
+      current.map((annotation) => {
+        if (annotation.source !== "terminal") return annotation;
+        const stale = !s.panes.some(
+          (pane) => pane.pane_id === annotation.paneId,
+        );
+        return stale === !!annotation.stale
+          ? annotation
+          : { ...annotation, stale };
+      }),
+    );
+  }, [annotationScope, annotationWorkspace, commitAnnotations, s.panes]);
   useLayoutEffect(() => {
     const current = inspectorStateRef.current;
     if (!current?.open || !focusedWorkspace || s.pendingFocusWorkspaceId) {
@@ -2077,8 +2734,17 @@ export default function App() {
     if (!historyPane || historyPane.pane_id === current.originPaneId) return;
     commitInspectorState({ ...current, originPaneId: historyPane.pane_id });
   }, [commitInspectorState, s]);
+  // Search keeps the current pane listed for context, but focusing it is a
+  // no-op, so selection lands on the first entry a jump can actually reach.
   useEffect(() => {
-    if (paneJumpOpen && paneJumpOptions.length === 0) closePaneJump();
+    if (!paneJumpOpen || paneJumpSearch === null) return;
+    if (!paneJumpOptions[paneJumpIndexRef.current]?.current) return;
+    const target = paneJumpOptions.findIndex((entry) => !entry.current);
+    if (target >= 0) selectPaneJumpIndex(target);
+  }, [paneJumpOpen, paneJumpOptions, paneJumpSearch, selectPaneJumpIndex]);
+  useEffect(() => {
+    if (paneJumpOpen && paneJumpSearch === null && paneJumpOptions.length === 0)
+      closePaneJump();
     if (paneJumpIndexRef.current >= paneJumpOptions.length) {
       selectPaneJumpIndex(paneJumpOptions.length - 1);
     }
@@ -2086,6 +2752,7 @@ export default function App() {
     closePaneJump,
     paneJumpOpen,
     paneJumpOptions.length,
+    paneJumpSearch,
     selectPaneJumpIndex,
   ]);
   useLayoutEffect(() => {
@@ -2125,7 +2792,7 @@ export default function App() {
     const current = inspectorStateRef.current;
     if (!current || !activeFilePreview.entry?.path) return;
     writeResourceFileSelection(
-      localStorage,
+      roamgateLocalStorage,
       current.scope,
       activeFilePreview.entry.path,
     );
@@ -2160,6 +2827,14 @@ export default function App() {
   }, [connectionClient, focusedWorkspace, inspectorState]);
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
+      if (e.defaultPrevented || e.isComposing || e.keyCode === 229) return;
+      if (
+        document.querySelector(
+          ".modal-backdrop, .command-popover, .context-menu",
+        ) ||
+        document.getElementById(CONFIG_MENU_ID)
+      )
+        return;
       if (paneJumpOpen) {
         const paneJumpNavigationKey =
           e.key === "Tab" ||
@@ -2167,6 +2842,40 @@ export default function App() {
           e.key === "ArrowUp" ||
           e.key === "Enter" ||
           e.key === "Escape";
+        const paneJumpSearchShortcut = shortcutMatches(e, "panes.search");
+        if (paneJumpSearch !== null) {
+          if (paneJumpSearchShortcut || paneJumpNavigationKey) {
+            e.preventDefault();
+            e.stopPropagation();
+            if (paneJumpSearchShortcut && e.repeat) return;
+            if (paneJumpSearchShortcut || e.key === "Escape")
+              closePaneJump(true);
+            else if (e.key === "Tab")
+              movePaneJumpSelection(e.shiftKey ? -1 : 1);
+            else if (e.key === "ArrowDown") movePaneJumpSelection(1);
+            else if (e.key === "ArrowUp") movePaneJumpSelection(-1);
+            else commitPaneJump();
+          } else if (shortcutMatches(e, "panes.recent")) {
+            e.preventDefault();
+            e.stopPropagation();
+            movePaneJumpSelection(e.shiftKey ? -1 : 1);
+          }
+          // Every other key belongs to the search field, and no workspace
+          // shortcut may fire while it has focus.
+          return;
+        }
+        // Keep the opening modifiers held: Ctrl+K on macOS, Ctrl+Alt+K
+        // on Windows/Linux, and Shift when cycling backwards.
+        if (
+          paneJumpSearchShortcut ||
+          e.code === "KeyK" ||
+          e.key.toLowerCase() === "k"
+        ) {
+          e.preventDefault();
+          e.stopPropagation();
+          openPaneJumpSearch();
+          return;
+        }
         if (paneJumpNavigationKey) {
           e.preventDefault();
           e.stopPropagation();
@@ -2183,22 +2892,39 @@ export default function App() {
           }
           return;
         }
-        if (e.key !== "Control" && e.key !== "Shift") {
+        if (
+          !["Control", "Shift", "Alt", "Meta"].includes(e.key) &&
+          !shortcutMatches(e, "panes.recent")
+        ) {
           closePaneJump();
         }
       }
-      const paneJumpShortcut =
-        e.ctrlKey && !e.metaKey && !e.altKey && e.key === "Tab";
+      const paneJumpShortcut = shortcutMatches(e, "panes.recent");
       if (paneJumpShortcut) {
         if (isEditableElement(e.target)) return;
         if (paneJumpOptions.length === 0) return;
         e.preventDefault();
         e.stopPropagation();
-        if (!paneJumpCtrlDownRef.current) {
-          paneJumpCtrlDownRef.current = true;
+        if (!paneJumpOpen && !e.repeat) {
+          paneJumpModifierRef.current = e.ctrlKey
+            ? "ctrlKey"
+            : e.altKey
+              ? "altKey"
+              : e.metaKey
+                ? "metaKey"
+                : null;
           selectPaneJumpIndex(defaultPaneJumpIndex());
           setPaneJumpOpen(true);
+        } else if (paneJumpOpen) {
+          movePaneJumpSelection(e.shiftKey ? -1 : 1);
         }
+        return;
+      }
+      if (shortcutMatches(e, "panes.search")) {
+        if (isEditableElement(e.target)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        openPaneJumpSearch();
         return;
       }
       if (e.key === "Escape") {
@@ -2224,8 +2950,6 @@ export default function App() {
       }
       const tabAction = tabShortcutAction(e);
       if (tabAction) {
-        // Browser-level Cmd+T/Cmd+W may still be reserved by the host browser,
-        // but standalone/webview clients can route them through this handler.
         e.preventDefault();
         e.stopPropagation();
         if (
@@ -2275,10 +2999,38 @@ export default function App() {
         store.focusTab(targetTabId);
         return;
       }
+      const pluginAction = pluginActionShortcut(e);
+      if (pluginAction) {
+        e.preventDefault();
+        e.stopPropagation();
+        // Typing into the popup's own terminal never reaches here, since
+        // isEditableElement stops at the xterm textarea.
+        if (
+          isEditableElement(e.target) ||
+          document.querySelector(".modal-backdrop")
+        ) {
+          return;
+        }
+        if (e.repeat) return;
+        const current = store.get();
+        const layoutActivePaneId = activePaneIdForSnapshot(current);
+        const activePane = current.panes.find(
+          (pane) => pane.pane_id === layoutActivePaneId,
+        );
+        // Hide-or-open is resolved against Herdr, not this client's popup
+        // state, which a Space switch can leave stale. See togglePluginPopup.
+        void store.togglePluginPopup(
+          pluginAction.pluginId,
+          pluginAction.actionId,
+          {
+            workspace_id: activePane?.workspace_id,
+            focused_pane_cwd: activePane?.foreground_cwd ?? activePane?.cwd,
+          },
+        );
+        return;
+      }
       const paneAction = paneShortcutAction(e);
       if (paneAction) {
-        // Browser-level Cmd+D may still be reserved by the host browser, but
-        // standalone/webview clients can route it through this handler.
         e.preventDefault();
         e.stopPropagation();
         if (
@@ -2287,7 +3039,7 @@ export default function App() {
         ) {
           return;
         }
-        if (e.repeat && paneAction.type === "split") return;
+        if (e.repeat && paneAction.type !== "focus") return;
 
         const current = store.get();
         const focusedWorkspace = current.workspaces.find((w) => w.focused);
@@ -2307,6 +3059,8 @@ export default function App() {
         if (!activePane) return;
         if (paneAction.type === "split") {
           void store.splitPane(activePane.pane_id, paneAction.direction);
+        } else if (paneAction.type === "zoom") {
+          void store.zoomPane(activePane.pane_id);
         } else {
           void store.focusPaneDirection(
             activePane.pane_id,
@@ -2337,11 +3091,24 @@ export default function App() {
         toggleWorkspaceInspector();
         return;
       }
-      const fileExplorerShortcut =
-        e.key.toLowerCase() === "e" &&
-        e.shiftKey &&
-        !e.altKey &&
-        (e.metaKey || e.ctrlKey);
+      if (shortcutMatches(e, "inspector.expand")) {
+        if (mobile || isEditableElement(e.target)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (e.repeat) return;
+        const current = inspectorStateRef.current;
+        if (!current?.open) toggleWorkspaceInspector();
+        setInspectorExpanded(!current?.open || !current.expanded);
+        return;
+      }
+      if (shortcutMatches(e, "annotations.toggle")) {
+        if (isEditableElement(e.target)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        if (!e.repeat) toggleAnnotations();
+        return;
+      }
+      const fileExplorerShortcut = shortcutMatches(e, "files.toggle");
       if (fileExplorerShortcut) {
         if (isEditableElement(e.target)) return;
         e.preventDefault();
@@ -2349,12 +3116,7 @@ export default function App() {
         toggleFileExplorer();
         return;
       }
-      const workspacesShortcut =
-        e.key.toLowerCase() === "w" &&
-        e.ctrlKey &&
-        !e.metaKey &&
-        e.shiftKey &&
-        !e.altKey;
+      const workspacesShortcut = shortcutMatches(e, "workspaces.open");
       if (workspacesShortcut) {
         if (isEditableElement(e.target)) return;
         e.preventDefault();
@@ -2362,12 +3124,7 @@ export default function App() {
         openWorkspaces();
         return;
       }
-      const diffViewerShortcut =
-        e.key.toLowerCase() === "g" &&
-        e.shiftKey &&
-        e.ctrlKey &&
-        !e.metaKey &&
-        !e.altKey;
+      const diffViewerShortcut = shortcutMatches(e, "diff.toggle");
       if (diffViewerShortcut) {
         if (isEditableElement(e.target)) return;
         e.preventDefault();
@@ -2375,17 +3132,21 @@ export default function App() {
         toggleDiffViewer();
         return;
       }
-      if (!e.metaKey || e.ctrlKey || e.altKey || e.shiftKey) return;
-      if (e.key.toLowerCase() !== "b" || isEditableElement(e.target)) return;
+      if (shortcutMatches(e, "zen.toggle")) {
+        if (isEditableElement(e.target)) return;
+        e.preventDefault();
+        e.stopPropagation();
+        toggleZenMode();
+        return;
+      }
+      if (!shortcutMatches(e, "sidebar.toggle") || isEditableElement(e.target))
+        return;
       e.preventDefault();
       toggleSidebar();
     };
     const onKeyUp = (e: KeyboardEvent) => {
-      if (!paneJumpOpen) {
-        if (!e.ctrlKey) paneJumpCtrlDownRef.current = false;
-        return;
-      }
-      if (e.key === "Control" || !e.ctrlKey) {
+      const modifier = paneJumpModifierRef.current;
+      if (paneJumpOpen && modifier && !e[modifier]) {
         e.preventDefault();
         e.stopPropagation();
         commitPaneJump();
@@ -2407,13 +3168,20 @@ export default function App() {
     commitPaneJump,
     defaultPaneJumpIndex,
     movePaneJumpSelection,
+    mobile,
+    openPaneJumpSearch,
     openWorkspaces,
     paneJumpOpen,
     paneJumpOptions.length,
+    paneJumpSearch,
     selectPaneJumpIndex,
+    setInspectorExpanded,
+    toggleAnnotations,
     toggleDiffViewer,
     toggleFileExplorer,
+    toggleSidebar,
     toggleWorkspaceInspector,
+    toggleZenMode,
   ]);
   useEffect(() => {
     const media = window.matchMedia(SYSTEM_THEME_QUERY);
@@ -2451,9 +3219,9 @@ export default function App() {
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = resolvedTheme;
     document.documentElement.style.colorScheme = resolvedTheme;
-    localStorage.setItem(THEME_KEY, theme);
+    roamgateLocalStorage.setItem(THEME_KEY, theme);
     document.documentElement.dataset.accent = accentColor;
-    localStorage.setItem(ACCENT_COLOR_KEY, accentColor);
+    roamgateLocalStorage.setItem(ACCENT_COLOR_KEY, accentColor);
     document.documentElement.style.zoom =
       uiScale === UI_SCALE_DEFAULT ? "" : String(uiScale / 100);
     if (uiScale === UI_SCALE_DEFAULT) {
@@ -2464,28 +3232,54 @@ export default function App() {
         String(uiScale / 100),
       );
     }
-    localStorage.setItem(UI_SCALE_KEY, String(uiScale));
+    // Radix positions popovers using getBoundingClientRect. Some engines
+    // return pre-zoom layout px instead of visual viewport px under CSS
+    // zoom, which breaks the static 1/zoom portal compensation. Measure the
+    // actual ratio and compensate with it so anchoring works either way.
+    const zoomProbe = document.createElement("div");
+    zoomProbe.style.cssText =
+      "position:fixed;top:100px;left:0;width:1px;height:1px;pointer-events:none;visibility:hidden";
+    document.body.append(zoomProbe);
+    const zoomRectRatio = zoomProbe.getBoundingClientRect().top / 100;
+    zoomProbe.remove();
+    if (zoomRectRatio > 0) {
+      document.documentElement.style.setProperty(
+        "--popover-portal-zoom",
+        String(1 / zoomRectRatio),
+      );
+      document.documentElement.style.setProperty(
+        "--popover-content-zoom",
+        String(zoomRectRatio),
+      );
+    } else {
+      document.documentElement.style.removeProperty("--popover-portal-zoom");
+      document.documentElement.style.removeProperty("--popover-content-zoom");
+    }
+    roamgateLocalStorage.setItem(UI_SCALE_KEY, String(uiScale));
   }, [accentColor, resolvedTheme, theme, uiScale]);
   useEffect(() => {
-    localStorage.setItem(
+    roamgateLocalStorage.setItem(ZEN_MODE_KEY, serializeZenMode(zenMode));
+  }, [zenMode]);
+  useEffect(() => {
+    roamgateLocalStorage.setItem(
       MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY,
       serializeMobileTerminalShortcutRows(mobileTerminalShortcuts),
     );
   }, [mobileTerminalShortcuts]);
   useEffect(() => {
-    localStorage.setItem(
+    roamgateLocalStorage.setItem(
       MOBILE_TERMINAL_SIDE_SHORTCUTS_STORAGE_KEY,
       serializeMobileTerminalSideShortcuts(mobileTerminalSideShortcuts),
     );
   }, [mobileTerminalSideShortcuts]);
   useEffect(() => {
-    localStorage.setItem(
+    roamgateLocalStorage.setItem(
       TERMINAL_THEME_SELECTION_STORAGE_KEY,
       serializeTerminalThemeSelection(terminalThemeSelection),
     );
   }, [terminalThemeSelection]);
   useEffect(() => {
-    localStorage.setItem(
+    roamgateLocalStorage.setItem(
       CUSTOM_TERMINAL_THEMES_STORAGE_KEY,
       serializeCustomTerminalThemes(customTerminalThemes),
     );
@@ -2523,12 +3317,24 @@ export default function App() {
     return () => window.clearTimeout(timer);
   }, [notice]);
   useEffect(() => {
+    // Hiding/showing the sidebar snaps `.body`'s grid columns instantly (no
+    // CSS transition), which grows or shrinks every terminal in the tab by
+    // exactly the sidebar's width in one frame. The ResizeObserver that
+    // normally drives this still fires, but its resize RPC is debounced for
+    // window-drag bursts, so the newly revealed columns sit blank (the
+    // terminal's own background) until that debounce elapses and the server
+    // streams a redrawn frame — a black bar the width of the sidebar. Route
+    // this discrete toggle through the same immediate-resize signal used for
+    // mobile/desktop layout switches instead.
+    window.dispatchEvent(new Event(LAYOUT_CHANGE_EVENT));
+  }, [sidebarHidden]);
+  useEffect(() => {
     const normalizedWidth = normalizeSidebarWidth(sidebarWidth);
     if (normalizedWidth !== sidebarWidth) {
       setSidebarWidth(normalizedWidth);
       return;
     }
-    localStorage.setItem("sidebarWidth", String(normalizedWidth));
+    roamgateLocalStorage.setItem("sidebarWidth", String(normalizedWidth));
   }, [sidebarWidth]);
 
   const setInspectorView = (view: InspectorView) => {
@@ -2547,13 +3353,16 @@ export default function App() {
           : current.originPaneId,
     };
     commitInspectorState(next);
-    writeInspectorPreferences(localStorage, next);
+    writeInspectorPreferences(roamgateLocalStorage, next);
     if (mobile) setMobileView(view);
   };
   const setInspectorDock = (dock: InspectorDock) => {
     const current = inspectorStateRef.current;
     if (!current || current.dock === dock) return;
-    const preferences = readInspectorPreferences(localStorage, current.scope);
+    const preferences = readInspectorPreferences(
+      roamgateLocalStorage,
+      current.scope,
+    );
     const next = {
       ...current,
       dock,
@@ -2561,18 +3370,12 @@ export default function App() {
       expanded: false,
     };
     commitInspectorState(next);
-    writeInspectorPreferences(localStorage, next);
-  };
-  const setInspectorExpanded = (expanded: boolean) => {
-    const current = inspectorStateRef.current;
-    if (!current) return;
-    const next = { ...current, expanded };
-    commitInspectorState(next);
-    writeInspectorPreferences(localStorage, next);
+    writeInspectorPreferences(roamgateLocalStorage, next);
   };
   const clearInspectorDetail = () => {
     const current = inspectorStateRef.current;
     if (current?.view === "files") {
+      fileQuickOpenRequestRef.current += 1;
       setActiveFilePreview(emptyActiveFilePreviewSelection());
     } else {
       setActiveDiff(emptyActiveDiffSelection());
@@ -2590,21 +3393,26 @@ export default function App() {
     e.preventDefault();
     const bounds = stage.getBoundingClientRect();
     const minimum =
-      current.dock === "right" ? INSPECTOR_MIN_RIGHT : INSPECTOR_MIN_BOTTOM;
+      (current.dock === "right" ? INSPECTOR_MIN_RIGHT : INSPECTOR_MIN_BOTTOM) /
+      (annotationsDocked ? 2 : 1);
     const maximum = inspectorMaximumSize(
       current.dock,
       bounds.width,
       bounds.height,
+      annotationsDocked,
     );
     const next = {
       ...current,
       size: Math.min(
         maximum,
-        Math.max(minimum, current.size + (increase ? 24 : -24)),
+        Math.max(
+          minimum,
+          Math.min(current.size, maximum) + (increase ? 24 : -24),
+        ),
       ),
     };
     commitInspectorState(next);
-    writeInspectorPreferences(localStorage, next);
+    writeInspectorPreferences(roamgateLocalStorage, next);
   };
   const startInspectorResize = (e: React.PointerEvent) => {
     const current = inspectorStateRef.current;
@@ -2614,16 +3422,22 @@ export default function App() {
     e.stopPropagation();
     const startX = e.clientX;
     const startY = e.clientY;
-    const startSize = current.size;
     const dock = current.dock;
     const bounds = stage.getBoundingClientRect();
-    const maxSize = inspectorMaximumSize(dock, bounds.width, bounds.height);
+    const maxSize = inspectorMaximumSize(
+      dock,
+      bounds.width,
+      bounds.height,
+      annotationsDocked,
+    );
+    const startSize = Math.min(current.size, maxSize);
     let finalSize = startSize;
     const onMove = (event: PointerEvent) => {
       finalSize = Math.min(
         maxSize,
         Math.max(
-          dock === "right" ? INSPECTOR_MIN_RIGHT : INSPECTOR_MIN_BOTTOM,
+          (dock === "right" ? INSPECTOR_MIN_RIGHT : INSPECTOR_MIN_BOTTOM) /
+            (annotationsDocked ? 2 : 1),
           startSize +
             (dock === "right"
               ? startX - event.clientX
@@ -2650,7 +3464,7 @@ export default function App() {
       if (!latest) return;
       const next = { ...latest, size: finalSize };
       commitInspectorState(next);
-      writeInspectorPreferences(localStorage, next);
+      writeInspectorPreferences(roamgateLocalStorage, next);
     };
     window.addEventListener("pointermove", onMove);
     window.addEventListener("pointerup", finish);
@@ -2677,15 +3491,22 @@ export default function App() {
   };
   return (
     <div
-      className={`app ${sidebarHidden ? "sidebar-hidden" : ""} ${
-        mobileControlsCollapsed ? "mobile-controls-collapsed" : ""
-      }`}
+      className={`app ${sidebarHidden && !mobile ? "sidebar-hidden" : ""} ${
+        zenMode && !mobile ? "zen" : ""
+      } ${mobileControlsCollapsed ? "mobile-controls-collapsed" : ""}`}
     >
       <header className="topbar">
         <div className="topbar-start">
           <div className="brand">
-            <img className="logo" src="/herdr-icon.png" alt="Herdr" />
-            <span className="brand-title">Studio</span>
+            <img
+              className="logo"
+              src="/roamgate-mark-48.png"
+              srcSet="/roamgate-mark-48.png 2x, /roamgate-mark-72.png 3x"
+              width={24}
+              height={24}
+              alt=""
+            />
+            <span className="brand-title">Roamgate</span>
             <span className="brand-version">v{packageJson.version}</span>
           </div>
           <ConnectionSwitcher />
@@ -2715,6 +3536,8 @@ export default function App() {
               onTerminalFontFamilyChange={setTerminalFontFamily}
               uiScale={uiScale}
               onUiScaleChange={setUiScale}
+              zenMode={zenMode}
+              onZenModeChange={applyZenMode}
               onMobileTerminalShortcutsChange={setMobileTerminalShortcuts}
               onMobileTerminalSideShortcutsChange={
                 setMobileTerminalSideShortcuts
@@ -2725,6 +3548,19 @@ export default function App() {
           </div>
         </div>
       </header>
+
+      {zenMode && !mobile ? (
+        <button
+          type="button"
+          className="zen-island"
+          title={shortcutTitle("Exit Zen mode", "zen.toggle")}
+          aria-label={shortcutTitle("Exit Zen mode", "zen.toggle")}
+          onClick={() => applyZenMode(false)}
+        >
+          <Minimize2 size={13} />
+          <span>Exit Zen</span>
+        </button>
+      ) : null}
 
       <nav
         className="mobile-nav"
@@ -2747,7 +3583,7 @@ export default function App() {
         <button
           type="button"
           className={mobileView === "files" ? "active" : ""}
-          title="Files"
+          title={shortcutTitle("Files", "files.toggle")}
           aria-label="Show workspace files"
           tabIndex={mobileControlsCollapsed ? -1 : 0}
           onClick={() => openFileExplorer()}
@@ -2758,13 +3594,27 @@ export default function App() {
         <button
           type="button"
           className={mobileView === "changes" ? "active" : ""}
-          title="Changes"
+          title={shortcutTitle("Changes", "diff.toggle")}
           aria-label="Show workspace changes"
           tabIndex={mobileControlsCollapsed ? -1 : 0}
           onClick={() => openDiffViewer()}
         >
           <FileDiff size={16} />
           <span className="mobile-nav-label">Changes</span>
+        </button>
+        <button
+          type="button"
+          className={mobileView === "annotations" ? "active" : ""}
+          title={shortcutTitle("Annotations", "annotations.toggle")}
+          aria-label="Show review annotations"
+          aria-pressed={annotationsOpen}
+          tabIndex={mobileControlsCollapsed ? -1 : 0}
+          onClick={toggleAnnotations}
+        >
+          <MessageSquareText size={16} />
+          <span className="mobile-nav-label">
+            Annotations{annotations.length > 0 ? ` ${annotations.length}` : ""}
+          </span>
         </button>
         <button
           type="button"
@@ -2778,7 +3628,13 @@ export default function App() {
           aria-pressed={historyInspectorOpen}
           tabIndex={mobileControlsCollapsed ? -1 : 0}
           disabled={!activePaneHasAgent && !historyInspectorOpen}
-          onClick={() => setAgentHistoryInspectorOpen(!historyInspectorOpen)}
+          onClick={() => {
+            if (historyInspectorOpen && mobileView !== "history") {
+              setMobileView("history");
+            } else {
+              setAgentHistoryInspectorOpen(!historyInspectorOpen);
+            }
+          }}
         >
           <History size={16} />
           <span className="mobile-nav-label">History</span>
@@ -2794,7 +3650,7 @@ export default function App() {
         className={`mobile-workspace-shortcut ${
           mobileView === "workspaces" ? "is-active" : ""
         }`}
-        title="Workspaces"
+        title={shortcutTitle("Workspaces", "workspaces.open")}
         aria-label={
           mobileView === "workspaces" ? "Hide workspaces" : "Show workspaces"
         }
@@ -2899,92 +3755,97 @@ export default function App() {
         </button>
       </div>
 
-      {s.updateInfo?.update_available || s.notice ? (
-        <div className="toast-viewport" aria-live="polite">
-          {s.updateInfo?.update_available ? (
-            <div
-              className={`toast toast-info ${
-                s.updateInstalling ? "toast-loading" : ""
-              }`}
-              role="status"
-            >
-              <ToastMark kind="info" loading={s.updateInstalling} />
-              <div className="toast-content">
-                <strong>
-                  Herdr Studio {s.updateInfo.latest_version} is available
-                </strong>
-                <p>
-                  Current {s.updateInfo.current_version}
-                  {s.updateInfo.can_auto_update
-                    ? " · ready to update and restart"
-                    : s.updateInfo.reason
-                      ? ` · ${s.updateInfo.reason}`
-                      : ""}
-                </p>
-                <div className="toast-actions">
-                  {s.updateInfo.can_auto_update ? (
-                    <button
-                      type="button"
-                      className="toast-action primary"
-                      onClick={() => store.installUpdate()}
-                      disabled={s.updateInstalling}
-                    >
-                      {s.updateInstalling ? "Updating..." : "Update & restart"}
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    className="toast-action"
+      {s.updateInfo?.update_available || s.notice
+        ? createPortal(
+            <div className="toast-viewport" aria-live="polite">
+              {s.updateInfo?.update_available ? (
+                <div
+                  className={`toast toast-info ${
+                    s.updateInstalling ? "toast-loading" : ""
+                  }`}
+                  role="status"
+                >
+                  <ToastMark kind="info" loading={s.updateInstalling} />
+                  <div className="toast-content">
+                    <strong>
+                      Roamgate {s.updateInfo.latest_version} is available
+                    </strong>
+                    <p>
+                      Current {s.updateInfo.current_version}
+                      {s.updateInfo.can_auto_update
+                        ? " · ready to update and restart"
+                        : s.updateInfo.reason
+                          ? ` · ${s.updateInfo.reason}`
+                          : ""}
+                    </p>
+                    <div className="toast-actions">
+                      {s.updateInfo.can_auto_update ? (
+                        <button
+                          type="button"
+                          className="toast-action primary"
+                          onClick={() => store.installUpdate()}
+                          disabled={s.updateInstalling}
+                        >
+                          {s.updateInstalling
+                            ? "Updating..."
+                            : "Update & restart"}
+                        </button>
+                      ) : null}
+                      <button
+                        type="button"
+                        className="toast-action"
+                        onClick={() => store.dismissUpdate()}
+                        disabled={s.updateInstalling}
+                      >
+                        Dismiss
+                      </button>
+                    </div>
+                  </div>
+                  <CloseButton
+                    variant="toast"
+                    label="Dismiss update notification"
                     onClick={() => store.dismissUpdate()}
                     disabled={s.updateInstalling}
-                  >
-                    Dismiss
-                  </button>
+                  />
                 </div>
-              </div>
-              <CloseButton
-                variant="toast"
-                label="Dismiss update notification"
-                onClick={() => store.dismissUpdate()}
-                disabled={s.updateInstalling}
-              />
-            </div>
-          ) : null}
-          {s.notice ? (
-            <div
-              className={`toast toast-${s.notice.kind} ${
-                s.notice.loading ? "toast-loading" : ""
-              }`}
-              role={s.notice.kind === "error" ? "alert" : "status"}
-            >
-              <ToastMark kind={s.notice.kind} loading={s.notice.loading} />
-              <div className="toast-content">
-                <strong>{s.notice.message}</strong>
-                <NoticeDetail notice={s.notice} />
-                {s.notice.actionLabel &&
-                (s.notice.actionPaneId ||
-                  s.notice.actionWorkspaceId ||
-                  s.notice.actionClipboardText !== undefined) ? (
-                  <div className="toast-actions">
-                    <button
-                      type="button"
-                      className="toast-action primary"
-                      onClick={() => handleNoticeAction(s.notice!)}
-                    >
-                      {s.notice.actionLabel}
-                    </button>
+              ) : null}
+              {s.notice ? (
+                <div
+                  className={`toast toast-${s.notice.kind} ${
+                    s.notice.loading ? "toast-loading" : ""
+                  }`}
+                  role={s.notice.kind === "error" ? "alert" : "status"}
+                >
+                  <ToastMark kind={s.notice.kind} loading={s.notice.loading} />
+                  <div className="toast-content">
+                    <strong>{s.notice.message}</strong>
+                    <NoticeDetail notice={s.notice} />
+                    {s.notice.actionLabel &&
+                    (s.notice.actionPaneId ||
+                      s.notice.actionWorkspaceId ||
+                      s.notice.actionClipboardText !== undefined) ? (
+                      <div className="toast-actions">
+                        <button
+                          type="button"
+                          className="toast-action primary"
+                          onClick={() => handleNoticeAction(s.notice!)}
+                        >
+                          {s.notice.actionLabel}
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
-                ) : null}
-              </div>
-              <CloseButton
-                variant="toast"
-                label="Dismiss notification"
-                onClick={() => store.clearNotice()}
-              />
-            </div>
-          ) : null}
-        </div>
-      ) : null}
+                  <CloseButton
+                    variant="toast"
+                    label="Dismiss notification"
+                    onClick={() => store.clearNotice()}
+                  />
+                </div>
+              ) : null}
+            </div>,
+            document.body,
+          )
+        : null}
 
       <div
         className={`body mobile-view-${mobileView}`}
@@ -2993,6 +3854,11 @@ export default function App() {
         <div className="sidebar">
           <div className="sidebar-content">
             <WorkspaceTree
+              agentsFirst={
+                (mobile
+                  ? layoutPreferences.mobileSidebarOrder
+                  : layoutPreferences.desktopSidebarOrder) === "agents-first"
+              }
               key={`${resourceUiKey}:workspaces`}
               onSelect={(workspace) =>
                 keepInspectorForWorkspace(workspace.workspace_id)
@@ -3024,102 +3890,196 @@ export default function App() {
             key={`${resourceUiKey}:tabs`}
             mobile={mobile}
             inspectorOpen={inspectorState?.open === true}
+            annotationsOpen={annotationsOpen}
+            annotationCount={annotations.length}
             onToggleInspector={toggleWorkspaceInspector}
+            onToggleAnnotations={toggleAnnotations}
           />
           <div
-            ref={inspectorStageRef}
-            className={`workspace-stage ${
-              inspectorState?.open
-                ? `has-inspector inspector-dock-${inspectorState.dock}`
-                : ""
-            } ${inspectorState?.expanded ? "is-inspector-expanded" : ""}`}
+            className={`workspace-surfaces ${annotationsDocked ? "has-annotations" : ""}`}
           >
-            <div className="workspace-terminal-surface">
-              <TerminalPaneLayout
-                terminalTheme={terminalTheme}
-                uiScale={uiScale}
-                terminalFontFamily={terminalFontFamily}
-                mobileShortcuts={mobileTerminalShortcuts}
-                mobileSideShortcuts={mobileTerminalSideShortcuts}
-                composerOpen={terminalComposerOpen}
-                onComposerOpenChange={setTerminalComposerOpen}
-                agentHistoryOpen={agentHistoryOpen}
-                onAgentHistoryOpenChange={setAgentHistoryInspectorOpen}
-                onOpenWorkspaceFile={handleTerminalWorkspaceFile}
-              />
-            </div>
-            {inspectorState?.open && !inspectorState.expanded ? (
-              <div
-                className="workspace-inspector-resizer"
-                role="separator"
-                aria-label={`Resize ${inspectorState.dock} Inspector`}
-                aria-orientation={
-                  inspectorState.dock === "right" ? "vertical" : "horizontal"
-                }
-                tabIndex={0}
-                onKeyDown={resizeInspectorWithKeyboard}
-                onPointerDown={startInspectorResize}
-              />
-            ) : null}
-            {inspectorState ? (
-              <div
-                className={`workspace-inspector-slot ${
-                  inspectorState.open ? "" : "is-closed"
-                }`}
-                style={
-                  inspectorState.expanded
-                    ? undefined
-                    : inspectorState.dock === "right"
-                      ? { width: inspectorState.size }
-                      : { height: inspectorState.size }
-                }
-              >
-                <Suspense
-                  fallback={<div role="status">Loading Inspector...</div>}
-                >
-                  <WorkspaceInspectorHost
-                    key={`${resourceUiKey}:${resourceOwnerKey(inspectorState.scope)}`}
-                    state={inspectorState}
-                    onReady={finishInspectorFocus}
-                    visible={!mobile || mobileView !== "workspaces"}
-                    workspace={inspectorWorkspace}
-                    historyPane={inspectorHistoryPane}
-                    fileSelection={activeFilePreview}
-                    diffSelection={activeDiff}
-                    connectionClient={connectionClient}
-                    onFileSelectionChange={(selection) =>
-                      handleFilePreviewChange(
-                        resourceStateKey(inspectorState.scope),
-                        selection,
-                      )
-                    }
-                    onDiffSelectionChange={(selection) =>
-                      handleDiffSelectionChange(
-                        resourceStateKey(inspectorState.scope),
-                        selection,
-                      )
-                    }
-                    onOpenDiffFile={openDiffFileInExplorer}
-                    onViewChange={setInspectorView}
-                    onDockChange={setInspectorDock}
-                    onExpandedChange={setInspectorExpanded}
-                    onClose={closeInspector}
-                    onBack={clearInspectorDetail}
-                  />
-                </Suspense>
+            <div
+              ref={inspectorStageRef}
+              className={`workspace-stage ${
+                inspectorState?.open
+                  ? `has-inspector inspector-dock-${inspectorState.dock}`
+                  : ""
+              } ${inspectorState?.open && inspectorState.expanded ? "is-inspector-expanded" : ""}`}
+            >
+              <div className="workspace-terminal-surface">
+                <TerminalPaneLayout
+                  terminalTheme={terminalTheme}
+                  uiScale={uiScale}
+                  terminalFontFamily={terminalFontFamily}
+                  mobileShortcuts={mobileTerminalShortcuts}
+                  mobileSideShortcuts={mobileTerminalSideShortcuts}
+                  composerOpen={terminalComposerOpen}
+                  onComposerOpenChange={setTerminalComposerOpen}
+                  agentHistoryOpen={agentHistoryOpen}
+                  onAgentHistoryOpenChange={setAgentHistoryInspectorOpen}
+                  onOpenWorkspaceFile={handleTerminalWorkspaceFile}
+                  zenMode={zenMode && !mobile}
+                  onExitZenMode={() => applyZenMode(false)}
+                />
               </div>
-            ) : null}
+              {inspectorState?.open && !inspectorState.expanded ? (
+                <div
+                  className="workspace-inspector-resizer"
+                  role="separator"
+                  aria-label={`Resize ${inspectorState.dock} Inspector`}
+                  aria-orientation={
+                    inspectorState.dock === "right" ? "vertical" : "horizontal"
+                  }
+                  tabIndex={0}
+                  onKeyDown={resizeInspectorWithKeyboard}
+                  onPointerDown={startInspectorResize}
+                />
+              ) : null}
+              {inspectorState ? (
+                <div
+                  className={`workspace-inspector-slot ${
+                    inspectorState.open ? "" : "is-closed"
+                  }`}
+                  style={
+                    inspectorState.expanded
+                      ? undefined
+                      : inspectorState.dock === "right"
+                        ? { width: inspectorState.size }
+                        : { height: inspectorState.size }
+                  }
+                >
+                  <Suspense
+                    fallback={
+                      <TerminalLoadingFallback label="Loading Inspector" />
+                    }
+                  >
+                    <WorkspaceInspectorHost
+                      key={`${resourceUiKey}:${resourceOwnerKey(inspectorState.scope)}`}
+                      state={inspectorState}
+                      onReady={finishInspectorFocus}
+                      annotations={readAnnotationDraft(inspectorState.scope)}
+                      onCreateAnnotation={addAnnotation}
+                      onReanchorFileAnnotations={reanchorFileAnnotations}
+                      onReanchorDiffAnnotations={reanchorDiffAnnotations}
+                      onEditAnnotation={(id) => {
+                        if (!connectionClient.isCurrent()) return;
+                        setAnnotationDraftScope(inspectorState.scope, true);
+                        setFocusedAnnotationId(id);
+                        setAnnotationsOpen(true);
+                        if (mobile) setMobileView("annotations");
+                      }}
+                      visible={!mobile || mobileView === inspectorState.view}
+                      workspace={inspectorWorkspace}
+                      historyPane={inspectorHistoryPane}
+                      fileSelection={activeFilePreview}
+                      previewRequestRef={fileQuickOpenRequestRef}
+                      diffSelection={activeDiff}
+                      connectionClient={connectionClient}
+                      onFileSelectionChange={(selection) =>
+                        handleFilePreviewChange(
+                          resourceStateKey(inspectorState.scope),
+                          selection,
+                        )
+                      }
+                      onDiffSelectionChange={(selection) =>
+                        handleDiffSelectionChange(
+                          resourceStateKey(inspectorState.scope),
+                          selection,
+                        )
+                      }
+                      onRefreshFile={() => {
+                        if (inspectorWorkspace && activeFilePreview.entry)
+                          loadInspectorFilePreview(
+                            inspectorWorkspace.workspace_id,
+                            activeFilePreview.entry,
+                            activeFilePreview.fragment,
+                          );
+                      }}
+                      onOpenDiffFile={openDiffFileInExplorer}
+                      onOpenDocument={(path, fragment) => {
+                        if (inspectorWorkspace)
+                          openFileExplorerFile(
+                            inspectorWorkspace.workspace_id,
+                            {
+                              name: path.split("/").pop() ?? path,
+                              path,
+                              type: "file",
+                              size: 0,
+                              mtime_ms: 0,
+                              hidden: false,
+                            },
+                            undefined,
+                            fragment,
+                          );
+                      }}
+                      onViewChange={setInspectorView}
+                      onDockChange={setInspectorDock}
+                      onExpandedChange={setInspectorExpanded}
+                      onClose={closeInspector}
+                      onBack={clearInspectorDetail}
+                    />
+                  </Suspense>
+                </div>
+              ) : null}
+            </div>
+            <AnnotationPanel
+              key={annotationStorageKey}
+              open={annotationsOpen && !!annotationScope}
+              annotations={annotations}
+              floating={annotationsFloating && !mobile && !!annotationScope}
+              onToggleFloating={mobile ? undefined : toggleAnnotationsFloating}
+              agentPanes={annotationAgentPanes}
+              preferredPaneId={annotationPreferredPaneId}
+              busy={annotationDeliveryBusy}
+              focusedAnnotationId={focusedAnnotationId}
+              onClose={closeAnnotations}
+              onUpdateComment={(id, comment) =>
+                commitAnnotations((current) =>
+                  current.map((annotation) =>
+                    annotation.id === id
+                      ? { ...annotation, comment }
+                      : annotation,
+                  ),
+                )
+              }
+              onDelete={(id) => {
+                commitAnnotations((current) =>
+                  current.filter((annotation) => annotation.id !== id),
+                );
+                if (focusedAnnotationId === id) setFocusedAnnotationId(null);
+              }}
+              onMove={(id, delta) =>
+                commitAnnotations((current) =>
+                  moveReviewAnnotation(current, id, delta),
+                )
+              }
+              onGoToAgent={
+                deliveredPaneId &&
+                annotationAgentPanes.some(
+                  (pane) => pane.pane_id === deliveredPaneId,
+                )
+                  ? goToDeliveredAgent
+                  : undefined
+              }
+              onClear={clearAnnotations}
+              onCopy={() => void copyFeedback()}
+              onSend={(paneId) => void sendFeedback(paneId)}
+            />
           </div>
         </main>
       </div>
       <GlobalTooltip />
       {viewportDebugEnabled ? <ViewportDebugOverlay /> : null}
+      <PopupOverlay terminalTheme={terminalTheme} />
       {paneJumpOpen ? (
         <PaneJumpOverlay
           entries={paneJumpOptions}
           selectedIndex={paneJumpIndex}
+          search={paneJumpSearch}
+          onSearchChange={changePaneJumpSearch}
           onSelectIndex={selectPaneJumpIndex}
           onCommit={commitPaneJump}
+          onClose={closePaneJump}
         />
       ) : null}
     </div>

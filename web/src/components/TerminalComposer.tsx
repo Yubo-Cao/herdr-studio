@@ -1,3 +1,9 @@
+import { roamgateLocalStorage } from "../browserStorage";
+import {
+  shortcutMatches,
+  shortcutTitle,
+  useShortcutPreferences,
+} from "../shortcutPreferences";
 import {
   CircleHelp,
   CornerDownLeft,
@@ -30,6 +36,7 @@ import {
   writeTerminalComposerSelection,
 } from "../terminalComposer";
 import { MessageDialog } from "./ModalDialogs";
+import "./TerminalComposer.css";
 
 const TERMINAL_COMPOSER_HELP =
   "Draft multiline text with your phone’s native editor before sending it. Adding an image inserts its uploaded path and may dismiss the keyboard; tap the editor to reopen it.";
@@ -72,6 +79,7 @@ export function TerminalComposer({
   onUploadImage: (file: File) => Promise<string>;
   onError: (message: string) => void;
 }) {
+  useShortcutPreferences();
   const [text, setText] = useState(() => readTerminalComposerDraft(draftKey));
   const [submissionPending, setSubmissionPending] = useState(() =>
     terminalComposerSubmissionPending(draftKey),
@@ -83,8 +91,9 @@ export function TerminalComposer({
   const [helpOpen, setHelpOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(
     () =>
-      localStorage.getItem(TERMINAL_COMPOSER_SHORTCUTS_OPEN_STORAGE_KEY) !==
-      "false",
+      roamgateLocalStorage.getItem(
+        TERMINAL_COMPOSER_SHORTCUTS_OPEN_STORAGE_KEY,
+      ) !== "false",
   );
   const textareaRef = useRef<HTMLTextAreaElement | null>(null);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
@@ -321,8 +330,7 @@ export function TerminalComposer({
             if (
               !e.nativeEvent.isComposing &&
               !composingRef.current &&
-              e.key === "Enter" &&
-              (e.metaKey || e.ctrlKey)
+              shortcutMatches(e.nativeEvent, "composer.send")
             ) {
               e.preventDefault();
               void submit(true);
@@ -369,7 +377,7 @@ export function TerminalComposer({
               onPointerDown={keepTextareaFocus}
               onClick={() => {
                 const open = !shortcutsOpen;
-                localStorage.setItem(
+                roamgateLocalStorage.setItem(
                   TERMINAL_COMPOSER_SHORTCUTS_OPEN_STORAGE_KEY,
                   String(open),
                 );
@@ -424,7 +432,10 @@ export function TerminalComposer({
           <button
             type="button"
             className="terminal-composer-submit is-primary"
-            title="Insert into the terminal and send Enter"
+            title={shortcutTitle(
+              "Insert into the terminal and send Enter",
+              "composer.send",
+            )}
             aria-label="Send draft to the terminal"
             disabled={submitDisabled}
             onPointerDown={keepTextareaFocus}

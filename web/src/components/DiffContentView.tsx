@@ -1,6 +1,13 @@
-import { DEFAULT_THEMES, type SelectedLineRange } from "@pierre/diffs";
+import { imageMimeForPath } from "../../../shared/filePreview";
+import { roamgateLocalStorage } from "../browserStorage";
+import { shortcutMatches } from "../shortcutPreferences";
 import {
-  PatchDiff,
+  DEFAULT_THEMES,
+  getSingularPatch,
+  type SelectedLineRange,
+} from "@pierre/diffs";
+import {
+  FileDiff,
   Virtualizer,
   WorkerPoolContextProvider,
   type WorkerInitializationRenderOptions,
@@ -8,6 +15,7 @@ import {
 } from "@pierre/diffs/react";
 import {
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   ChevronUp,
   FolderOpen,
@@ -43,7 +51,7 @@ import type {
 } from "../types";
 import { connectionClientScopeKey } from "../useConnectionClient";
 import { gitDiffCode, gitDiffCodeLabel } from "../gitDiffStatus";
-import { requestFilePreview } from "./FileExplorerDialog";
+import { requestFilePreview } from "./fileExplorerResources";
 import {
   AnnotationComposerPopover,
   type AnnotationComposerDraft,
@@ -55,12 +63,15 @@ import {
 import {
   readDiffCollapseState,
   writeDiffCollapseState,
+  expandDiffEntryOnActivate,
 } from "./diffContentState";
+import { diffSyntaxLanguageForPath } from "./diffSyntaxHighlighting";
+import "./DiffContentView.css";
 
 type DiffViewMode = "split" | "unified";
 type AppTheme = "dark" | "light";
 type PierreDiffOptions = NonNullable<
-  ComponentProps<typeof PatchDiff<DiffReviewAnnotation>>["options"]
+  ComponentProps<typeof FileDiff<DiffReviewAnnotation>>["options"]
 >;
 
 const DIFF_VIEW_MODE_KEY = "diffViewMode";
@@ -110,17 +121,6 @@ const DIFF_SELECTION_CSS = `
     border-block: 1px solid var(--diffs-selection-base);
   }
 `;
-
-const PREVIEWABLE_IMAGE_EXTENSIONS = new Set([
-  "png",
-  "jpg",
-  "jpeg",
-  "gif",
-  "webp",
-  "bmp",
-  "ico",
-  "avif",
-]);
 
 type ImagePreviewState = {
   preview: FilePreview | null;
@@ -249,17 +249,17 @@ function deepQuerySelector(
 }
 
 function loadDiffViewMode(): DiffViewMode {
-  return localStorage.getItem(DIFF_VIEW_MODE_KEY) === "unified"
+  return roamgateLocalStorage.getItem(DIFF_VIEW_MODE_KEY) === "unified"
     ? "unified"
     : "split";
 }
 
 function loadMobileDiffWrap() {
-  return localStorage.getItem(MOBILE_DIFF_WRAP_KEY) === "true";
+  return roamgateLocalStorage.getItem(MOBILE_DIFF_WRAP_KEY) === "true";
 }
 
 function loadDesktopDiffWrap() {
-  return localStorage.getItem(DESKTOP_DIFF_WRAP_KEY) !== "false";
+  return roamgateLocalStorage.getItem(DESKTOP_DIFF_WRAP_KEY) !== "false";
 }
 
 function currentDocumentTheme(): AppTheme {
@@ -294,9 +294,8 @@ export function diffContentEntries(
   return entries.length ? entries : entry ? [entry] : [];
 }
 
-function isPreviewableImagePath(path: string) {
-  const ext = path.toLowerCase().split(".").pop() ?? "";
-  return PREVIEWABLE_IMAGE_EXTENSIONS.has(ext);
+export function isImageDiff(path: string, diff: string) {
+  return imageMimeForPath(path) !== null && (!diff || isBinaryDiffText(diff));
 }
 
 function isBinaryDiffText(diff: string) {
@@ -411,6 +410,31 @@ class DiffRenderBoundary extends Component<
   }
 }
 
+let nextPatchCacheKey = 0;
+
+export function highlightedPatch(patch: string, path: string) {
+  const diff = getSingularPatch(patch);
+  // Pierre 1.4 no longer assigns keys; each parsed patch needs its own worker cache entry.
+  diff.cacheKey = `patch:${++nextPatchCacheKey}`;
+  const language = diffSyntaxLanguageForPath(path);
+  // Pierre applies lang to both sides; let it infer each side of a language-changing rename.
+  if (!diff.prevName || diffSyntaxLanguageForPath(diff.prevName) === language)
+    diff.lang = language;
+  return diff;
+}
+
+function HighlightedPatch({
+  patch,
+  path,
+  ...props
+}: Omit<ComponentProps<typeof FileDiff<DiffReviewAnnotation>>, "fileDiff"> & {
+  patch: string;
+  path: string;
+}) {
+  const fileDiff = useMemo(() => highlightedPatch(patch, path), [patch, path]);
+  return <FileDiff<DiffReviewAnnotation> {...props} fileDiff={fileDiff} />;
+}
+
 function RawPatch({ patch }: { patch: string }) {
   return <pre className="diff-raw-patch">{patch}</pre>;
 }
@@ -422,6 +446,7 @@ type DiffFileSectionProps = {
   options: PierreDiffOptions;
   currentSearchMatch: boolean;
   embedded: boolean;
+  mobile: boolean;
   annotations: readonly DiffReviewAnnotation[];
   annotationSelectionActive: boolean;
   onToggle: (key: string, collapsed: boolean) => void;
@@ -438,6 +463,7 @@ const DiffFileSection = memo(function DiffFileSection({
   options,
   currentSearchMatch,
   embedded,
+  mobile,
   annotations,
   annotationSelectionActive,
   onToggle,
@@ -539,22 +565,52 @@ const DiffFileSection = memo(function DiffFileSection({
     >
       {embedded ? null : (
         <header className="diff-file-section-head">
-          <button
-            type="button"
-            className="diff-file-collapse"
-            onClick={toggle}
-            disabled={!section.active && !onSelectFile}
-            aria-expanded={!section.collapsed}
-            aria-label={`${section.collapsed ? "Expand" : "Collapse"} ${section.entry.path}`}
-            title={section.collapsed ? "Expand" : "Collapse"}
+          {mobile ? null : (
+            <button
+              type="button"
+              className="diff-file-collapse"
+              onClick={toggle}
+              disabled={!section.active && !onSelectFile}
+              aria-expanded={!section.collapsed}
+              aria-label={`${section.collapsed ? "Expand" : "Collapse"} ${section.entry.path}`}
+              title={section.collapsed ? "Expand" : "Collapse"}
+            >
+              {section.collapsed ? (
+                <ChevronRight size={14} />
+              ) : (
+                <ChevronDown size={14} />
+              )}
+            </button>
+          )}
+          <div
+            className={`diff-file-section-title ${
+              mobile && (section.active || onSelectFile) ? "is-toggle" : ""
+            }`}
+            onClick={
+              mobile && (section.active || onSelectFile) ? toggle : undefined
+            }
+            role={
+              mobile && (section.active || onSelectFile) ? "button" : undefined
+            }
+            tabIndex={
+              mobile && (section.active || onSelectFile) ? 0 : undefined
+            }
+            aria-expanded={
+              mobile && (section.active || onSelectFile)
+                ? !section.collapsed
+                : undefined
+            }
+            onKeyDown={
+              mobile && (section.active || onSelectFile)
+                ? (e) => {
+                    if (e.key === "Enter" || e.key === " ") {
+                      e.preventDefault();
+                      toggle();
+                    }
+                  }
+                : undefined
+            }
           >
-            {section.collapsed ? (
-              <ChevronRight size={14} />
-            ) : (
-              <ChevronDown size={14} />
-            )}
-          </button>
-          <div className="diff-file-section-title">
             <strong>{section.entry.path}</strong>
             <span
               className={`git-status-code git-status-${statusCode.toLowerCase()}`}
@@ -581,6 +637,11 @@ const DiffFileSection = memo(function DiffFileSection({
       )}
       {section.collapsed ? null : (
         <>
+          {mobile ? (
+            <div className="diff-file-path-banner" title={section.entry.path}>
+              {section.entry.path}
+            </div>
+          ) : null}
           {section.error ? (
             <div className="diff-content-state is-error">
               <span>{section.error}</span>
@@ -629,8 +690,13 @@ const DiffFileSection = memo(function DiffFileSection({
                 fallback={<RawPatch patch={section.file.diff} />}
                 resetKey={section.file.diff}
               >
-                <PatchDiff<DiffReviewAnnotation>
+                <HighlightedPatch
+                  // Remount on patch change: the renderer's line cache
+                  // realigns against edited documents and can index out of
+                  // range when a reloaded diff replaces the whole patch.
+                  key={section.file.diff}
                   patch={section.file.diff}
+                  path={section.entry.path}
                   options={sectionOptions}
                   lineAnnotations={pierreAnnotations}
                   selectedLines={
@@ -680,6 +746,7 @@ function areDiffFileSectionPropsEqual(
     previous.options === next.options &&
     previous.currentSearchMatch === next.currentSearchMatch &&
     previous.embedded === next.embedded &&
+    previous.mobile === next.mobile &&
     previous.annotations === next.annotations &&
     previous.annotationSelectionActive === next.annotationSelectionActive &&
     previous.onToggle === next.onToggle &&
@@ -691,6 +758,7 @@ function areDiffFileSectionPropsEqual(
 }
 
 export function DiffContentView({
+  selectionRevision = 0,
   entry,
   file,
   loading,
@@ -709,7 +777,9 @@ export function DiffContentView({
   onReanchorAnnotations,
   onEditAnnotation,
   embedded = false,
+  backAction,
 }: {
+  selectionRevision?: number;
   entry: GitDiffEntry | null;
   file: GitDiffFile | null;
   loading: boolean;
@@ -732,6 +802,7 @@ export function DiffContentView({
   ) => void;
   onEditAnnotation?: (id: string) => void;
   embedded?: boolean;
+  backAction?: { label: string; onClick: () => void };
 }) {
   const sectionRef = useRef<HTMLElement | null>(null);
   const searchInputRef = useRef<HTMLInputElement | null>(null);
@@ -763,6 +834,14 @@ export function DiffContentView({
   const effectiveViewMode: DiffViewMode = mobile ? "unified" : viewMode;
   const wrapEnabled = mobile ? mobileWrap : desktopWrap;
   const activeEntryKey = entry ? diffEntryKey(entry) : "";
+  useEffect(() => {
+    if (!activeEntryKey) return;
+    setManualCollapseStates((current) => {
+      const next = expandDiffEntryOnActivate(current, activeEntryKey);
+      if (next !== current) writeDiffCollapseState(resourceKey, next);
+      return next;
+    });
+  }, [activeEntryKey, resourceKey, selectionRevision]);
   const filesByKey = useMemo(() => {
     const merged = { ...files };
     if (entry && file) merged[diffEntryKey(entry)] = file;
@@ -790,9 +869,7 @@ export function DiffContentView({
         const key = diffEntryKey(visibleEntry);
         const diffFile = filesByKey[key] ?? null;
         const imagePreview =
-          !!diffFile &&
-          isPreviewableImagePath(visibleEntry.path) &&
-          (!diffFile.diff || isBinaryDiffText(diffFile.diff));
+          !!diffFile && isImageDiff(visibleEntry.path, diffFile.diff);
         const autoCollapse = diffAutoCollapseInfo(visibleEntry, diffFile);
         const defaultCollapsed = autoCollapse !== null;
         const active = key === activeEntryKey;
@@ -1027,13 +1104,13 @@ export function DiffContentView({
     openFileRef.current = onOpenFile;
   }, [onOpenFile]);
   useEffect(() => {
-    localStorage.setItem(DIFF_VIEW_MODE_KEY, viewMode);
+    roamgateLocalStorage.setItem(DIFF_VIEW_MODE_KEY, viewMode);
   }, [viewMode]);
   useEffect(() => {
-    localStorage.setItem(DESKTOP_DIFF_WRAP_KEY, String(desktopWrap));
+    roamgateLocalStorage.setItem(DESKTOP_DIFF_WRAP_KEY, String(desktopWrap));
   }, [desktopWrap]);
   useEffect(() => {
-    localStorage.setItem(MOBILE_DIFF_WRAP_KEY, String(mobileWrap));
+    roamgateLocalStorage.setItem(MOBILE_DIFF_WRAP_KEY, String(mobileWrap));
   }, [mobileWrap]);
   useEffect(() => {
     requestedImagePreviewsRef.current.clear();
@@ -1159,10 +1236,11 @@ export function DiffContentView({
   );
 
   useEffect(() => {
-    if (embedded) return;
+    if (embedded || mobile) return;
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
-      if (e.key.toLowerCase() !== "f") return;
+      if (e.defaultPrevented || document.querySelector(".shortcut-modal"))
+        return;
+      if (!shortcutMatches(e, "preview.search")) return;
       const section = sectionRef.current;
       if (!section || section.offsetParent === null) return;
       if (isEditableSearchTarget(e.target)) return;
@@ -1173,7 +1251,7 @@ export function DiffContentView({
     window.addEventListener("keydown", onKey, { capture: true });
     return () =>
       window.removeEventListener("keydown", onKey, { capture: true });
-  }, [embedded, focusSearch]);
+  }, [embedded, mobile, focusSearch]);
 
   const diffList = visibleEntries.length ? (
     <Virtualizer
@@ -1193,6 +1271,7 @@ export function DiffContentView({
           options={pierreOptions}
           currentSearchMatch={currentSearchEntryKey === section.key}
           embedded={embedded}
+          mobile={mobile}
           annotations={
             annotationsByPath.get(section.key) ?? EMPTY_DIFF_REVIEW_ANNOTATIONS
           }
@@ -1215,14 +1294,16 @@ export function DiffContentView({
   return (
     <section
       ref={sectionRef}
-      className={`diff-content-view ${embedded ? "is-embedded" : ""}`}
+      className={`diff-content-view ${embedded ? "is-embedded" : ""} ${
+        mobile ? "is-mobile" : ""
+      }`}
       aria-label={embedded ? "File changes" : "Diff Viewer content"}
       tabIndex={-1}
       onKeyDownCapture={(e) => {
         if (
           !embedded &&
-          (e.metaKey || e.ctrlKey) &&
-          e.key.toLowerCase() === "f"
+          !mobile &&
+          shortcutMatches(e.nativeEvent, "preview.search")
         ) {
           if (isEditableSearchTarget(e.target)) return;
           e.preventDefault();
@@ -1232,6 +1313,17 @@ export function DiffContentView({
       }}
     >
       <div className="diff-content-head">
+        {mobile && backAction ? (
+          <button
+            type="button"
+            className="diff-content-back"
+            title={backAction.label}
+            aria-label={backAction.label}
+            onClick={backAction.onClick}
+          >
+            <ChevronLeft size={14} aria-hidden="true" />
+          </button>
+        ) : null}
         {embedded ? null : (
           <div className="diff-content-title">
             <strong>
@@ -1241,7 +1333,6 @@ export function DiffContentView({
                   }`
                 : "Diff Viewer"}
             </strong>
-            {entry ? <span>{entry.path}</span> : null}
           </div>
         )}
         {mobile ? (
@@ -1251,7 +1342,7 @@ export function DiffContentView({
             onClick={() => setMobileWrap((value) => !value)}
             aria-pressed={mobileWrap}
           >
-            {mobileWrap ? "Wrap" : "No wrap"}
+            Wrap
           </button>
         ) : null}
         <div className="diff-content-actions">
@@ -1269,8 +1360,10 @@ export function DiffContentView({
                 <ChevronUp size={14} />
               </button>
               <span>
-                {hunkIndex < 0 ? "–" : hunkIndex + 1}/{hunkTargets.length}{" "}
-                {hunkTargets.length === 1 ? "change" : "changes"}
+                {hunkIndex < 0 ? "–" : hunkIndex + 1}/{hunkTargets.length}
+                {mobile
+                  ? ""
+                  : ` ${hunkTargets.length === 1 ? "change" : "changes"}`}
               </span>
               <button
                 type="button"
@@ -1282,7 +1375,7 @@ export function DiffContentView({
               </button>
             </div>
           ) : null}
-          {!embedded ? (
+          {!embedded && !mobile ? (
             <div className="diff-search-controls">
               <label className="diff-search">
                 <Search size={13} />
@@ -1376,7 +1469,7 @@ export function DiffContentView({
               onClick={() => setDesktopWrap((value) => !value)}
               aria-pressed={desktopWrap}
             >
-              {desktopWrap ? "Wrap" : "No wrap"}
+              Wrap
             </button>
           </div>
         ) : null}

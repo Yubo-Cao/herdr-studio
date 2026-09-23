@@ -19,7 +19,7 @@ describe("workspace preview helpers", () => {
     expect(inlinePreviewMimeForPath("docs/guide.PDF")).toBe("application/pdf");
     expect(inlinePreviewMimeForPath("images/demo.webp")).toBe("image/webp");
     expect(inlinePreviewMimeForPath("page.html")).toBeNull();
-    expect(inlinePreviewMimeForPath("vector.svg")).toBeNull();
+    expect(inlinePreviewMimeForPath("vector.svg")).toBe("image/svg+xml");
   });
 
   test("chooses larger limits only for previewable images", () => {
@@ -57,6 +57,29 @@ describe("workspace preview helpers", () => {
     expect(preview.binary).toBe(true);
     expect(preview.mime_type).toBe("image/png");
     expect(preview.image_data_url).toBe("data:image/png;base64,cG5nLWRhdGE=");
+  });
+
+  test("previews SVG and additional browser image formats as image data", () => {
+    const svg =
+      '<svg xmlns="http://www.w3.org/2000/svg"><path d="M0 0h10"/></svg>';
+    const preview = decodePreviewBuffer(Buffer.from(svg), false, "vector.SVG");
+    expect(preview).toMatchObject({
+      binary: true,
+      text: null,
+      mime_type: "image/svg+xml",
+    });
+    expect(preview.image_data_url).toBe(
+      `data:image/svg+xml;base64,${Buffer.from(svg).toString("base64")}`,
+    );
+    expect(imageMimeForPath("animation.apng")).toBe("image/apng");
+    expect(imageMimeForPath("photo.jfif")).toBe("image/jpeg");
+    expect(imageMimeForPath("photo.jpe")).toBe("image/jpeg");
+    expect(previewLimitForPath("vector.svg", 1024)).toBe(
+      PREVIEW_IMAGE_MAX_BYTES,
+    );
+    expect(
+      decodePreviewBuffer(Buffer.from(svg), true, "vector.svg").image_data_url,
+    ).toBeUndefined();
   });
 
   test("trims incomplete UTF-8 tails for truncated text", () => {

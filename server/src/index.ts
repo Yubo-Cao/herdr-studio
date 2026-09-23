@@ -1,10 +1,15 @@
 import type { ServerWebSocket } from "bun";
+import { isHtmlPath } from "../../shared/filePreview";
+import { DOWNLOAD_TIMEOUT_MS } from "./workspace/file-constants";
+import { createWebPushService } from "./notifications/web-push";
 import { rmSync } from "node:fs";
 import packageJson from "../../package.json";
 import type { SshTunnelConfig } from "./bridge/ssh-tunnel";
 import {
+  flushCoalescedMessages,
   sendWebSocketMessage,
   WebSocketCleanupTracker,
+  WS_PER_MESSAGE_DEFLATE,
 } from "./bridge/websocket-send";
 import {
   browserUrlFor,
@@ -18,6 +23,13 @@ import {
   runServiceCommand,
   SERVICE_COMMAND_CONTINUE,
 } from "./config/service-manager";
+import { runHerdrCommand } from "./herdr/cli";
+import { enrichIntegrationVersions } from "./herdr/integration-versions";
+import {
+  createHerdrSetupHandlers,
+  herdrSetupGuardForProfile,
+} from "./http/herdr-setup";
+import { HerdrClient } from "./bridge/herdr-client";
 import {
   connectionRoutingErrorResponse,
   type ParsedConnectionHttpRoute,
@@ -92,9 +104,19 @@ if (serviceCommandResult === SERVICE_COMMAND_CONTINUE) {
 } else if (serviceCommandResult !== null) {
   process.exit(serviceCommandResult);
 }
+const herdrCommandResult = await runHerdrCommand(
+  process.argv.slice(2),
+  APP_VERSION,
+);
+if (herdrCommandResult !== null) {
+  process.exit(herdrCommandResult);
+}
 const config = loadServerConfig(APP_VERSION);
 configureServerLogger(config.logLevel);
 const logger = serverLogger;
+const webPush = createWebPushService({
+  warn: (message) => logger.warn(message),
+});
 const downstreamConnectionConfig = {
   socketPath: config.socketPath,
   clientSocketPath: config.clientSocketPath,
@@ -103,12 +125,19 @@ const downstreamConnectionConfig = {
   hasExplicitSocketPath: config.hasExplicitSocketPath,
   hasExplicitClientSocketPath: config.hasExplicitClientSocketPath,
 };
-const { isAuthed, handleTokenLogin, handleLogin, loginPage } =
-  createAuthHandlers({
-    authRequired: config.authRequired,
-    password: config.password,
-    urlLoginToken: config.generatedAuthToken,
-  });
+const {
+  isAuthed,
+  sessionToken,
+  handleTokenLogin,
+  handleLogin,
+  handleLogout,
+  loginPage,
+} = createAuthHandlers({
+  authRequired: config.authRequired,
+  password: config.password,
+  urlLoginToken: config.generatedAuthToken,
+  secureCookies: Boolean(config.tls),
+});
 
 type RpcRequest = ConnectionRpcRequest;
 
@@ -120,6 +149,7 @@ const { handleUpdateCheck, handleUpdateInstall } = createUpdateHandlers({
 });
 const clients = new Set<ServerWebSocket<unknown>>();
 const clientIds = new WeakMap<ServerWebSocket<unknown>, number>();
+const clientSessions = new WeakMap<ServerWebSocket<unknown>, string | null>();
 interface WebSocketCleanupSnapshot {
   client: string;
   viewedTerminals: string[];
@@ -357,6 +387,22 @@ const connectionManager = new ConnectionManager<LegacyConnectionRuntime>(
   logger.child("connections"),
 );
 
+const { handleHerdrStatus, handleHerdrSetup } = createHerdrSetupHandlers({
+  ping: () => {
+    const runtime = connectionManager.defaultReadyRuntime();
+    return runtime
+      ? runtime.herdr.ping()
+      : new HerdrClient(config.socketPath).ping();
+  },
+  guard: () =>
+    herdrSetupGuardForProfile(
+      config,
+      connectionProfiles
+        .list()
+        .find((profile) => profile.id === connectionManager.defaultId()),
+    ),
+});
+
 function runtimeFactoryForProfile(
   profile: ConnectionProfile | SyntheticLocalProfile,
 ) {
@@ -384,8 +430,28 @@ function runtimeFactoryForProfile(
         config: profileConfig,
         logger: logger.child("connection"),
         safeSend,
+        broadcast: (payload, context) => {
+          for (const ws of clients) safeSend(ws, payload, context);
+        },
         clientLabel,
         markRpcError,
+        onTaskEvent: (event) => {
+          const connections = connectionProfiles.list();
+          webPush.notify(
+            {
+              ...event,
+              connectionId: identity.id,
+              connectionLabel:
+                connections.length > 1
+                  ? (connections.find(
+                      (connection) => connection.id === identity.id,
+                    )?.label ?? identity.label)
+                  : undefined,
+              runtimeGeneration: context.generation,
+            },
+            context.isCurrent,
+          );
+        },
         onEvent: (event, eventIdentity) => {
           if (!context.isCurrent()) return;
           logger.debug("Herdr event", {
@@ -475,11 +541,13 @@ function safeSend(
   ws: ServerWebSocket<unknown>,
   payload: string,
   context = "message",
+  coalesceKey?: string,
 ): boolean {
   return sendWebSocketMessage(ws, payload, {
     cleanup: () => {
       webSocketCleanup.cleanup(ws);
     },
+    coalesceKey,
     context,
     warn: (message) =>
       logger.warn("websocket send failed", {
@@ -693,7 +761,7 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
           control: {
             type: "pause_connection",
             reason:
-              "Another Herdr Studio client paused this connection. Resume when you want this browser to sync again.",
+              "Another Roamgate client paused this connection. Resume when you want this browser to sync again.",
           },
         }),
         "pause-other-client",
@@ -778,6 +846,17 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     return;
   }
 
+  if (method === "agent.list") {
+    try {
+      const result = await connection.agentSessions.listWithActivity(
+        params ?? {},
+      );
+      sendReply({ id, result }, "agent-list");
+    } catch (e) {
+      sendError("agent-list-error", e);
+    }
+    return;
+  }
   if (method === "agent_history.get") {
     try {
       const result = await readAgentMessageHistory(params ?? {});
@@ -917,7 +996,7 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
       });
       const result = await herdr.call(method, {
         ...(params ?? {}),
-        base: baseSync.base,
+        base: baseSync.commit,
       });
       // Herdr identifies the repository but not which of several workspaces
       // for that repository initiated creation. Keep that GUI relationship.
@@ -1066,6 +1145,12 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
   try {
     const rawResult = await herdr.call(method, params ?? {});
     let result = rawResult;
+    if (method === "integration.list") {
+      result = await enrichIntegrationVersions(result, {
+        sshHost: sshHost(),
+        ping: () => herdr.ping(),
+      });
+    }
     if (method === "workspace.list") {
       result = await worktreeParents.enrichWorkspaceList(result);
       result = await enrichWorkspacesWithGitStatus(result);
@@ -1139,6 +1224,7 @@ async function handleConnectionHttpRequest(
         response = await connection.files.downloadWorkspaceFile({
           workspace_id: url.searchParams.get("workspace_id"),
           path: url.searchParams.get("path"),
+          scope: url.searchParams.get("scope"),
           inline: url.searchParams.get("inline") === "1",
         });
       } catch (error) {
@@ -1187,9 +1273,10 @@ async function handleConnectionHttpRequest(
 function main() {
   const server = bindListenerBeforeConnectionStart({
     bindListener: () =>
-      Bun.serve({
+      Bun.serve<{ sessionToken: string | null }>({
         port: config.port,
         hostname: config.host,
+        tls: config.tls,
         async fetch(req, server) {
           const requestPathname = rawRequestPathname(req.url);
           let url: URL;
@@ -1216,6 +1303,22 @@ function main() {
           if (url.pathname === "/login") {
             return loginPage();
           }
+          // The login page's logo and favicon must also work before login.
+          if (url.pathname === "/roamgate-icon-192.png") {
+            return serveStatic(req, config.publicDir);
+          }
+          if (url.pathname === "/api/logout") {
+            const response = handleLogout(req);
+            const token = sessionToken(req);
+            if (response.ok && config.authRequired && token) {
+              for (const client of clients) {
+                if (clientSessions.get(client) !== token) continue;
+                webSocketCleanup.cleanup(client);
+                client.close(4001, "Logged out");
+              }
+            }
+            return response;
+          }
 
           // Everything else requires auth when bound to a non-localhost address.
           if (!isAuthed(req)) {
@@ -1227,14 +1330,21 @@ function main() {
           }
 
           if (url.pathname === "/ws") {
-            if (server.upgrade(req)) return undefined;
+            if (
+              server.upgrade(req, { data: { sessionToken: sessionToken(req) } })
+            )
+              return undefined;
             return new Response("websocket upgrade failed", { status: 400 });
+          }
+          if (url.pathname === "/api/notifications/push") {
+            return webPush.handle(req);
           }
           if (url.pathname === "/api/health") {
             return Response.json({
               ok: true,
               version: APP_VERSION,
               socket: config.socketPath,
+              auth_required: config.authRequired,
             });
           }
           if (url.pathname === "/api/update/check" && req.method === "GET") {
@@ -1247,19 +1357,38 @@ function main() {
             server.timeout(req, UPDATE_HTTP_IDLE_TIMEOUT_SECONDS);
             return handleUpdateInstall(req);
           }
+          if (url.pathname === "/api/herdr/status" && req.method === "GET") {
+            return handleHerdrStatus();
+          }
+          if (url.pathname === "/api/herdr/setup" && req.method === "POST") {
+            // Herdr download plus service start shares the update budget.
+            server.timeout(req, UPDATE_HTTP_IDLE_TIMEOUT_SECONDS);
+            return handleHerdrSetup(req);
+          }
           const connectionRoute = parseConnectionHttpRoute(
             requestPathname,
             req.method,
           );
           if (connectionRoute) {
+            if (
+              connectionRoute.kind === "connection" &&
+              connectionRoute.endpoint === "file-download" &&
+              url.searchParams.get("inline") === "1" &&
+              isHtmlPath(url.searchParams.get("path") ?? "")
+            ) {
+              // HTML preparation can require several bounded SSH resource reads.
+              server.timeout(req, DOWNLOAD_TIMEOUT_MS / 1000);
+            }
             return handleConnectionHttpRequest(connectionRoute, url, req);
           }
           // Everything else: serve the built frontend (embedded or on-disk).
           return serveStatic(req, config.publicDir);
         },
         websocket: {
+          perMessageDeflate: WS_PER_MESSAGE_DEFLATE,
           open(ws) {
             clients.add(ws);
+            clientSessions.set(ws, ws.data.sessionToken);
             const label = assignClientId(ws);
             logger.debug("client connected", {
               client: label,
@@ -1282,7 +1411,20 @@ function main() {
               "hello",
             );
           },
+          drain(ws) {
+            // The viewer caught up: send the newest repaint we held back.
+            flushCoalescedMessages(ws, {
+              cleanup: () => {
+                webSocketCleanup.cleanup(ws);
+              },
+              warn: (detail) =>
+                logger.warn("websocket send failed", {
+                  detail: detail.replace(/^\[bridge\] /, ""),
+                }),
+            });
+          },
           message(ws, message) {
+            if (!clients.has(ws)) return;
             const text =
               typeof message === "string" ? message : message.toString();
             const { id, method, connectionId, connectionGeneration } =
@@ -1372,7 +1514,7 @@ function main() {
           logger.warn("Herdr not reachable yet", {
             connection: runtime.identity.id,
             error: sanitizeConnectionError(error),
-            action: "start `herdr server`; RPCs retry per request",
+            action: "run `roamgate herdr setup`; RPCs retry per request",
           }),
         );
     },
@@ -1383,7 +1525,11 @@ function main() {
     },
   });
   const listeningPort = server.port ?? config.port;
-  const publicBrowserUrl = browserUrlFor(config.host, listeningPort);
+  const publicBrowserUrl = browserUrlFor(
+    config.host,
+    listeningPort,
+    Boolean(config.tls),
+  );
   logger.info("listening", {
     url: publicBrowserUrl,
     websocket: "/ws",
@@ -1411,7 +1557,9 @@ function main() {
     config.generatedAuthToken,
   );
   if (isAnyHost(config.host)) {
-    const lanUrls = getLanIPs().map((ip) => `http://${ip}:${listeningPort}`);
+    const lanUrls = getLanIPs().map((ip) =>
+      browserUrlFor(ip, listeningPort, Boolean(config.tls)),
+    );
     if (lanUrls.length > 0) {
       for (const url of lanUrls) logger.info("LAN URL", { url });
     } else {
@@ -1423,6 +1571,7 @@ function main() {
 
 let managerStopTask: Promise<void> | null = null;
 function stopManagerOnce(): Promise<void> {
+  webPush.stop();
   connectionProfiles.stopSupervision();
   managerStopTask ??= connectionManager.stopAll();
   return managerStopTask;

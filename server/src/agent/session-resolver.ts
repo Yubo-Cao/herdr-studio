@@ -19,6 +19,12 @@ import {
   findGrokSessionForCwd,
 } from "./grok-session";
 import {
+  describeAntigravitySessionPath,
+  findAntigravitySessionById,
+  findAntigravitySessionForCwd,
+} from "./antigravity-session";
+import { findMuseSession, type MuseMetadataCache } from "./muse-session";
+import {
   integrationInstallCommand,
   isRecord,
   normalizeAgentName,
@@ -27,14 +33,13 @@ import {
 
 export type AgentSessionResolverContext = {
   pathCache: Map<string, string>;
+  museMetadata: MuseMetadataCache;
 };
 
-const DEFAULT_RESOLVER_CONTEXT: AgentSessionResolverContext = {
-  pathCache: new Map(),
-};
+const DEFAULT_RESOLVER_CONTEXT = createAgentSessionResolverContext();
 
 export function createAgentSessionResolverContext(): AgentSessionResolverContext {
-  return { pathCache: new Map() };
+  return { pathCache: new Map(), museMetadata: new Map() };
 }
 
 function normalizeParams(raw: Record<string, unknown>): AgentHistoryParams {
@@ -175,9 +180,20 @@ async function sessionFileFor(
         : await findGrokSessionById(session.value, cwd);
     return descriptor?.file ?? null;
   }
+  if (agent === "agy") {
+    const descriptor =
+      session.kind === "path"
+        ? await describeAntigravitySessionPath(resolve(session.value))
+        : await findAntigravitySessionById(session.value, cwd);
+    return descriptor?.file ?? null;
+  }
   if (session.kind === "path") {
     const path = resolve(session.value);
     return files.statFile(path);
+  }
+  if (agent === "muse") {
+    // A remote ID must never resolve to this machine's unrelated transcript.
+    return files.remote ? null : findMuseSession({ id: session.value });
   }
   if (agent === "pi" && files.remote) {
     return files.findPiSessionById(session.value);
@@ -220,7 +236,23 @@ export async function resolveAgentSession(
   if (!params.pane_id) throw new Error("agent session requires pane_id");
 
   const result = await herdrCall("agent.get", { target: params.pane_id });
-  const agentInfo = parseAgentInfo(result);
+  return resolveAgentSessionInfo(
+    rawParams,
+    parseAgentInfo(result),
+    files,
+    context,
+  );
+}
+
+/** Resolve an existing agent snapshot without another Herdr request. */
+export async function resolveAgentSessionInfo(
+  rawParams: Record<string, unknown>,
+  agentInfo: Record<string, unknown> | null,
+  files: AgentSessionFileAccess,
+  context: AgentSessionResolverContext,
+): Promise<AgentSessionResolved> {
+  const params = normalizeParams(rawParams);
+  if (!params.pane_id) throw new Error("agent session requires pane_id");
   const session = parseAgentSession(agentInfo);
   const agent = normalizeAgentName(
     stringValue(agentInfo?.agent) || session?.agent || params.agent || "",
@@ -230,10 +262,12 @@ export async function resolveAgentSession(
     agent !== "claude" &&
     agent !== "kimi" &&
     agent !== "grok" &&
-    agent !== "pi"
+    agent !== "pi" &&
+    agent !== "muse" &&
+    agent !== "agy"
   ) {
     throw new Error(
-      `agent session only supports codex, claude, kimi, grok, and pi`,
+      `agent session only supports codex, claude, kimi, grok, pi, muse, and agy`,
     );
   }
   // Native session files follow the agent process, which may have been
@@ -262,17 +296,53 @@ export async function resolveAgentSession(
       };
     }
   }
+  if (agent === "agy" && !resolvedSession) {
+    const descriptor = await findAntigravitySessionForCwd(cwd);
+    if (descriptor) {
+      file = descriptor.file;
+      resolvedSession = {
+        source: "agy-local",
+        agent: "agy",
+        kind: "id",
+        value: descriptor.session.sessionId,
+      };
+    }
+  }
+  if (agent === "muse" && !resolvedSession && !files.remote) {
+    file = await findMuseSession({ cwd, metadataCache: context.museMetadata });
+    if (file?.sessionId) {
+      resolvedSession = {
+        source: "muse-local",
+        agent: "muse",
+        kind: "id",
+        value: file.sessionId,
+      };
+    }
+  }
   if (!resolvedSession) {
     return {
       ...base,
       status: "missing_session",
       detail:
-        agent === "grok"
-          ? cwd
-            ? `No local Grok Build session was found for ${cwd}. Start Grok Build in this directory, then refresh Session Inspect.`
-            : "Herdr did not report a working directory for this Grok Build pane."
-          : "Herdr has not received an agent session id for this pane. Install the Herdr integration for this agent and start a new agent session.",
-      command: agent === "grok" ? undefined : integrationInstallCommand(agent),
+        agent === "muse"
+          ? files.remote
+            ? "Muse session inspection over SSH requires a Herdr-reported transcript path. Local session discovery is not used for remote panes."
+            : cwd
+              ? `No local Muse Code session was found for ${cwd}. Start Muse Code in this directory without --no-session-log, then refresh Session Inspect.`
+              : "Herdr did not report a working directory for this Muse Code pane."
+          : agent === "grok"
+            ? cwd
+              ? `No local Grok Build session was found for ${cwd}. Start Grok Build in this directory, then refresh Session Inspect.`
+              : "Herdr did not report a working directory for this Grok Build pane."
+            : agent === "agy"
+              ? cwd
+                ? `No local Antigravity session was found for ${cwd}. Start Antigravity in this directory, then refresh Session Inspect.`
+                : "Herdr did not report a working directory for this Antigravity pane."
+              : "Herdr has not received an agent session id for this pane. Install the Herdr integration for this agent and start a new agent session.",
+      command:
+        agent === "grok" || agent === "muse"
+          ? undefined
+          : integrationInstallCommand(agent),
       updated_at: new Date(0).toISOString(),
       path: "",
       session: null,

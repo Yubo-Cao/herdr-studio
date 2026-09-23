@@ -73,21 +73,19 @@ describe("tutorial Markdown", () => {
     const { content } = await renderTutorial(
       '# Tutorial\n\n<a id="tailscale"></a>\n\n## Networking\n\n' +
         "[Jump](#tailscale) [Deployment](./DEPLOYMENT.md#logging) [Security](../SECURITY.md)\n\n" +
-        "![Terminal](./images/herdr-studio-desktop-terminal.png)\n\n```bash\necho '<safe>'\n```\n\n" +
+        "![Workspace](./images/roamgate-desktop-changes.png)\n\n```bash\necho '<safe>'\n```\n\n" +
         "| Name | Purpose |\n| --- | --- |\n| Serve | Private access |\n",
     );
     expect(content).toContain('href="#tailscale"');
     expect(content).toContain(
-      'href="https://github.com/powerfooI/herdr-studio/blob/main/docs/DEPLOYMENT.md#logging"',
+      'href="https://github.com/powerfooI/roamgate/blob/main/docs/DEPLOYMENT.md#logging"',
     );
     expect(content).toContain(
-      'href="https://github.com/powerfooI/herdr-studio/blob/main/SECURITY.md"',
+      'href="https://github.com/powerfooI/roamgate/blob/main/SECURITY.md"',
     );
-    expect(content).toContain(
-      'src="../assets/herdr-studio-desktop-terminal.png"',
-    );
-    expect(content).toContain('width="4990"');
-    expect(content).toContain('height="2820"');
+    expect(content).toContain('src="../assets/roamgate-desktop-changes.png"');
+    expect(content).toContain('width="4998"');
+    expect(content).toContain('height="2714"');
     expect(content).toContain('loading="lazy"');
     expect(content).toContain("&lt;safe&gt;");
     expect(content).toContain('role="region"');
@@ -99,6 +97,118 @@ describe("tutorial Markdown", () => {
 });
 
 describe("Pages references", () => {
+  test("agent logos illustrate product examples, not a hero support list", async () => {
+    const html = await Bun.file(
+      new URL("../site/index.html", import.meta.url),
+    ).text();
+    const sources = new Set<string>();
+    const labels: string[] = [];
+    let heroLogos = 0;
+    await new HTMLRewriter()
+      .on("img.agent-logo", {
+        element(element) {
+          sources.add(element.getAttribute("src") ?? "");
+          expect(element.getAttribute("alt")).toBe("");
+          expect(element.getAttribute("width")).toBe("28");
+          expect(element.getAttribute("height")).toBe("28");
+        },
+      })
+      .on(".hero-copy .agent-logo", {
+        element() {
+          heroLogos++;
+        },
+      })
+      .on(".mini-agent strong", {
+        text(chunk) {
+          if (chunk.text.trim()) labels.push(chunk.text.trim());
+        },
+      })
+      .transform(new Response(html))
+      .text();
+    expect(heroLogos).toBe(0);
+    expect(html).not.toContain('class="agent-brands"');
+    expect(labels).toEqual(["Codex", "Pi", "Kimi"]);
+    expect([...sources].sort()).toEqual([
+      "./assets/codex.svg",
+      "./assets/kimi.svg",
+      "./assets/pi.svg",
+    ]);
+    for (const source of sources) {
+      const svg = await Bun.file(
+        new URL(`../site/${source}`, import.meta.url),
+      ).text();
+      expect(svg).toContain("<svg");
+      expect(svg).toContain("viewBox=");
+    }
+    expect(
+      await Bun.file(new URL("../site/assets/pi.svg", import.meta.url)).text(),
+    ).toBe(
+      await Bun.file(
+        new URL("../web/src/assets/pi-logo.svg", import.meta.url),
+      ).text(),
+    );
+    expect(html).toContain('href="./assets/agent-icons-LICENSE.txt"');
+  });
+
+  test("social previews and canonical URLs use the production domain", async () => {
+    for (const page of ["index.html", "tutorial/index.html"]) {
+      const html = await Bun.file(
+        new URL(`../site/${page}`, import.meta.url),
+      ).text();
+      expect(html).not.toContain("github.io/");
+      expect(html).toMatch(
+        /property="og:image"\s+content="https:\/\/roamgate\.dev\/roamgate-og\.png"/,
+      );
+      expect(html).toMatch(
+        /name="twitter:image"\s+content="https:\/\/roamgate\.dev\/roamgate-og\.png"/,
+      );
+      expect(html).toContain(
+        'name="twitter:card" content="summary_large_image"',
+      );
+      const url = `https://roamgate.dev/${page.replace("index.html", "")}`;
+      expect(html.replace(/\s+/g, " ")).toContain(
+        `rel="canonical" href="${url}"`,
+      );
+    }
+    expect(
+      await Bun.file(
+        new URL("../site/roamgate-og.png", import.meta.url),
+      ).exists(),
+    ).toBe(true);
+    for (const file of ["robots.txt", "sitemap.xml"]) {
+      const content = await Bun.file(
+        new URL(`../site/${file}`, import.meta.url),
+      ).text();
+      expect(content).toContain("https://roamgate.dev/");
+      expect(content).not.toContain("github.io/");
+    }
+  });
+
+  test("website and tutorial reuse the current README screenshots", async () => {
+    const [readme, site, tutorial, build] = await Promise.all(
+      [
+        "../README.md",
+        "../site/index.html",
+        "../docs/TUTORIAL.md",
+        "./build-pages.ts",
+      ].map((path) => Bun.file(new URL(path, import.meta.url)).text()),
+    );
+    const screenshotPattern = /roamgate-(?:desktop|mobile)-[a-z-]+\.png/g;
+    const screenshots = [...new Set(readme.match(screenshotPattern))].sort();
+    expect(screenshots).toHaveLength(6);
+    for (const source of [site, build]) {
+      expect([...new Set(source.match(screenshotPattern))].sort()).toEqual(
+        screenshots,
+      );
+    }
+    for (const source of [site, tutorial, build]) {
+      expect(source).not.toMatch(/herdr-studio-(?:desktop|mobile)-/);
+    }
+    for (const image of tutorial.match(screenshotPattern) ?? []) {
+      expect(screenshots).toContain(image);
+    }
+  });
+
   test("collects relative links and responsive images without external URLs", () => {
     expect(
       localPageReferences(

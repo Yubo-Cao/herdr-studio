@@ -6,7 +6,6 @@ import type { FrameData } from "./thin-client";
 import type { Logger } from "../utils/logger";
 import { silentLogger } from "../utils/logger";
 import { MOUSE_KIND, VtInputClassifier } from "./vt-input-classifier";
-import { TerminalScrollIntent } from "./terminal-scroll-intent";
 
 const ESC_FLUSH_MS = 25;
 const FIRST_SURFACE_WAIT_MS = 10_000;
@@ -14,6 +13,12 @@ const FIRST_SURFACE_WAIT_MS = 10_000;
 const SURFACE_FIT_MAX_ATTEMPTS = 3;
 // How long a misfitting frame waits for the settled replacement.
 const FIT_DEFER_MS = 500;
+
+type ScrollDispatch = {
+  offset: number;
+  startOffset: number;
+  observed: boolean;
+};
 
 /**
  * Terminal stream over the stable endpoint protocol (Herdr >= 0.9.0).
@@ -32,9 +37,27 @@ export class EndpointTerminalSession extends EventEmitter {
   private pressedMouseButtons = new Set<number>();
   private escFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private paneId: string | null = null;
-  private scrollIntent = new TerminalScrollIntent();
+  private lastScroll: {
+    offsetFromBottom: number;
+    maxOffsetFromBottom: number;
+  } | null = null;
+  // Keep wheel intent separate from viewport feedback: a delayed surface must
+  // not replace movement already queued by newer wheel events.
+  private scrollTarget: number | null = null;
+  private scrollInFlight = false;
+  // One dispatch waits for both its RPC and viewport feedback. Further wheel
+  // events coalesce into scrollTarget without blocking the shared command lane.
+  private scrollDispatched: ScrollDispatch | null = null;
   private closed = false;
   private seq = 0;
+  private readonly linkSessionId = crypto.randomUUID();
+  private linkLookupEpoch = 0;
+  private linkFrame: {
+    token: string;
+    content: string;
+    surface: EndpointSurface;
+    frame: FrameData;
+  } | null = null;
   private deferredFrame: {
     timer: ReturnType<typeof setTimeout>;
     emit: () => void;
@@ -52,9 +75,10 @@ export class EndpointTerminalSession extends EventEmitter {
     private lookupPaneId: (terminalId: string) => Promise<string | null>,
     private logger: Logger = silentLogger,
     private firstSurfaceWaitMs = FIRST_SURFACE_WAIT_MS,
+    surfaceCodecsEnabled = true,
   ) {
     super();
-    this.client = new EndpointClient(socketPath);
+    this.client = new EndpointClient(socketPath, surfaceCodecsEnabled);
     this.client.on("surface", (s) => this.onSurface(s));
     this.client.on("clipboard", (clipboard) => {
       if (!this.closed && this.paneId) this.emit("clipboard", clipboard);
@@ -240,25 +264,86 @@ export class EndpointTerminalSession extends EventEmitter {
   }
 
   private onSurface(surface: EndpointSurface) {
-    if (this.closed || !this.paneId) return; // connect() replays after lookup
+    if (this.closed) return;
+    if (!this.paneId) return; // connect() replays after lookup
     const pane = surface.panes.find((p) => p.paneId === this.paneId);
     if (!pane?.mouseReporting) this.pressedMouseButtons.clear();
-    if (!pane) return;
+    if (!pane) {
+      this.linkFrame = null;
+      this.lastScroll = null;
+      this.scrollTarget = null;
+      this.scrollDispatched = null;
+      return;
+    }
     this.fitSurface(surface, pane);
-    if (pane.scroll)
-      this.scrollIntent.observe(
-        pane.scroll.offsetFromBottom,
-        pane.scroll.maxOffsetFromBottom,
+    const previousMaxOffset = this.lastScroll?.maxOffsetFromBottom;
+    this.lastScroll = pane.scroll
+      ? {
+          offsetFromBottom: pane.scroll.offsetFromBottom,
+          maxOffsetFromBottom: pane.scroll.maxOffsetFromBottom,
+        }
+      : null;
+    if (!this.lastScroll) {
+      this.scrollTarget = null;
+      this.scrollDispatched = null;
+    } else if (this.scrollTarget !== null) {
+      const sent = this.scrollDispatched;
+      // Rebase only outstanding movement, not a completed dispatch awaiting
+      // its frame. Otherwise growth creates a hidden target never sent by RPC.
+      if (
+        !sent ||
+        (this.scrollInFlight && !sent.observed) ||
+        this.scrollTarget !== sent.offset
+      ) {
+        const growth =
+          previousMaxOffset === undefined
+            ? 0
+            : this.lastScroll.maxOffsetFromBottom - previousMaxOffset;
+        if (this.scrollTarget > 0) this.scrollTarget += growth;
+      }
+      this.scrollTarget = Math.max(
+        0,
+        Math.min(this.lastScroll.maxOffsetFromBottom, this.scrollTarget),
       );
-    else this.scrollIntent.reset();
+      if (sent)
+        sent.offset = Math.min(
+          sent.offset,
+          this.lastScroll.maxOffsetFromBottom,
+        );
+      if (
+        sent &&
+        (this.lastScroll.offsetFromBottom === sent.offset ||
+          this.lastScroll.offsetFromBottom !== sent.startOffset)
+      ) {
+        sent.observed = true;
+      }
+      this.settleScroll();
+    }
 
     const cropped = cropFrame(surface.frame, pane.innerRect);
+    // Herdr emits full surfaces even for focus and read-only link RPCs. Surface
+    // sequence/object identity is not link content identity; cursor is not content.
+    const content = JSON.stringify({
+      paneId: pane.paneId,
+      revision: pane.contentRevision,
+      rect: pane.innerRect,
+      scroll: pane.scroll,
+      width: cropped.width,
+      height: cropped.height,
+      cells: cropped.cells,
+      hyperlinks: cropped.hyperlinks,
+    });
+    if (this.linkFrame?.content !== content) this.linkFrame = null;
     const bytes = Buffer.from(frameToAnsi(cropped), "utf8");
     const mouseReporting = pane.mouseReporting;
     const emitFrame = () => {
       if (this.closed) return;
       this.seq += 1;
+      const token =
+        this.linkFrame?.token ?? `${this.linkSessionId}:${this.seq}`;
+      this.linkFrame ??= { token, content, surface, frame: cropped };
       this.emit("terminal", {
+        linkFrame: token,
         seq: this.seq,
         width: cropped.width,
         height: cropped.height,
@@ -306,6 +391,7 @@ export class EndpointTerminalSession extends EventEmitter {
   }
 
   resize(cols: number, rows: number) {
+    this.linkFrame = null;
     this.clearDeferredFrame();
     this.paneSize = { cols, rows };
     this.fitAttempts = SURFACE_FIT_MAX_ATTEMPTS;
@@ -432,7 +518,13 @@ export class EndpointTerminalSession extends EventEmitter {
   }
 
   input(data: Buffer) {
+    this.linkFrame = null;
     if (!this.paneId || this.closed) return;
+    // Typing or application input supersedes a queued history gesture.
+    if (data.length > 0) {
+      this.scrollTarget = null;
+      this.scrollDispatched = null;
+    }
     const pane = this.latestSurface()?.panes.find(
       (p) => p.paneId === this.paneId,
     );
@@ -500,6 +592,7 @@ export class EndpointTerminalSession extends EventEmitter {
         row! >= pane.innerRect.height
       )
         return;
+      this.linkFrame = null;
       this.client.sendPaneInput(this.paneId, [
         {
           type: "mouse",
@@ -514,34 +607,197 @@ export class EndpointTerminalSession extends EventEmitter {
       return;
     }
     this.client.assertMethod("pane.scroll");
+    if (!this.lastScroll) return;
     const delta = direction === "up" ? lines : -lines;
-    const intent = this.scrollIntent.next(delta);
-    if (!intent) return;
-    const paneId = this.paneId;
-    this.enqueueCommand(() =>
-      this.client.callEndpoint("pane.scroll", {
-        pane_id: paneId,
-        offset_from_bottom: intent.offset,
-      }),
+    const offset = Math.max(
+      0,
+      Math.min(
+        this.lastScroll.maxOffsetFromBottom,
+        (this.scrollTarget ?? this.lastScroll.offsetFromBottom) + delta,
+      ),
+    );
+    if (offset === (this.scrollTarget ?? this.lastScroll.offsetFromBottom))
+      return;
+    // Pending motion blocks lookups, but canceled/clamped motion may never
+    // repaint. Keep the displayed token while retiring pre-gesture requests.
+    this.linkLookupEpoch++;
+    this.scrollTarget = offset;
+    this.flushScroll();
+  }
+
+  private settleScroll() {
+    const sent = this.scrollDispatched;
+    if (this.scrollInFlight || !sent?.observed) return;
+    this.scrollDispatched = null;
+    if (this.scrollTarget === sent.offset) this.scrollTarget = null;
+    this.flushScroll();
+  }
+
+  private flushScroll() {
+    if (
+      this.closed ||
+      this.scrollInFlight ||
+      this.scrollDispatched ||
+      this.scrollTarget === null
     )
-      .then(() => this.scrollIntent.acknowledge(intent.id))
+      return;
+    this.scrollInFlight = true;
+    let sent: ScrollDispatch | null = null;
+    this.enqueueCommand(async () => {
+      const offset = this.scrollTarget;
+      if (offset === null || !this.paneId || !this.lastScroll) return;
+      if (offset === this.lastScroll.offsetFromBottom) {
+        // Coalescing canceled the unsent movement; no RPC or repaint is needed.
+        this.scrollTarget = null;
+        return;
+      }
+      sent = {
+        offset,
+        startOffset: this.lastScroll.offsetFromBottom,
+        observed: false,
+      };
+      this.scrollDispatched = sent;
+      const surfaceAtDispatch = this.latestSurface();
+      const result = await this.client.callEndpoint("pane.scroll", {
+        pane_id: this.paneId,
+        offset_from_bottom: offset,
+      });
+      if (this.scrollDispatched !== sent) return;
+      // Herdr 0.9.0 returns PaneInfo, including the applied (possibly clamped)
+      // offset. Its revision is NOT a surface revision. Older/opaque results
+      // still reconcile through surfaces; a confirmed no-op needs no repaint.
+      const scroll = scrollResult(result, this.paneId);
+      if (scroll && !sent.observed) {
+        if (this.scrollTarget === sent.offset)
+          this.scrollTarget = scroll.offset;
+        else if (
+          this.scrollTarget !== null &&
+          this.latestSurface() === surfaceAtDispatch
+        )
+          this.scrollTarget = Math.min(this.scrollTarget, scroll.maxOffset);
+        sent.offset = scroll.offset;
+        if (scroll.offset === sent.startOffset) sent.observed = true;
+      }
+    })
+      .then(() => {
+        this.scrollInFlight = false;
+        this.settleScroll();
+        this.flushScroll();
+      })
       .catch((e) => {
-        this.scrollIntent.fail(intent.id);
+        this.scrollInFlight = false;
+        if (this.scrollDispatched === sent) {
+          this.scrollTarget = null;
+          this.scrollDispatched = null;
+        }
         this.logger.debug("endpoint pane.scroll failed", {
           error: e instanceof Error ? e.message : String(e),
         });
+        this.flushScroll();
       });
   }
 
+  /** Read-only hit testing on the very shell that rendered the cropped pane. */
+  async resolveLink(token: string, row: number, col: number) {
+    const displayed = this.linkFrame;
+    const epoch = this.linkLookupEpoch;
+    const pane = displayed?.surface.panes.find((p) => p.paneId === this.paneId);
+    const current = () =>
+      !this.closed &&
+      !this.connecting &&
+      this.linkFrame === displayed &&
+      this.linkLookupEpoch === epoch &&
+      !this.fitResizeInFlight &&
+      this.scrollTarget === null;
+    if (
+      !displayed ||
+      !pane ||
+      displayed.token !== token ||
+      !current() ||
+      !Number.isInteger(row) ||
+      !Number.isInteger(col) ||
+      row < 0 ||
+      col < 0 ||
+      row >= displayed.frame.height ||
+      col >= displayed.frame.width
+    )
+      throw new Error("Terminal link frame changed");
+    // The public xterm buffer omits OSC8 IDs. Read the owned cropped frame,
+    // without invoking plugins or requiring the optional plain-link resolver.
+    const uri = frameHyperlinkAt(displayed.frame, row, col);
+    if (uri !== undefined) return { regions: [], url: null, uri };
+    if (!this.negotiation?.methods.includes("pane.link.resolve"))
+      return { regions: [], url: null };
+    this.client.assertMethod("pane.link.resolve");
+    // Optional hover reads must not block focus/scroll or close a healthy terminal.
+    const result = await this.client.callEndpoint(
+      "pane.link.resolve",
+      {
+        pane_id: this.paneId,
+        viewport_row: row,
+        col,
+        content_revision: pane.contentRevision,
+        ...(pane.scroll
+          ? { offset_from_bottom: pane.scroll.offsetFromBottom }
+          : {}),
+      },
+      1500,
+    );
+    if (!current()) throw new Error("Terminal link frame changed");
+    return resolvedFrameLink(result, displayed.frame, row, col);
+  }
+
   close() {
+    this.linkFrame = null;
     if (this.closed) return;
     this.closed = true;
-    this.scrollIntent.reset();
+    this.scrollTarget = null;
+    this.scrollDispatched = null;
     this.pressedMouseButtons.clear();
     if (this.escFlushTimer) clearTimeout(this.escFlushTimer);
     this.clearDeferredFrame();
     this.client.close();
   }
+}
+
+function scrollResult(result: unknown, paneId: string) {
+  if (
+    !result ||
+    typeof result !== "object" ||
+    !("type" in result) ||
+    result.type !== "pane_info" ||
+    !("pane" in result)
+  )
+    return null;
+  const pane = result.pane;
+  if (
+    !pane ||
+    typeof pane !== "object" ||
+    !("pane_id" in pane) ||
+    pane.pane_id !== paneId ||
+    !("scroll" in pane)
+  )
+    return null;
+  const scroll = pane.scroll;
+  if (
+    !scroll ||
+    typeof scroll !== "object" ||
+    !("offset_from_bottom" in scroll) ||
+    !("max_offset_from_bottom" in scroll)
+  )
+    return null;
+  const offset = scroll.offset_from_bottom;
+  const maxOffset = scroll.max_offset_from_bottom;
+  if (
+    typeof offset !== "number" ||
+    typeof maxOffset !== "number" ||
+    !Number.isSafeInteger(offset) ||
+    !Number.isSafeInteger(maxOffset) ||
+    offset < 0 ||
+    maxOffset < offset
+  )
+    return null;
+  return { offset, maxOffset };
 }
 
 /** Crop one pane's content rect out of the tab surface. */
@@ -566,4 +822,125 @@ export function cropFrame(
       x >= 0 && x < width && y >= 0 && y < height ? { ...cursor, x, y } : null;
   }
   return { cells, width, height, cursor, hyperlinks: frame.hyperlinks };
+}
+
+/** Undefined means no OSC8; null means an invalid ID and must suppress labels. */
+export function frameHyperlinkAt(
+  frame: FrameData,
+  row: number,
+  col: number,
+): string | null | undefined {
+  for (let x = 0; x <= col; x++) {
+    const cell = frame.cells[row * frame.width + x];
+    if (!cell || cell.skip) continue;
+    const width = Math.max(1, Bun.stringWidth(cell.symbol));
+    if (col < x + width) {
+      if (cell.hyperlink === null) return undefined;
+      return frame.hyperlinks[cell.hyperlink] ?? null;
+    }
+    x += width - 1;
+  }
+  return undefined;
+}
+
+/** resolve returns regions, not a target; activate is unsafe (it runs plugins). */
+export function resolvedFrameLink(
+  result: unknown,
+  frame: FrameData,
+  row: number,
+  col: number,
+): {
+  regions: { row: number; start_col: number; end_col: number }[];
+  url: string | null;
+} {
+  const empty = { regions: [], url: null };
+  if (
+    !result ||
+    typeof result !== "object" ||
+    !("type" in result) ||
+    result.type !== "pane_link_resolved" ||
+    !("regions" in result) ||
+    !Array.isArray(result.regions) ||
+    result.regions.length > frame.height
+  )
+    return empty;
+  const regions: { row: number; start_col: number; end_col: number }[] = [];
+  for (const region of result.regions) {
+    if (
+      !region ||
+      typeof region !== "object" ||
+      !Number.isInteger(region.row) ||
+      !Number.isInteger(region.start_col) ||
+      !Number.isInteger(region.end_col) ||
+      region.row < 0 ||
+      region.row >= frame.height ||
+      region.start_col < 0 ||
+      region.end_col < region.start_col ||
+      region.end_col >= frame.width ||
+      (regions.length && region.row <= regions[regions.length - 1]!.row)
+    )
+      return empty;
+    regions.push({
+      row: region.row,
+      start_col: region.start_col,
+      end_col: region.end_col,
+    });
+  }
+  if (
+    !regions.some(
+      (r) => r.row === row && r.start_col <= col && col <= r.end_col,
+    )
+  )
+    return empty;
+  const first = regions[0]!;
+  const last = regions[regions.length - 1]!;
+  // No upstream read-only target API exists. At either viewport edge we cannot
+  // prove the URL is complete (including a clipped prefix that itself is a URL).
+  if (
+    (first.row === 0 && first.start_col === 0) ||
+    // A wide glyph wrapping below the viewport can leave one spacer cell.
+    (last.row === frame.height - 1 && last.end_col >= frame.width - 2)
+  )
+    return { regions, url: null };
+  let url = "";
+  for (let i = 0; i < regions.length; i++) {
+    const r = regions[i]!;
+    const previous = regions[i - 1];
+    const spacer = previous && frame.cells[r.row * frame.width - 1];
+    const firstCell = frame.cells[r.row * frame.width];
+    const wideWrap =
+      previous?.end_col === frame.width - 2 &&
+      spacer?.symbol === " " &&
+      !spacer.skip &&
+      spacer.hyperlink === null &&
+      firstCell &&
+      !firstCell.skip &&
+      Bun.stringWidth(firstCell.symbol) === 2;
+    if (
+      previous &&
+      (r.row !== previous.row + 1 ||
+        r.start_col !== 0 ||
+        (previous.end_col !== frame.width - 1 && !wideWrap))
+    )
+      return { regions, url: null };
+    for (let x = r.start_col; x <= r.end_col; x++) {
+      const cell = frame.cells[r.row * frame.width + x];
+      if (!cell || cell.hyperlink !== null) return { regions, url: null };
+      if (cell.skip) continue;
+      url += cell.symbol;
+      x += Math.max(0, Bun.stringWidth(cell.symbol) - 1);
+    }
+  }
+  try {
+    const parsed = new URL(url);
+    if (
+      !/^https?:\/\//i.test(url) ||
+      !parsed.hostname ||
+      /[\s\u0000-\u001f\u007f]/u.test(url)
+    )
+      return { regions, url: null };
+  } catch {
+    return { regions, url: null };
+  }
+  return { regions, url };
 }

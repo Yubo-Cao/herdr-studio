@@ -77,9 +77,6 @@ jobs:
           test "$(read_version package.json)" = "$VERSION"
           test "$(read_version web/package.json)" = "$VERSION"
           test "$(read_version server/package.json)" = "$VERSION"
-          escaped_version="${VERSION//./\\.}"
-          git show "$release_sha:CHANGELOG.md" \
-            | grep -Eq "^## ${escaped_version} - [0-9]{4}-[0-9]{2}-[0-9]{2}$"
 
           tag="v$VERSION"
           if git rev-parse --verify --quiet "refs/tags/$tag" >/dev/null; then
@@ -88,7 +85,7 @@ jobs:
           else
             git config user.name "github-actions[bot]"
             git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-            git tag -a "$tag" -m "Herdr Studio $VERSION" "$release_sha"
+            git tag -a "$tag" -m "Roamgate $VERSION" "$release_sha"
             gh auth setup-git
             git push origin "$tag"
           fi

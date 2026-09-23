@@ -27,6 +27,9 @@ export type FilePreviewDecoded = {
 export type FilePreviewResult = FilePreviewDecoded & {
   root: string;
   path: string;
+  // Omitted for regular files; "directory" marks a directory target, which
+  // has no previewable content (text stays null).
+  type?: "file" | "directory";
   size: number;
   mtime_ms: number;
   truncated: boolean;

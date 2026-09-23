@@ -1,8 +1,13 @@
 import { describe, expect, test } from "bun:test";
-import {
-  macCommandEditingSequence,
-  modifiedEnterSequence,
-} from "./terminalKeys";
+import { terminalShortcutSequence } from "./terminalKeys";
+import { defaultShortcutBindings } from "./shortcutBindings";
+type KeyEvent = Parameters<typeof terminalShortcutSequence>[0];
+const modifiedEnterSequence = (event: KeyEvent) =>
+  terminalShortcutSequence(event, defaultShortcutBindings("linux"));
+const macCommandEditingSequence = (event: KeyEvent, isMac: boolean) =>
+  isMac
+    ? terminalShortcutSequence(event, defaultShortcutBindings("mac"))
+    : null;
 
 function keyEvent(
   overrides: Partial<Parameters<typeof modifiedEnterSequence>[0]> = {},
@@ -22,13 +27,23 @@ function keyEvent(
 }
 
 describe("terminal modified Enter keys", () => {
-  test("keeps Shift+Enter and Alt+Enter distinct", () => {
+  test("keeps Shift+Enter, Alt+Enter and Ctrl+Enter distinct", () => {
     expect(modifiedEnterSequence(keyEvent({ shiftKey: true }))).toBe(
       "\x1b[13;2u",
     );
     expect(modifiedEnterSequence(keyEvent({ altKey: true }))).toBe(
       "\x1b[13;3u",
     );
+    for (const platform of ["mac", "windows", "linux"] as const) {
+      for (const code of ["Enter", "NumpadEnter"]) {
+        expect(
+          terminalShortcutSequence(
+            keyEvent({ code, ctrlKey: true }),
+            defaultShortcutBindings(platform),
+          ),
+        ).toBe("\x1b[13;5u");
+      }
+    }
   });
 
   test("does not collapse other modifier combinations", () => {
@@ -42,7 +57,13 @@ describe("terminal modified Enter keys", () => {
         }),
       );
       const expected =
-        modifiers === 1 ? "\x1b[13;2u" : modifiers === 2 ? "\x1b[13;3u" : null;
+        modifiers === 1
+          ? "\x1b[13;2u"
+          : modifiers === 2
+            ? "\x1b[13;3u"
+            : modifiers === 4
+              ? "\x1b[13;5u"
+              : null;
       expect(sequence).toBe(expected);
     }
   });

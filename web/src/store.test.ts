@@ -134,7 +134,7 @@ describe("automatic update check preference", () => {
 
       await store.checkForUpdate();
       expect(fetchCalls).toBe(2);
-      expect(store.get().notice?.message).toBe("Herdr Studio is up to date");
+      expect(store.get().notice?.message).toBe("Roamgate is up to date");
     } finally {
       __storeTesting.replaceState(previousState);
       globalThis.fetch = previousFetch;
@@ -318,6 +318,9 @@ function partitionState(): State {
     sessionsByConnectionId: { alpha, beta },
     notice: null,
     taskNotificationsEnabled: false,
+    taskNotificationPreferences: { completed: true, blocked: true },
+    taskNotificationTransport: "local",
+    taskNotificationBusy: false,
     taskNotificationPermission: "unsupported",
     automaticUpdateChecksEnabled: true,
     updateInfo: null,
@@ -326,6 +329,79 @@ function partitionState(): State {
     dismissedUpdateVersion: null,
   };
 }
+
+describe("Git folder actions", () => {
+  test.each([
+    ["stage", -1],
+    ["unstage", 0],
+    ["discard_unstaged", 1],
+    ["delete_untracked", 2],
+  ] as const)(
+    "%s reports progress and refreshes after failure at %d",
+    async (gitAction, failAt) => {
+      const previousState = store.get();
+      const originalConnection = bridge.connection;
+      const entries = ["one.ts", "two.ts", "three.ts"].map((path) => ({
+        path,
+        old_path: `old/${path}`,
+        mtime_ms: 123,
+        size: 456,
+      }));
+      const mutations: Record<string, unknown>[] = [];
+      const refreshCalls: string[] = [];
+      bridge.connection = () => ({
+        connectionId: "alpha",
+        generation: 10,
+        serverRuntimeGeneration: 1,
+        isCurrent: () => true,
+        acceptsServerGeneration: (generation) => generation === 1,
+        call: async (method, params) => {
+          if (method === "git.file_action") {
+            mutations.push(params!);
+            if (mutations.length - 1 === failAt)
+              throw new Error("File changed");
+            return {};
+          }
+          refreshCalls.push(method);
+          return {};
+        },
+      });
+      try {
+        __storeTesting.replaceState(partitionState());
+        const result = await store.runGitFileActionBatch(
+          "same-workspace",
+          gitAction,
+          entries,
+        );
+        const completed = failAt < 0 ? entries.length : failAt;
+        expect(result).toBe(failAt < 0 ? completed : undefined);
+        expect(mutations).toEqual(
+          entries
+            .slice(0, failAt < 0 ? entries.length : failAt + 1)
+            .map((entry) => ({
+              workspace_id: "same-workspace",
+              action: gitAction,
+              ...entry,
+            })),
+        );
+        expect(refreshCalls).toEqual(
+          completed
+            ? ["workspace.list", "tab.list", "pane.list", "agent.list"]
+            : [],
+        );
+        expect(store.get().notice?.kind).toBe(failAt < 0 ? "success" : "error");
+        if (failAt >= 0) {
+          expect(store.get().notice?.detail).toBe(
+            `${completed} of 3 files completed. File changed`,
+          );
+        }
+      } finally {
+        bridge.connection = originalConnection;
+        __storeTesting.replaceState(previousState);
+      }
+    },
+  );
+});
 
 describe("connection-partitioned store state", () => {
   test("keeps the store generation aligned when pausing an already-disconnected bridge", () => {
@@ -1562,4 +1638,63 @@ describe("basic Herdr 0.9 compatibility", () => {
       }
     });
   }
+});
+
+describe("agent activity refresh", () => {
+  test("reloads server recency and tolerates unavailable agent metadata", async () => {
+    const originalConnection = bridge.connection;
+    const snapshot = partitionState();
+    let sequence = 42;
+    let activity = 1234;
+    let unavailable = false;
+    bridge.connection = (() => ({
+      connectionId: "alpha",
+      generation: 10,
+      isCurrent: () => true,
+      call: (async (method) => {
+        if (method === "workspace.list")
+          return { workspaces: structuredClone(snapshot.workspaces) };
+        if (method === "tab.list")
+          return { tabs: structuredClone(snapshot.tabs) };
+        if (method === "pane.list")
+          return { panes: structuredClone(snapshot.panes) };
+        if (method === "agent.list") {
+          if (unavailable) throw new Error("Unsupported method");
+          return {
+            agents: snapshot.panes.map((pane) => ({
+              ...pane,
+              state_change_seq: sequence,
+              last_activity_at: activity,
+            })),
+          };
+        }
+        if (method === "pane.layout") return { layout: null };
+        return {};
+      }) as ConnectionClient["call"],
+    })) as typeof bridge.connection;
+    try {
+      __storeTesting.replaceState(snapshot);
+      await store.refresh();
+      expect(store.get().panes[0]?.state_change_seq).toBe(42);
+      expect(store.get().panes[0]?.last_activity_at).toBe(1234);
+      __storeTesting.replaceState(snapshot); // Fresh browser snapshot has no activity history.
+      await store.refresh();
+      expect(store.get().panes[0]?.state_change_seq).toBe(42);
+      expect(store.get().panes[0]?.last_activity_at).toBe(1234);
+      sequence = 2; // Herdr restarted: accept its new sequence rather than a cached maximum.
+      await store.refresh();
+      expect(store.get().panes[0]?.state_change_seq).toBe(2);
+      expect(store.get().panes[0]?.last_activity_at).toBe(1234);
+      activity = 2345;
+      await store.refresh();
+      expect(store.get().panes[0]?.last_activity_at).toBe(2345);
+      unavailable = true;
+      await store.refresh();
+      expect(store.get().error).toBeNull();
+      expect(store.get().panes).toEqual(snapshot.panes);
+    } finally {
+      bridge.connection = originalConnection;
+      __storeTesting.replaceState(partitionState());
+    }
+  });
 });

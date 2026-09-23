@@ -1,9 +1,13 @@
+import { normalizeSearchText } from "./searchText";
+import { shortId } from "./utils";
 import type { Pane, PaneLayout, Tab, Workspace } from "./types";
 
 export type PaneJumpEntry = {
   paneId: string;
+  paneLabel: string;
   title: string;
-  subtitle: string;
+  tabLabel: string;
+  cwd: string;
   agent?: string;
   agentStatus?: string;
   current: boolean;
@@ -53,6 +57,34 @@ export function paneJumpEntries(
   snapshot: PaneJumpSnapshot,
   activePaneId?: string | null,
 ): PaneJumpEntry[] {
+  return orderedPaneJumpEntries(snapshot, activePaneId, false);
+}
+
+/**
+ * Searches every live pane instead of the recent ones alone, so a pane that was
+ * never visited stays reachable by workspace, tab, directory, or agent name.
+ * Matches keep the recent-first order rather than a relevance ranking, which
+ * leaves the list stable while the query grows.
+ */
+export function paneSearchEntries(
+  snapshot: PaneJumpSnapshot,
+  query: string,
+  activePaneId?: string | null,
+): PaneJumpEntry[] {
+  const entries = orderedPaneJumpEntries(snapshot, activePaneId, true);
+  const tokens = normalizeSearchText(query).split(" ").filter(Boolean);
+  if (tokens.length === 0) return entries;
+  return entries.filter((entry) => {
+    const haystack = normalizeSearchText(paneSearchValue(entry));
+    return tokens.every((token) => haystack.includes(token));
+  });
+}
+
+function orderedPaneJumpEntries(
+  snapshot: PaneJumpSnapshot,
+  activePaneId: string | null | undefined,
+  includeAllPanes: boolean,
+): PaneJumpEntry[] {
   const paneById = new Map(snapshot.panes.map((pane) => [pane.pane_id, pane]));
   const workspaceById = new Map(
     snapshot.workspaces.map((workspace) => [workspace.workspace_id, workspace]),
@@ -61,7 +93,11 @@ export function paneJumpEntries(
   const fallbackPaneIds =
     snapshot.layout?.panes.map((pane) => pane.pane_id) ?? [];
   const seen = new Set<string>();
-  const orderedPaneIds = [...snapshot.recentPaneIds, ...fallbackPaneIds];
+  const orderedPaneIds = [
+    ...snapshot.recentPaneIds,
+    ...fallbackPaneIds,
+    ...(includeAllPanes ? snapshot.panes.map((pane) => pane.pane_id) : []),
+  ];
 
   return orderedPaneIds
     .filter((paneId) => {
@@ -77,6 +113,20 @@ export function paneJumpEntries(
         paneId === activePaneId,
       ),
     );
+}
+
+function paneSearchValue(entry: PaneJumpEntry): string {
+  return [
+    entry.title,
+    entry.tabLabel,
+    entry.cwd,
+    entry.paneLabel,
+    entry.agent,
+    entry.agentStatus,
+    entry.paneId,
+  ]
+    .filter(Boolean)
+    .join(" ");
 }
 
 /** Returns a real focus target, excluding an invalid or already-current item. */
@@ -103,14 +153,13 @@ function paneJumpEntry(
       ? tab.label
       : `Tab ${tab.number}`
     : pane.tab_id;
-  const subtitle = [tabLabel, cwd]
-    .filter((value) => value.trim().length > 0)
-    .join(" · ");
 
   return {
     paneId: pane.pane_id,
+    paneLabel: `Pane ${shortId(pane.pane_id)}`,
     title: workspaceLabel,
-    subtitle,
+    tabLabel,
+    cwd,
     agent: pane.agent,
     agentStatus: pane.agent ? pane.agent_status : undefined,
     current,

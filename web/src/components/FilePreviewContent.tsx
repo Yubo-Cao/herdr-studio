@@ -1,3 +1,8 @@
+import { shortcutMatches } from "../shortcutPreferences";
+import {
+  HTML_PREVIEW_MAX_BYTES,
+  isHtmlPath,
+} from "../../../shared/filePreview";
 import {
   useCallback,
   useEffect,
@@ -9,7 +14,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import type { EditorView as CodeMirrorEditorView } from "@codemirror/view";
-import { ChevronLeft } from "lucide-react";
+import { ChevronLeft, FolderPlus, RefreshCw } from "lucide-react";
 import { fileReviewLineLabel, MAX_QUOTE_LENGTH } from "../annotations";
 import {
   FileAnnotationDrag,
@@ -21,9 +26,11 @@ import type {
   ReviewAnnotation,
 } from "../annotations";
 import type { FileExplorerEntry, FilePreview } from "../types";
+import { copyTextFromUserGesture } from "../terminalClipboard";
 import { useConnectionClient } from "../useConnectionClient";
 import {
   resolveWorkspaceMarkdownImageUrl,
+  workspaceMarkdownDocumentPath,
   workspaceFileUrl,
 } from "../workspaceFileUrl";
 import { MarkdownPreview, type MarkdownSelectionTarget } from "./markdown";
@@ -32,6 +39,7 @@ import {
   type AnnotationComposerDraft,
 } from "./AnnotationComposerPopover";
 import { MermaidDiagram } from "./MermaidDiagram";
+import { ImagePreview } from "./ImagePreview";
 import {
   handlePreviewEditorCopy,
   isEditablePreviewTarget,
@@ -40,13 +48,22 @@ import {
   selectAllInPreviewElement,
 } from "./previewSelection";
 import { highlightCodeTokens } from "./syntaxHighlighting";
-import { store } from "../store";
+import { store, useStoreSelector } from "../store";
+import { relativePathWithinCheckout } from "../workspaceResource";
+import {
+  directoryPreviewName,
+  directoryPreviewPath,
+  normalizeFilesystemPath,
+} from "../filesystemPaths";
+import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
+import "./FilePreviewContent.css";
 
 export type ActiveFilePreviewSelection = {
   entry: FileExplorerEntry | null;
   preview: FilePreview | null;
   loading: boolean;
   error: string | null;
+  fragment?: string;
 };
 
 export type FilePreviewSelectionMeta = {
@@ -92,6 +109,12 @@ async function importCodeMirrorPreviewDeps() {
 
   return {
     basicSetup: codemirror.basicSetup,
+    configuredShortcutGuard: state.Prec.highest(
+      view.keymap.of([
+        { key: "Mod-f", run: () => true },
+        { key: "Mod-a", run: () => true },
+      ]),
+    ),
     Compartment: state.Compartment,
     Decoration: view.Decoration,
     RangeSet: state.RangeSet,
@@ -162,11 +185,14 @@ export function FilePreviewContent({
   preview,
   loading,
   error,
+  fragment,
   changesContent,
   changesKey,
   annotations = [],
   backAction,
   onOpenChanges,
+  onOpenFile,
+  onRefresh,
   onCreateAnnotation,
   onReanchorAnnotations,
 }: {
@@ -174,15 +200,19 @@ export function FilePreviewContent({
   preview: FilePreview | null;
   loading: boolean;
   error: string | null;
+  fragment?: string;
   changesContent?: ReactNode;
   changesKey?: string;
   backAction?: { label: string; onClick: () => void };
   annotations?: readonly ReviewAnnotation[];
   onOpenChanges?: () => void;
+  onOpenFile?: (path: string, fragment?: string) => void;
+  onRefresh?: () => void;
   onCreateAnnotation?: (annotation: NewReviewAnnotation) => void;
   onReanchorAnnotations?: (path: string, text: string) => void;
 }) {
   const connectionClient = useConnectionClient();
+  const workspaces = useStoreSelector((state) => state.workspaces);
   const previewSectionRef = useRef<HTMLElement | null>(null);
   const previewContentRef = useRef<HTMLDivElement | null>(null);
   const editorViewRef = useRef<CodeMirrorEditorView | null>(null);
@@ -192,6 +222,7 @@ export function FilePreviewContent({
     "rendered",
   );
   const [detailTab, setDetailTab] = useState<"file" | "changes">("file");
+  const [workspaceDialogOpen, setWorkspaceDialogOpen] = useState(false);
   const [pendingAnnotation, setPendingAnnotation] =
     useState<PendingFileAnnotation | null>(null);
   const [markdownSelection, setMarkdownSelection] =
@@ -199,13 +230,28 @@ export function FilePreviewContent({
   const theme = useDocumentTheme();
   const previewText = preview?.text ?? null;
   const previewPath = preview?.path ?? "";
+  const markdownDocumentPath = preview
+    ? workspaceMarkdownDocumentPath(previewPath, preview.root)
+    : previewPath;
   const hasPreviewText = previewText !== null;
   const hasMarkdownPreview = hasPreviewText && isMarkdownPath(previewPath);
   const hasMermaidPreview = hasPreviewText && isMermaidPath(previewPath);
   const hasPdfPreview = Boolean(preview && isPdfPath(previewPath));
   const pdfTooLarge =
     hasPdfPreview && (preview?.size ?? 0) > PDF_INLINE_PREVIEW_MAX_BYTES;
-  const hasRichPreview = hasMarkdownPreview || hasMermaidPreview;
+  const hasHtmlPreview =
+    hasPreviewText &&
+    !preview?.binary &&
+    preview?.type !== "directory" &&
+    isHtmlPath(previewPath) &&
+    (!/^(?:\/|[a-z]:[\\/])/i.test(previewPath) ||
+      relativePathWithinCheckout(preview?.root ?? "", previewPath) !==
+        undefined);
+  const htmlTooLarge =
+    hasHtmlPreview &&
+    ((preview?.size ?? 0) > HTML_PREVIEW_MAX_BYTES || !!preview?.truncated);
+  const hasRichPreview =
+    hasMarkdownPreview || hasMermaidPreview || hasHtmlPreview;
   const renderRichPreview = hasRichPreview && previewMode === "rendered";
   const inlinePreviewUrl = useMemo(() => {
     if (!preview?.workspace_id || !previewPath) return null;
@@ -226,7 +272,7 @@ export function FilePreviewContent({
     return (source: string) =>
       resolveWorkspaceMarkdownImageUrl(
         source,
-        previewPath,
+        markdownDocumentPath,
         connectionClient,
         preview.workspace_id,
         preview.resource_revision,
@@ -236,10 +282,28 @@ export function FilePreviewContent({
     preview?.resource_revision,
     preview?.workspace_id,
     previewPath,
+    markdownDocumentPath,
   ]);
+  const markdownLinkUrlResolver = useMemo(() => {
+    if (!preview?.workspace_id) return undefined;
+    return (path: string) =>
+      workspaceFileUrl(connectionClient, preview.workspace_id, path);
+  }, [connectionClient, preview?.workspace_id]);
   const changesAvailable =
     changesContent !== undefined && !!changesKey && !!onOpenChanges;
   const showingChanges = detailTab === "changes" && changesAvailable;
+  const directoryPath = directoryPreviewPath(preview);
+  const directoryWorkspaceRoot = directoryPath
+    ? workspaces.some((workspace) => {
+        const root = workspace.worktree?.checkout_path ?? workspace.cwd;
+        return !!root && normalizeFilesystemPath(root) === directoryPath;
+      })
+    : false;
+  const showDirectoryWorkspaceAction =
+    !!directoryPath && !directoryWorkspaceRoot;
+  const directoryWorkspaceName = directoryPath
+    ? directoryPreviewName(directoryPath)
+    : "";
   const lineAnnotations = useMemo(
     () =>
       annotations.filter(
@@ -267,6 +331,9 @@ export function FilePreviewContent({
 
   useEffect(() => {
     setPreviewMode("rendered");
+  }, [entry?.path]);
+
+  useEffect(() => {
     setPendingAnnotation(null);
     setMarkdownSelection(null);
   }, [previewPath]);
@@ -290,13 +357,14 @@ export function FilePreviewContent({
   useEffect(() => {
     if (showingChanges || !hasPreviewText) return;
     const onKey = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey || e.shiftKey) return;
-      const key = e.key.toLowerCase();
-      if (key !== "f" && key !== "a") return;
+      if (e.defaultPrevented || document.querySelector(".shortcut-modal"))
+        return;
+      const find = shortcutMatches(e, "preview.search");
+      if (!find && !shortcutMatches(e, "preview.selectAll")) return;
       const section = previewSectionRef.current;
       if (!section || section.offsetParent === null) return;
       if (isEditablePreviewTarget(e.target)) return;
-      if (key === "f") {
+      if (find) {
         if (renderRichPreview) return;
         e.preventDefault();
         e.stopImmediatePropagation();
@@ -367,7 +435,7 @@ export function FilePreviewContent({
   const copyPreviewText = async () => {
     if (previewText === null) return;
     try {
-      await navigator.clipboard.writeText(previewText);
+      await copyTextFromUserGesture(previewText);
       store.notify({
         kind: "success",
         message: "File content copied",
@@ -390,7 +458,7 @@ export function FilePreviewContent({
       aria-label="File preview"
       tabIndex={-1}
       onKeyDownCapture={(e) => {
-        if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "f") {
+        if (shortcutMatches(e.nativeEvent, "preview.search")) {
           if (showingChanges || renderRichPreview) return;
           e.preventDefault();
           e.stopPropagation();
@@ -404,16 +472,44 @@ export function FilePreviewContent({
             <button
               type="button"
               className="file-preview-back"
+              title={backAction.label}
+              aria-label={backAction.label}
               onClick={backAction.onClick}
             >
-              <ChevronLeft size={13} aria-hidden="true" />
-              {backAction.label}
+              <ChevronLeft size={14} aria-hidden="true" />
             </button>
           ) : null}
           <div className="file-preview-title" title={entry?.name}>
             {entry?.name ?? "Preview"}
           </div>
           <div className="file-preview-head-actions">
+            {!showingChanges && showDirectoryWorkspaceAction ? (
+              <button
+                type="button"
+                className="file-preview-refresh"
+                title="New workspace with this directory as CWD"
+                aria-label="New workspace with this directory as CWD"
+                onClick={() => setWorkspaceDialogOpen(true)}
+              >
+                <FolderPlus size={13} aria-hidden="true" />
+              </button>
+            ) : null}
+            {!showingChanges && entry && onRefresh ? (
+              <button
+                type="button"
+                className="file-preview-refresh"
+                title="Refresh preview"
+                aria-label="Refresh preview"
+                disabled={loading}
+                onClick={onRefresh}
+              >
+                <RefreshCw
+                  size={13}
+                  className={loading ? "is-spinning" : undefined}
+                  aria-hidden="true"
+                />
+              </button>
+            ) : null}
             {!showingChanges && hasPreviewText && !preview?.truncated ? (
               <button
                 type="button"
@@ -428,13 +524,27 @@ export function FilePreviewContent({
               <button
                 type="button"
                 className="file-preview-mode-toggle"
+                role="switch"
+                aria-label="Source mode"
+                aria-checked={previewMode === "raw"}
                 onClick={() =>
                   setPreviewMode((mode) =>
                     mode === "rendered" ? "raw" : "rendered",
                   )
                 }
               >
-                {previewMode === "rendered" ? "Raw" : "Rendered"}
+                <span className="file-preview-mode-label">
+                  {hasMermaidPreview ? "Diagram" : "Preview"}
+                </span>
+                <span
+                  className={
+                    "settings-switch" + (previewMode === "raw" ? " is-on" : "")
+                  }
+                  aria-hidden="true"
+                >
+                  <span />
+                </span>
+                <span className="file-preview-mode-label">Source</span>
               </button>
             ) : null}
             {changesAvailable ? (
@@ -484,14 +594,17 @@ export function FilePreviewContent({
           {error ? (
             <div className="file-preview-state is-error">{error}</div>
           ) : null}
-          {!loading && !error && preview?.image_data_url ? (
-            <div className="file-preview-image-wrap">
-              <img
-                className="file-preview-image"
-                src={preview.image_data_url}
-                alt={entry?.name ?? preview.path}
-              />
+          {!loading && !error && directoryPath ? (
+            <div className="file-preview-state">
+              Directories cannot be previewed.
             </div>
+          ) : null}
+          {!loading && !error && preview?.image_data_url ? (
+            <ImagePreview
+              key={previewPath}
+              src={preview.image_data_url}
+              name={entry?.name ?? preview.path}
+            />
           ) : null}
           {!loading &&
           !error &&
@@ -518,7 +631,34 @@ export function FilePreviewContent({
               Binary file cannot be previewed.
             </div>
           ) : null}
-          {!loading && !error && preview?.truncated && !hasPdfPreview ? (
+          {!loading && !error && hasHtmlPreview && renderRichPreview ? (
+            htmlTooLarge ? (
+              <div className="file-preview-state">
+                HTML is too large to render. Use Source or Download from the
+                file menu.
+              </div>
+            ) : inlinePreviewUrl ? (
+              <>
+                <div className="file-preview-banner">
+                  Static HTML preview. Scripts are blocked; HTTPS stylesheets
+                  can access the network.
+                </div>
+                <iframe
+                  key={inlinePreviewUrl}
+                  className="file-preview-html"
+                  sandbox=""
+                  referrerPolicy="no-referrer"
+                  src={inlinePreviewUrl}
+                  aria-label={`HTML preview: ${entry?.name ?? previewPath}`}
+                />
+              </>
+            ) : null
+          ) : null}
+          {!loading &&
+          !error &&
+          preview?.truncated &&
+          !hasPdfPreview &&
+          !(hasHtmlPreview && renderRichPreview) ? (
             <div className="file-preview-banner">
               Preview truncated at 512 KB.
             </div>
@@ -527,6 +667,10 @@ export function FilePreviewContent({
             <MarkdownPreview
               text={previewText}
               imageUrlResolver={markdownImageUrlResolver}
+              documentPath={onOpenFile ? markdownDocumentPath : undefined}
+              linkUrlResolver={markdownLinkUrlResolver}
+              fragment={fragment}
+              onOpenDocument={onOpenFile}
               onSelectionChange={
                 onCreateAnnotation ? setMarkdownSelection : undefined
               }
@@ -534,6 +678,7 @@ export function FilePreviewContent({
           ) : null}
           {!loading && !error && hasMermaidPreview && renderRichPreview ? (
             <MermaidDiagram
+              key={previewPath}
               code={previewText}
               className="file-preview-mermaid"
             />
@@ -608,6 +753,12 @@ export function FilePreviewContent({
         draft={annotationComposerDraft}
         onSave={saveAnnotation}
         onClose={closeAnnotationComposer}
+      />
+      <CreateWorkspaceDialog
+        open={workspaceDialogOpen}
+        initialName={directoryWorkspaceName}
+        initialCwd={directoryPath ?? ""}
+        onClose={() => setWorkspaceDialogOpen(false)}
       />
     </section>
   );
@@ -780,6 +931,7 @@ function CodeMirrorPreview({
           doc: text,
           extensions: [
             deps.basicSetup,
+            deps.configuredShortcutGuard,
             deps.search({ top: true }),
             deps.keymap.of(deps.searchKeymap),
             deps.EditorState.readOnly.of(true),

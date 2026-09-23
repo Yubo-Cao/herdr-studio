@@ -1,3 +1,4 @@
+import "./CollaborationBar.css";
 import { Check, Pencil, Users, X } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
 import { Avatar, AvatarFallback } from "./ui/Avatar";

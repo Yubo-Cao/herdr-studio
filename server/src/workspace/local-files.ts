@@ -6,7 +6,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import { DOWNLOAD_TIMEOUT_MS, LIST_LIMIT } from "./file-constants";
 import {
   assertInsideRoot,
@@ -35,6 +35,7 @@ export async function listLocalFiles(
   rootPath: string,
   relativePath: string,
   showHidden: boolean,
+  followDirectoryLinks = false,
 ): Promise<FileListResult> {
   const rootReal = await realpath(rootPath);
   const targetPath = lexicalTargetInsideRoot(rootReal, relativePath);
@@ -56,7 +57,7 @@ export async function listLocalFiles(
         const entryPath = join(targetReal, dirent.name);
         const linkInfo = await lstat(entryPath).catch(() => null);
         if (!linkInfo) return null;
-        const type = dirent.isDirectory()
+        let type: FileExplorerEntry["type"] = dirent.isDirectory()
           ? "directory"
           : dirent.isSymbolicLink()
             ? "symlink"
@@ -77,6 +78,9 @@ export async function listLocalFiles(
                 : targetInfo.isFile()
                   ? "file"
                   : undefined;
+            }
+            if (followDirectoryLinks && targetInfo?.isDirectory()) {
+              type = "directory";
             }
             try {
               assertInsideRoot(rootReal, linkTargetReal);
@@ -118,13 +122,13 @@ export async function resolveLocalFilePaths(
   const resolved = await Promise.all(
     requestedPaths.map(async (requestedPath) => {
       try {
-        const requestedAbsolute = requestedPath.startsWith("/");
+        const requestedAbsolute = isAbsolute(requestedPath);
         const targetPath = requestedAbsolute
           ? requestedPath
           : lexicalTargetInsideRoot(rootReal, requestedPath);
         const targetReal = await realpath(targetPath);
         const info = await stat(targetReal);
-        return info.isFile() ? requestedPath : null;
+        return info.isFile() || info.isDirectory() ? requestedPath : null;
       } catch {
         return null;
       }
@@ -138,18 +142,30 @@ export async function readLocalFile(
   requestedPath: string,
 ): Promise<FilePreviewResult> {
   const rootReal = await realpath(rootPath);
-  const requestedAbsolute = requestedPath.startsWith("/");
+  const requestedAbsolute = isAbsolute(requestedPath);
   const targetPath = requestedAbsolute
     ? requestedPath
     : lexicalTargetInsideRoot(rootReal, requestedPath);
   const targetReal = await realpath(targetPath);
   const info = await stat(targetReal);
-  if (!info.isFile()) {
-    throw new Error("only regular files can be previewed");
-  }
   const displayPath = requestedAbsolute
     ? targetReal
     : relativePreviewPath(rootReal, targetPath);
+  if (info.isDirectory()) {
+    return {
+      root: rootReal,
+      path: displayPath,
+      type: "directory",
+      size: 0,
+      mtime_ms: info.mtimeMs,
+      truncated: false,
+      text: null,
+      binary: false,
+    };
+  }
+  if (!info.isFile()) {
+    throw new Error("only regular files can be previewed");
+  }
   const previewLimit = previewLimitForPath(displayPath, info.size);
   const raw = Buffer.from(
     await Bun.file(targetReal)
@@ -174,7 +190,7 @@ export async function downloadLocalFile(
   requestedPath: string,
 ): Promise<FileDownloadResult> {
   const rootReal = await realpath(rootPath);
-  const requestedAbsolute = requestedPath.startsWith("/");
+  const requestedAbsolute = isAbsolute(requestedPath);
   const targetPath = requestedAbsolute
     ? requestedPath
     : lexicalTargetInsideRoot(rootReal, requestedPath);

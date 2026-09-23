@@ -2,7 +2,7 @@
 
 ## Project overview
 
-Herdr Studio is a web client for Herdr. It has two parts:
+Roamgate is an independent community Web and PWA client for Herdr. It has two parts:
 
 - `server/src`: Bun-powered local bridge server (HTTP + WebSocket) that talks
   to the local Herdr socket.
@@ -12,7 +12,8 @@ Herdr Studio is a web client for Herdr. It has two parts:
 - `scripts/`: release and packaging helpers.
 
 Generated build output lives in `server/public`,
-`server/src/public-files.gen.ts`, `server/herdr-gui*`, and `dist/`. These are
+`server/src/public-files.gen.ts`, `server/roamgate*`, legacy `server/herdr-gui*`,
+and `dist/`. These are
 build artifacts; they must not be edited or committed.
 
 ## Review priorities
@@ -45,12 +46,15 @@ When reviewing pull requests, focus on:
 
 ## Verification
 
+Install all workspace dependencies once with `bun install --frozen-lockfile`
+from the repo root. The root `bun.lock` is authoritative.
+
 Changes are expected to pass, from the repo root:
 
 - `bun run format:check`
 - `bun run lint`
 - `bun run test`
-- `cd web && bun run typecheck` and `cd server && bun run typecheck`
-- For frontend-facing changes: `cd web && bun run build`
+- `bun run typecheck`
+- For frontend-facing changes: `bun run build:web`
 
 Call out missing verification when a PR touches these areas without it.

@@ -11,6 +11,7 @@ import {
   overlayScrollbarExcludedElement,
   type OverlayThumbGeometry,
 } from "./overlayScrollbar";
+import "./OverlayScrollbarLayer.css";
 
 type Axis = "vertical" | "horizontal";
 
@@ -64,13 +65,29 @@ function findScrollableElement(target: EventTarget | null) {
   return null;
 }
 
-function measureScrollbars(target: HTMLElement): ScrollbarLayout | null {
+function measureScrollbars(
+  target: HTMLElement,
+  layer: HTMLElement,
+): ScrollbarLayout | null {
   if (!target.isConnected) return null;
   const rect = target.getBoundingClientRect();
-  const top = Math.max(0, rect.top);
-  const right = Math.min(window.innerWidth, rect.right);
-  const bottom = Math.min(window.innerHeight, rect.bottom);
-  const left = Math.max(0, rect.left);
+  const layerRect = layer.getBoundingClientRect();
+  if (
+    !layer.offsetWidth ||
+    !layer.offsetHeight ||
+    !layerRect.width ||
+    !layerRect.height
+  )
+    return null;
+  // Rects and pointer events share viewport units; positioned CSS lengths
+  // use the layer's local units. Measure the ratio so root CSS zoom is not
+  // applied twice, including engines with different zoom/rect behavior.
+  const scaleX = layerRect.width / layer.offsetWidth;
+  const scaleY = layerRect.height / layer.offsetHeight;
+  const top = Math.max(layerRect.top, rect.top);
+  const right = Math.min(layerRect.right, rect.right);
+  const bottom = Math.min(layerRect.bottom, rect.bottom);
+  const left = Math.max(layerRect.left, rect.left);
   const visibleWidth = Math.max(0, right - left);
   const visibleHeight = Math.max(0, bottom - top);
 
@@ -94,19 +111,19 @@ function measureScrollbars(target: HTMLElement): ScrollbarLayout | null {
   const vertical = verticalGeometry
     ? {
         ...verticalGeometry,
-        top: verticalGeometry.start,
-        left: right - TRACK_INSET - THUMB_SIZE,
-        width: THUMB_SIZE,
-        height: verticalGeometry.size,
+        top: (verticalGeometry.start - layerRect.top) / scaleY,
+        left: (right - TRACK_INSET - THUMB_SIZE - layerRect.left) / scaleX,
+        width: THUMB_SIZE / scaleX,
+        height: verticalGeometry.size / scaleY,
       }
     : null;
   const horizontal = horizontalGeometry
     ? {
         ...horizontalGeometry,
-        top: bottom - TRACK_INSET - THUMB_SIZE,
-        left: horizontalGeometry.start,
-        width: horizontalGeometry.size,
-        height: THUMB_SIZE,
+        top: (bottom - TRACK_INSET - THUMB_SIZE - layerRect.top) / scaleY,
+        left: (horizontalGeometry.start - layerRect.left) / scaleX,
+        width: horizontalGeometry.size / scaleX,
+        height: THUMB_SIZE / scaleY,
       }
     : null;
 
@@ -138,6 +155,7 @@ function sameLayout(a: ScrollbarLayout | null, b: ScrollbarLayout | null) {
 export function OverlayScrollbarLayer() {
   const [layout, setLayout] = useState<ScrollbarLayout | null>(null);
   const [visible, setVisible] = useState(false);
+  const layerRef = useRef<HTMLDivElement>(null);
   const targetRef = useRef<HTMLElement | null>(null);
   const dragRef = useRef<DragState | null>(null);
   const refreshRef = useRef<(target: HTMLElement) => void>(() => undefined);
@@ -157,6 +175,7 @@ export function OverlayScrollbarLayer() {
     clearHideTimers();
     hideTimerRef.current = window.setTimeout(() => {
       if (dragRef.current) return;
+      targetRef.current = null;
       setVisible(false);
       clearTimerRef.current = window.setTimeout(() => {
         if (!dragRef.current) setLayout(null);
@@ -168,7 +187,7 @@ export function OverlayScrollbarLayer() {
     let frame = 0;
     let pendingTarget: HTMLElement | null = null;
 
-    // Coalesce scroll and pointer events so geometry is measured at most once per frame.
+    // Measure scroll and drag updates at most once per frame.
     const refresh = (target: HTMLElement) => {
       pendingTarget = target;
       if (frame) return;
@@ -176,8 +195,8 @@ export function OverlayScrollbarLayer() {
         frame = 0;
         const nextTarget = pendingTarget;
         pendingTarget = null;
-        if (!nextTarget) return;
-        const nextLayout = measureScrollbars(nextTarget);
+        if (!nextTarget || !layerRef.current) return;
+        const nextLayout = measureScrollbars(nextTarget, layerRef.current);
         targetRef.current = nextTarget;
         setLayout((current) =>
           sameLayout(current, nextLayout) ? current : nextLayout,
@@ -204,26 +223,6 @@ export function OverlayScrollbarLayer() {
       }
       if (hasScrollableOverflow(target)) refresh(target);
     };
-    const onPointerMove = (event: PointerEvent) => {
-      if (dragRef.current) return;
-      const eventTarget =
-        event.target instanceof HTMLElement ? event.target : null;
-      const activeTarget = targetRef.current;
-      if (eventTarget && activeTarget) {
-        const xtermViewport = eventTarget
-          .closest(".xterm")
-          ?.querySelector<HTMLElement>(".xterm-viewport");
-        if (
-          activeTarget.contains(eventTarget) ||
-          activeTarget === xtermViewport
-        ) {
-          refresh(activeTarget);
-          return;
-        }
-      }
-      const target = findScrollableElement(event.target);
-      if (target) refresh(target);
-    };
     const onWheel = (event: WheelEvent) => {
       const target = findScrollableElement(event.target);
       if (target) refresh(target);
@@ -233,7 +232,6 @@ export function OverlayScrollbarLayer() {
     };
 
     document.addEventListener("scroll", onScroll, true);
-    document.addEventListener("pointermove", onPointerMove, true);
     document.addEventListener("wheel", onWheel, {
       capture: true,
       passive: true,
@@ -244,7 +242,6 @@ export function OverlayScrollbarLayer() {
       clearHideTimers();
       refreshRef.current = () => undefined;
       document.removeEventListener("scroll", onScroll, true);
-      document.removeEventListener("pointermove", onPointerMove, true);
       document.removeEventListener("wheel", onWheel, true);
       window.removeEventListener("resize", onResize);
     };
@@ -300,7 +297,10 @@ export function OverlayScrollbarLayer() {
   });
 
   return (
-    <div className={`overlay-scrollbar-layer ${visible ? "is-visible" : ""}`}>
+    <div
+      ref={layerRef}
+      className={`overlay-scrollbar-layer ${visible ? "is-visible" : ""}`}
+    >
       {layout?.vertical ? (
         <div
           className="overlay-scrollbar-thumb is-vertical"

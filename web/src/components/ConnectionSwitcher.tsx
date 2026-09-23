@@ -37,6 +37,7 @@ import { CloseButton } from "./CloseButton";
 import { focusDialogElement } from "./dialogFocus";
 import { ConfirmDialog } from "./ModalDialogs";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import "./ConnectionSwitcher.css";
 
 type Draft = {
   id: string;
@@ -351,7 +352,7 @@ function ProfileForm({
           checked={draft.autoConnect}
           onChange={(event) => update("autoConnect", event.target.checked)}
         />
-        Connect automatically when Herdr Studio starts
+        Connect automatically when Roamgate starts
       </label>
       <p className="connection-profile-security-note">
         Local profiles store socket paths only. SSH commands, credentials, keys,
@@ -516,15 +517,14 @@ function SshProfileForm({
           checked={draft.autoConnect}
           onChange={(event) => update("autoConnect", event.target.checked)}
         />
-        Connect automatically when Herdr Studio starts
+        Connect automatically when Roamgate starts
       </label>
       <p className="connection-profile-security-note">
-        Leave the socket paths empty and Herdr Studio infers the default Herdr
+        Leave the socket paths empty and Roamgate infers the default Herdr
         sockets under the remote home directory at connect time. Authentication
         comes from the bridge service user&apos;s OpenSSH config, ssh-agent, or
-        system Keychain. Establish host trust outside Herdr Studio. Passwords,
-        keys, passphrases, commands, ports, and SSH options are never stored
-        here.
+        system Keychain. Establish host trust outside Roamgate. Passwords, keys,
+        passphrases, commands, ports, and SSH options are never stored here.
       </p>
       {feedback ? (
         <div
@@ -995,17 +995,32 @@ function ConnectionManagerDialog({ onClose }: { onClose: () => void }) {
                       Disconnect
                     </button>
                   ) : null}
-                  {capabilities.canRemove ? (
+                  {!connection.read_only ? (
                     <button
                       type="button"
                       className="danger"
-                      disabled={!!pending}
+                      disabled={!!pending || !capabilities.canRemove}
+                      aria-describedby={
+                        connection.is_default
+                          ? `connection-remove-help-${connection.id}`
+                          : undefined
+                      }
                       onClick={() => setRemoveTarget(connection)}
                     >
                       Remove
                     </button>
                   ) : null}
                 </div>
+                {connection.is_default && !connection.read_only ? (
+                  <p
+                    id={`connection-remove-help-${connection.id}`}
+                    className="connection-profile-policy"
+                  >
+                    To remove this default connection, use Set default on
+                    another connection first. If none is available, add a
+                    connection first.
+                  </p>
+                ) : null}
               </section>
             );
           })}
@@ -1015,7 +1030,7 @@ function ConnectionManagerDialog({ onClose }: { onClose: () => void }) {
           title="Remove Connection"
           message={
             removeTarget
-              ? `Remove connection "${removeTarget.label}"? This disconnects Herdr Studio but does not stop the Herdr server.`
+              ? `Remove connection "${removeTarget.label}"? This disconnects Roamgate but does not stop the Herdr server.`
               : "Remove this connection?"
           }
           confirmLabel="Remove"

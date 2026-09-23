@@ -15,10 +15,11 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { homedir } from "node:os";
+import { defaultDataFile, publishDataFile } from "../config/data-paths";
 import { dirname, isAbsolute, join, win32 } from "node:path";
 import { validateSshDestination } from "../bridge/ssh-command";
 import { nativeSocketPath } from "../config/server-config";
+import { roamgateEnv } from "../config/environment";
 import { validateConnectionId } from "./protocol";
 import { LEGACY_DEFAULT_CONNECTION_ID } from "./types";
 
@@ -61,10 +62,7 @@ export type PublicConnectionProfile = ConnectionProfile & {
 };
 
 export function defaultConnectionProfilesPath(): string {
-  return (
-    process.env.HERDR_GUI_CONNECTIONS_PATH ??
-    join(homedir(), ".config", "herdr-gui", "connections.json")
-  );
+  return roamgateEnv("CONNECTIONS_PATH") ?? defaultDataFile("connections.json");
 }
 
 function assertPlainObject(
@@ -428,6 +426,13 @@ export class ConnectionProfileStore {
       }
       assertNotSymlink(this.path);
       if (!existsSync(this.path)) return;
+      if (
+        this.options.path === undefined &&
+        roamgateEnv("CONNECTIONS_PATH") === undefined
+      ) {
+        // Clearing saved profiles must not restore the old registry next launch.
+        publishDataFile(`${this.path}.legacy-cleared`, "1\n");
+      }
       unlinkSync(this.path);
       try {
         const parentFd = openSync(
@@ -450,7 +455,7 @@ export class ConnectionProfileStore {
   private canHardenDefaultPath(): boolean {
     return (
       this.options.path === undefined &&
-      process.env.HERDR_GUI_CONNECTIONS_PATH === undefined
+      roamgateEnv("CONNECTIONS_PATH") === undefined
     );
   }
 

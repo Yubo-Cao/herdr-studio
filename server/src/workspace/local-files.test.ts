@@ -178,18 +178,47 @@ describe("local workspace file operations", () => {
     });
   });
 
-  test("resolves only regular files inside the workspace", async () => {
+  test("reads directory previews instead of rejecting them", async () => {
+    await withTempDir(async (root) => {
+      await mkdir(join(root, "src", "app"), { recursive: true });
+      const relative = await readLocalFile(root, "src/app");
+      expect(relative).toMatchObject({
+        type: "directory",
+        path: "src/app",
+        text: null,
+        binary: false,
+        size: 0,
+        truncated: false,
+      });
+      const absolute = await readLocalFile(root, join(root, "src"));
+      expect(absolute.type).toBe("directory");
+      expect(absolute.path.endsWith("/src")).toBe(true);
+    });
+  });
+
+  test("resolves files, directories, and explicit symlinks without relative escapes", async () => {
     await withTempDir(async (root) => {
       await mkdir(join(root, "a", "b"), { recursive: true });
       await writeFile(join(root, "a", "b", "c.png"), "image");
+      await symlink(join(root, ".."), join(root, "outside"));
       expect(
         await resolveLocalFilePaths(root, [
           "a/b/c.png",
           "a/b",
           "missing/file.png",
           "../outside.txt",
+          "..",
+          "outside",
+          join(root, "a", "b"),
+          join(root, ".."),
         ]),
-      ).toEqual(["a/b/c.png"]);
+      ).toEqual([
+        "a/b/c.png",
+        "a/b",
+        "outside",
+        join(root, "a", "b"),
+        join(root, ".."),
+      ]);
     });
   });
 

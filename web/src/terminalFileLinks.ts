@@ -3,7 +3,7 @@ const FILE_PATH_CANDIDATE_RE =
 const TRAILING_PROSE_RE = /[.,;:!?]+$/;
 const TRAILING_LOCATION_RE = /:\d+(?::\d+)?$/;
 const PATH_BOUNDARY_RE = /[\s"'`([{<]/;
-const MAX_CANDIDATES_PER_LINE = 32;
+export const MAX_CANDIDATES_PER_LINE = 32;
 const DEFAULT_POSITIVE_TTL_MS = 30_000;
 const DEFAULT_NEGATIVE_TTL_MS = 5_000;
 

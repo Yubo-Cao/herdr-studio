@@ -11,7 +11,6 @@ on:
         type: string
 
 permissions:
-  actions: write
   contents: write
   pull-requests: write
 
@@ -34,10 +33,6 @@ jobs:
           bun-version: "1.4.1"
           no-cache: true
       - run: bun install --frozen-lockfile
-      - run: bun install --frozen-lockfile
-        working-directory: web
-      - run: bun install --frozen-lockfile
-        working-directory: server
       - id: release
         name: Prepare release files
         env:
@@ -57,7 +52,7 @@ jobs:
           git config user.name "github-actions[bot]"
           git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
           git checkout -b "$branch"
-          git add package.json web/package.json server/package.json herdr-plugin.toml CHANGELOG.md
+          git add package.json web/package.json server/package.json herdr-plugin.toml
           git commit -m "Release $VERSION"
           gh auth setup-git
           git push origin "$branch"
@@ -66,5 +61,4 @@ jobs:
             --base main \
             --head "$branch" \
             --title "Release $VERSION" \
-            --body "Prepare $TAG by updating package versions and finalizing the CHANGELOG section. Review and merge this PR after its explicitly dispatched CI check passes, then run the Publish Release workflow for $VERSION."
-          gh workflow run "CI" --ref "$branch"
+            --body "Prepare $TAG by updating package versions. Release notes are generated from merged PRs when the release is published. Review this PR, select **Approve workflows to run**, and wait for CI to pass before merging. Then run the Publish Release workflow for $VERSION."

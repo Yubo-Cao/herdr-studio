@@ -1,3 +1,4 @@
+import { roamgateLocalStorage } from "../browserStorage";
 import { shallowEqual, store, useStoreSelector } from "../store";
 import type { GitStatusSummary, Pane, Workspace } from "../types";
 import { shortId } from "../utils";
@@ -8,6 +9,7 @@ import {
 } from "../terminalComposer";
 import { useEffect, useMemo, useRef, useState } from "react";
 import { ContextMenu, type ContextMenuState } from "./ContextMenu";
+import { ThemedSelect } from "./ThemedSelect";
 import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
 import { buildWorkspaceHierarchy, worktreeCreationSource } from "../worktree";
 import {
@@ -76,6 +78,7 @@ import {
   workspaceTreeItemIsTabStop,
 } from "./treeKeyboard";
 import { TREE_DEPTH_INDENT } from "./treeIndent";
+import "./WorkspaceTree.css";
 
 const LONG_PRESS_MS = 550;
 const LONG_PRESS_MOVE_PX = 10;
@@ -119,6 +122,14 @@ function AgentLayoutControl({
     <div className="workspace-agent-layout-control">
       <span>Agents</span>
       <div role="group" aria-label="Agent list layout">
+        <button
+          type="button"
+          className={value === "compact" ? "is-active" : ""}
+          aria-pressed={value === "compact"}
+          onClick={() => onChange("compact")}
+        >
+          Compact
+        </button>
         <button
           type="button"
           className={value === "nested" ? "is-active" : ""}
@@ -183,6 +194,7 @@ function GitStatusBadges({
 }
 
 export function WorkspaceTree({
+  agentsFirst = false,
   onSelect,
   onBrowseFiles,
   onReviewChanges,
@@ -191,6 +203,7 @@ export function WorkspaceTree({
   onReviewChangesForAgent,
   onViewAgentHistory,
 }: {
+  agentsFirst?: boolean;
   onSelect?: (workspace: Workspace) => void;
   onBrowseFiles?: (workspace: Workspace) => void;
   onReviewChanges?: (workspace: Workspace) => void;
@@ -237,7 +250,7 @@ export function WorkspaceTree({
   } | null>(null);
   const [agentListPreferences, setAgentListPreferences] = useState(() =>
     parseAgentListPreferences(
-      localStorage.getItem(AGENT_LIST_PREFERENCES_STORAGE_KEY),
+      roamgateLocalStorage.getItem(AGENT_LIST_PREFERENCES_STORAGE_KEY),
     ),
   );
   const [collapsedAgentGroups, setCollapsedAgentGroups] = useState<Set<string>>(
@@ -247,11 +260,11 @@ export function WorkspaceTree({
     agentListPreferences.sort === "manual" &&
     agentListPreferences.grouping === "none";
   const [agentPaneOrder, setAgentPaneOrder] = useState<string[]>(() =>
-    parseAgentOrder(localStorage.getItem(agentOrderStorageKey)),
+    parseAgentOrder(roamgateLocalStorage.getItem(agentOrderStorageKey)),
   );
   const [agentLayout, setAgentLayout] = useState<WorkspaceAgentLayout>(() =>
     parseWorkspaceAgentLayout(
-      localStorage.getItem(WORKSPACE_AGENT_LAYOUT_STORAGE_KEY),
+      roamgateLocalStorage.getItem(WORKSPACE_AGENT_LAYOUT_STORAGE_KEY),
     ),
   );
   const [createOpen, setCreateOpen] = useState(false);
@@ -268,13 +281,13 @@ export function WorkspaceTree({
     COLLAPSED_WORKTREE_GROUPS_STORAGE_KEY,
   );
   const [pinnedWorkspaceKeys, setPinnedWorkspaceKeys] = useState<string[]>(() =>
-    parseWorkspacePins(localStorage.getItem(pinsStorageKey)),
+    parseWorkspacePins(roamgateLocalStorage.getItem(pinsStorageKey)),
   );
   const [collapsedWorktreeGroupKeys, setCollapsedWorktreeGroupKeys] = useState<
     string[]
   >(() =>
     parseCollapsedWorktreeGroups(
-      localStorage.getItem(collapsedGroupsStorageKey),
+      roamgateLocalStorage.getItem(collapsedGroupsStorageKey),
     ),
   );
   const pinnedWorkspaceSet = new Set(pinnedWorkspaceKeys);
@@ -326,7 +339,7 @@ export function WorkspaceTree({
     ),
   );
   useEffect(() => {
-    localStorage.setItem(
+    roamgateLocalStorage.setItem(
       AGENT_LIST_PREFERENCES_STORAGE_KEY,
       JSON.stringify(agentListPreferences),
     );
@@ -342,22 +355,25 @@ export function WorkspaceTree({
     setAgentDropTarget(null);
   }, [connectionClient]);
   useEffect(() => {
-    localStorage.setItem(WORKSPACE_AGENT_LAYOUT_STORAGE_KEY, agentLayout);
+    roamgateLocalStorage.setItem(
+      WORKSPACE_AGENT_LAYOUT_STORAGE_KEY,
+      agentLayout,
+    );
   }, [agentLayout]);
   useEffect(() => {
-    localStorage.setItem(
+    roamgateLocalStorage.setItem(
       agentOrderStorageKey,
       serializeAgentOrder(agentPaneOrder),
     );
   }, [agentOrderStorageKey, agentPaneOrder]);
   useEffect(() => {
-    localStorage.setItem(
+    roamgateLocalStorage.setItem(
       pinsStorageKey,
       serializeWorkspacePins(pinnedWorkspaceKeys),
     );
   }, [pinnedWorkspaceKeys, pinsStorageKey]);
   useEffect(() => {
-    localStorage.setItem(
+    roamgateLocalStorage.setItem(
       collapsedGroupsStorageKey,
       serializeCollapsedWorktreeGroups(collapsedWorktreeGroupKeys),
     );
@@ -608,6 +624,7 @@ export function WorkspaceTree({
                 : EMPTY_AGENT_PANES_BY_WORKSPACE
             }
             tabCountsByWorkspace={tabCountsByWorkspace}
+            alwaysShowTabCount={agentLayout === "compact"}
             activePaneId={activePaneId}
             pinnedWorkspaceKeys={pinnedWorkspaceSet}
             collapsedWorktreeGroupKeys={collapsedWorktreeGroupSet}
@@ -639,47 +656,47 @@ export function WorkspaceTree({
         <div className="panel-head">
           <h2>Agents</h2>
           <div className="panel-actions agent-list-controls">
-            <label className="agent-list-control">
-              <ArrowDownWideNarrow size={15} aria-hidden="true" />
-              <select
-                aria-label="Agent sort order"
-                title={`Sort agents: ${{ attention: "Attention first", workspace: "Workspace order", manual: "Manual order" }[agentListPreferences.sort]}`}
-                value={agentListPreferences.sort}
-                onChange={(event) => {
-                  clearAgentDrag();
-                  setAgentListPreferences((current) => ({
-                    ...current,
-                    sort: event.target.value as AgentSort,
-                  }));
-                }}
-              >
-                <option value="attention">Attention first</option>
-                <option value="workspace">Workspace order</option>
-                <option value="manual">Manual order</option>
-              </select>
-            </label>
-            <label
+            <ThemedSelect
+              className="agent-list-control"
+              icon={<ArrowDownWideNarrow size={15} aria-hidden="true" />}
+              align="end"
+              aria-label="Agent sort order"
+              title={`Sort agents: ${{ attention: "Attention first", workspace: "Workspace order", manual: "Manual order" }[agentListPreferences.sort]}`}
+              value={agentListPreferences.sort}
+              options={[
+                { value: "attention", label: "Attention first" },
+                { value: "workspace", label: "Workspace order" },
+                { value: "manual", label: "Manual order" },
+              ]}
+              onChange={(sort) => {
+                clearAgentDrag();
+                setAgentListPreferences((current) => ({
+                  ...current,
+                  sort: sort as AgentSort,
+                }));
+              }}
+            />
+            <ThemedSelect
               className={`agent-list-control ${agentListPreferences.grouping !== "none" ? "is-active" : ""}`}
-            >
-              <Layers size={15} aria-hidden="true" />
-              <select
-                aria-label="Agent grouping"
-                title={`Group agents: ${{ none: "No grouping", status: "Status", workspace: "Workspace", agent: "Agent type" }[agentListPreferences.grouping]}`}
-                value={agentListPreferences.grouping}
-                onChange={(event) => {
-                  clearAgentDrag();
-                  setAgentListPreferences((current) => ({
-                    ...current,
-                    grouping: event.target.value as AgentGrouping,
-                  }));
-                }}
-              >
-                <option value="none">No grouping</option>
-                <option value="status">Status</option>
-                <option value="workspace">Workspace</option>
-                <option value="agent">Agent type</option>
-              </select>
-            </label>
+              icon={<Layers size={15} aria-hidden="true" />}
+              align="end"
+              aria-label="Agent grouping"
+              title={`Group agents: ${{ none: "No grouping", status: "Status", workspace: "Workspace", agent: "Agent type" }[agentListPreferences.grouping]}`}
+              value={agentListPreferences.grouping}
+              options={[
+                { value: "none", label: "No grouping" },
+                { value: "status", label: "Status" },
+                { value: "workspace", label: "Workspace" },
+                { value: "agent", label: "Agent type" },
+              ]}
+              onChange={(grouping) => {
+                clearAgentDrag();
+                setAgentListPreferences((current) => ({
+                  ...current,
+                  grouping: grouping as AgentGrouping,
+                }));
+              }}
+            />
           </div>
         </div>
         <div className="agents-list">
@@ -768,8 +785,8 @@ export function WorkspaceTree({
 
   return (
     <>
-      {workspacePanel}
-      {agentsPanel}
+      {agentsFirst ? agentsPanel : workspacePanel}
+      {agentsFirst ? workspacePanel : agentsPanel}
       <ContextMenu
         state={menu}
         pinnedWorkspaceKeys={pinnedWorkspaceSet}
@@ -875,6 +892,7 @@ function WorkspaceRow({
   childrenByParent,
   agentsByWorkspace,
   tabCountsByWorkspace,
+  alwaysShowTabCount = false,
   activePaneId,
   pinnedWorkspaceKeys,
   collapsedWorktreeGroupKeys,
@@ -890,6 +908,7 @@ function WorkspaceRow({
   childrenByParent: Map<string, Workspace[]>;
   agentsByWorkspace: ReadonlyMap<string, Pane[]>;
   tabCountsByWorkspace: ReadonlyMap<string, number>;
+  alwaysShowTabCount?: boolean;
   activePaneId: string | null;
   pinnedWorkspaceKeys: ReadonlySet<string>;
   collapsedWorktreeGroupKeys: ReadonlySet<string>;
@@ -903,6 +922,7 @@ function WorkspaceRow({
   const children = childrenByParent.get(w.workspace_id) ?? [];
   const agents = agentsByWorkspace.get(w.workspace_id) ?? [];
   const tabCount = tabCountsByWorkspace.get(w.workspace_id) ?? 0;
+  const tabCountVisible = alwaysShowTabCount || tabCount > 1;
   const s = useStoreSelector(
     (state) => ({
       pendingFocusWorkspaceId: state.pendingFocusWorkspaceId,
@@ -983,7 +1003,7 @@ function WorkspaceRow({
           hasActiveAgent ? "has-active-agent" : ""
         } ${isChild ? "is-child" : ""} ${pinned ? "is-pinned" : ""} ${
           isPendingFocus ? "is-loading" : ""
-        } ${tabCount > 1 ? "has-tab-count" : ""} ${
+        } ${tabCountVisible ? "has-tab-count" : ""} ${
           workspaceDrag?.isDragging ? "is-dragging" : ""
         } ${
           workspaceDrag?.dropPosition
@@ -1108,8 +1128,10 @@ function WorkspaceRow({
         ) : (
           <span className="twisty" aria-hidden="true" />
         )}
-        <strong className="ws-label">{workspaceDisplayName(w)}</strong>
-        {tabCount > 1 ? (
+        <strong className="ws-label" title={workspaceDisplayName(w)}>
+          {workspaceDisplayName(w)}
+        </strong>
+        {tabCountVisible ? (
           <span
             className="workspace-tab-count"
             title={`${tabCount} tabs`}
@@ -1159,6 +1181,7 @@ function WorkspaceRow({
               childrenByParent={childrenByParent}
               agentsByWorkspace={agentsByWorkspace}
               tabCountsByWorkspace={tabCountsByWorkspace}
+              alwaysShowTabCount={alwaysShowTabCount}
               activePaneId={activePaneId}
               pinnedWorkspaceKeys={pinnedWorkspaceKeys}
               collapsedWorktreeGroupKeys={collapsedWorktreeGroupKeys}

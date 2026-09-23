@@ -1,25 +1,24 @@
+import type { TerminalReviewAnnotation } from "./annotations";
+import { getShortcutSnapshot } from "./shortcutPreferences";
+import { matchesShortcut, type ShortcutBindings } from "./shortcutBindings";
 import type { Workspace } from "./types";
 import { connectionStorageKey } from "./connectionStorage";
 
 export type InspectorView = "files" | "changes" | "history";
-export type WorkspaceSurface = "terminal" | InspectorView;
+export type WorkspaceSurface = "terminal" | "annotations" | InspectorView;
 export const WORKSPACE_INSPECTOR_REQUEST_EVENT =
-  "herdr:workspace-inspector-request";
+  "roamgate:workspace-inspector-request";
+export const WORKSPACE_ANNOTATION_REQUEST_EVENT =
+  "roamgate:workspace-annotation-request";
 
 export function isWorkspaceInspectorShortcut(
   event: Pick<
     KeyboardEvent,
     "key" | "metaKey" | "ctrlKey" | "altKey" | "shiftKey" | "repeat"
   >,
+  bindings: ShortcutBindings = getShortcutSnapshot().preset.bindings,
 ): boolean {
-  return (
-    event.key.toLowerCase() === "b" &&
-    event.metaKey &&
-    !event.ctrlKey &&
-    !event.altKey &&
-    event.shiftKey &&
-    !event.repeat
-  );
+  return !event.repeat && matchesShortcut(event, "inspector.toggle", bindings);
 }
 
 export interface WorkspaceInspectorRequest {
@@ -27,6 +26,13 @@ export interface WorkspaceInspectorRequest {
   generation: number;
   workspaceId: string;
   view: InspectorView;
+}
+
+export interface WorkspaceAnnotationRequest {
+  connectionId: string;
+  generation: number;
+  workspaceId: string;
+  annotation: TerminalReviewAnnotation;
 }
 export type InspectorDock = "right" | "bottom";
 
@@ -40,7 +46,24 @@ export function inspectorMaximumSize(
   dock: InspectorDock,
   availableWidth: number,
   availableHeight: number,
+  peerLayout = false,
 ): number {
+  if (peerLayout) {
+    return Math.max(
+      0,
+      dock === "right"
+        ? Math.min(
+            availableWidth * 0.55,
+            availableWidth - TERMINAL_MIN_WIDTH / 2 - INSPECTOR_SEPARATOR_SIZE,
+          )
+        : Math.min(
+            availableHeight * 0.5,
+            availableHeight -
+              TERMINAL_MIN_HEIGHT / 2 -
+              INSPECTOR_SEPARATOR_SIZE,
+          ),
+    );
+  }
   return dock === "right"
     ? Math.max(
         INSPECTOR_MIN_RIGHT,
@@ -85,6 +108,8 @@ export interface WorkspaceInspectorState {
 export interface InspectorPreferences {
   view: InspectorView;
   dock: InspectorDock;
+  expanded: boolean;
+  expandedNavigationRatios: Partial<Record<InspectorSplitView, number>>;
   rightSize: number;
   bottomSize: number;
   filesNavigationRatio: number;
@@ -114,12 +139,12 @@ function normalizedCheckoutPath(path: string): string {
 export function checkoutKeyForWorkspace(workspace: Workspace): string | null {
   const worktree = workspace.worktree;
   if (!worktree) return null;
-  const settingsKey = worktree.gui_settings_key?.trim();
-  if (settingsKey) return settingsKey;
-  const repoKey = worktree.repo_key.trim();
+  const repoKey = worktree.gui_settings_key?.trim() || worktree.repo_key.trim();
   const checkoutPath = normalizedCheckoutPath(worktree.checkout_path);
   if (!repoKey || !checkoutPath) return null;
-  return `${repoKey}:${checkoutPath}`;
+  // Keep the endpoint-qualified repository identity when a profile is repointed.
+  // The path separates its main checkout from linked worktrees.
+  return JSON.stringify([repoKey, checkoutPath]);
 }
 
 export function resourceScopeForWorkspace(
@@ -208,7 +233,7 @@ function preferencesStorageKey(scope: ResourceScope): string {
 }
 
 function finiteSize(value: unknown, fallback: number): number {
-  return typeof value === "number" && Number.isFinite(value) && value >= 180
+  return typeof value === "number" && Number.isFinite(value) && value > 0
     ? value
     : fallback;
 }
@@ -249,6 +274,8 @@ export function readInspectorPreferences(
   const fallback: InspectorPreferences = {
     view: "files",
     dock: "right",
+    expanded: false,
+    expandedNavigationRatios: {},
     rightSize: finiteSize(defaults.rightSize, DEFAULT_RIGHT_SIZE),
     bottomSize: finiteSize(defaults.bottomSize, DEFAULT_BOTTOM_SIZE),
     filesNavigationRatio: DEFAULT_INSPECTOR_NAVIGATION_RATIO,
@@ -264,6 +291,15 @@ export function readInspectorPreferences(
           ? value.view
           : "files",
       dock: value.dock === "bottom" ? "bottom" : "right",
+      expanded: value.expanded === true,
+      expandedNavigationRatios: Object.fromEntries(
+        (["files", "changes"] as const).flatMap((view) => {
+          const ratio = value.expandedNavigationRatios?.[view];
+          return typeof ratio === "number" && Number.isFinite(ratio)
+            ? [[view, finiteNavigationRatio(ratio)]]
+            : [];
+        }),
+      ),
       rightSize: finiteSize(value.rightSize, DEFAULT_RIGHT_SIZE),
       bottomSize: finiteSize(value.bottomSize, DEFAULT_BOTTOM_SIZE),
       filesNavigationRatio: finiteNavigationRatio(value.filesNavigationRatio),
@@ -285,6 +321,7 @@ export function writeInspectorPreferences(
     ...previous,
     view: state.view,
     dock: state.dock,
+    expanded: state.expanded,
     rightSize: state.dock === "right" ? state.size : previous.rightSize,
     bottomSize: state.dock === "bottom" ? state.size : previous.bottomSize,
   };
@@ -296,13 +333,24 @@ export function writeInspectorNavigationRatio(
   scope: ResourceScope,
   view: InspectorSplitView,
   ratio: number,
+  expanded = false,
 ): void {
   const previous = readInspectorPreferences(storage, scope);
   const key =
     view === "files" ? "filesNavigationRatio" : "changesNavigationRatio";
   storage.setItem(
     preferencesStorageKey(scope),
-    JSON.stringify({ ...previous, [key]: finiteNavigationRatio(ratio) }),
+    JSON.stringify(
+      expanded
+        ? {
+            ...previous,
+            expandedNavigationRatios: {
+              ...previous.expandedNavigationRatios,
+              [view]: finiteNavigationRatio(ratio),
+            },
+          }
+        : { ...previous, [key]: finiteNavigationRatio(ratio) },
+    ),
   );
 }
 

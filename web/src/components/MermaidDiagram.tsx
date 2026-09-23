@@ -1,11 +1,18 @@
 import { useEffect, useState } from "react";
-import { loadMermaidModule, renderMermaidDiagram } from "../mermaidRender";
+import {
+  loadMermaidModule,
+  normalizeMermaidSource,
+  renderMermaidDiagram,
+} from "../mermaidRender";
+
+import { ZoomablePreview } from "./ZoomablePreview";
+import "./MermaidDiagram.css";
 
 type MermaidDiagramState =
   | { kind: "loading" }
   | { kind: "empty" }
   | { kind: "error"; error: string }
-  | { kind: "svg"; svg: string };
+  | { kind: "svg"; svg: string; width: number; height: number };
 
 export function MermaidDiagram({
   code,
@@ -18,7 +25,7 @@ export function MermaidDiagram({
 
   useEffect(() => {
     let cancelled = false;
-    if (!code.trim()) {
+    if (!normalizeMermaidSource(code).trim()) {
       setState({ kind: "empty" });
       return () => {
         cancelled = true;
@@ -29,11 +36,23 @@ export function MermaidDiagram({
       (mermaid) => {
         if (cancelled) return;
         const rendered = renderMermaidDiagram(mermaid, code);
-        setState(
-          rendered.ok
-            ? { kind: "svg", svg: rendered.svg }
-            : { kind: "error", error: rendered.error },
-        );
+        if (!rendered.ok) {
+          setState({ kind: "error", error: rendered.error });
+          return;
+        }
+        const svg = new DOMParser().parseFromString(
+          rendered.svg,
+          "image/svg+xml",
+        ).documentElement;
+        const viewBox = svg
+          .getAttribute("viewBox")
+          ?.trim()
+          .split(/[\s,]+/)
+          .map(Number);
+        const width = Number(svg.getAttribute("width")) || viewBox?.[2] || 800;
+        const height =
+          Number(svg.getAttribute("height")) || viewBox?.[3] || 600;
+        setState({ kind: "svg", svg: rendered.svg, width, height });
       },
       (error) => {
         if (cancelled) return;
@@ -71,17 +90,29 @@ export function MermaidDiagram({
     return (
       <div className={`mermaid-diagram-error ${className}`.trim()} role="alert">
         Mermaid render failed: {state.error}
+        <details>
+          <summary>Show diagram source</summary>
+          <pre>
+            <code>{code}</code>
+          </pre>
+        </details>
       </div>
     );
   }
   return (
-    <div
+    <ZoomablePreview
+      key={code}
+      dimensions={state}
+      label="Mermaid diagram"
       className={`mermaid-diagram ${className}`.trim()}
-      role="img"
-      aria-label="Mermaid diagram"
-      // SVG produced by beautiful-mermaid from escaped labels; the shared
-      // module promise keeps it identical to the Markdown preview output.
-      dangerouslySetInnerHTML={{ __html: state.svg }}
-    />
+    >
+      <div
+        className="mermaid-svg"
+        role="img"
+        aria-label="Mermaid diagram"
+        // Renderer labels are escaped, styles are scoped, and IDs are unique.
+        dangerouslySetInnerHTML={{ __html: state.svg }}
+      />
+    </ZoomablePreview>
   );
 }

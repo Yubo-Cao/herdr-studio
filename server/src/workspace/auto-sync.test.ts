@@ -3,6 +3,8 @@ import { shQuote } from "../utils/process-utils";
 import { createWorkspaceAutoSync, syncWorkspaceBranch } from "./auto-sync";
 
 type Result = { code: number; stdout: string; stderr: string };
+const fetchedCommit = "a".repeat(40);
+const remoteHead = `ref: refs/heads/master\tHEAD\n${fetchedCommit}\tHEAD\n`;
 
 function deferred<T>() {
   let resolve!: (value: T | PromiseLike<T>) => void;
@@ -69,7 +71,7 @@ describe("workspace branch auto-sync", () => {
     expect(commands[2]).toContain("status --porcelain=v1");
   });
 
-  test("fetches and merges origin main into a clean branch", async () => {
+  test("fetches and merges origin's default branch into a clean branch", async () => {
     const commands: string[] = [];
     const result = await syncWorkspaceBranch({
       root: "/repo",
@@ -80,7 +82,10 @@ describe("workspace branch auto-sync", () => {
           { code: 0, stdout: "feature/test\n", stderr: "" },
           { code: 0, stdout: "", stderr: "" },
           { code: 0, stdout: "before\n", stderr: "" },
+          { code: 0, stdout: remoteHead, stderr: "" },
           { code: 0, stdout: "", stderr: "" },
+          { code: 0, stdout: "", stderr: "" },
+          { code: 0, stdout: fetchedCommit, stderr: "" },
           { code: 0, stdout: "feature/test\n", stderr: "" },
           { code: 0, stdout: "", stderr: "" },
           { code: 0, stdout: "before\n", stderr: "" },
@@ -93,12 +98,15 @@ describe("workspace branch auto-sync", () => {
 
     expect(result).toEqual({
       last_status: "updated",
-      last_message: "Merged origin/main into feature/test.",
+      last_message: "Merged origin/master into feature/test.",
       last_branch: "feature/test",
     });
-    expect(commands[4]).toContain("fetch origin main");
-    expect(commands[8]).toContain(
-      "-c commit.gpgsign=false merge --no-edit --no-stat FETCH_HEAD",
+    expect(commands[4]).toContain("ls-remote --symref origin HEAD");
+    expect(commands[6]).toContain(
+      `fetch --no-tags --no-write-fetch-head --refmap= origin '${fetchedCommit}'`,
+    );
+    expect(commands[11]).toContain(
+      `-c commit.gpgsign=false merge --no-edit --no-stat '${fetchedCommit}'`,
     );
   });
 
@@ -113,7 +121,10 @@ describe("workspace branch auto-sync", () => {
           { code: 0, stdout: "feature/test\n", stderr: "" },
           { code: 0, stdout: "", stderr: "" },
           { code: 0, stdout: "before\n", stderr: "" },
+          { code: 0, stdout: remoteHead, stderr: "" },
           { code: 0, stdout: "", stderr: "" },
+          { code: 0, stdout: "", stderr: "" },
+          { code: 0, stdout: fetchedCommit, stderr: "" },
           { code: 0, stdout: "feature/test\n", stderr: "" },
           { code: 0, stdout: "", stderr: "" },
           { code: 0, stdout: "before\n", stderr: "" },
@@ -165,7 +176,10 @@ describe("workspace branch auto-sync", () => {
           { code: 0, stdout: "feature/test\n", stderr: "" },
           { code: 0, stdout: "", stderr: "" },
           { code: 0, stdout: "before\n", stderr: "" },
+          { code: 0, stdout: remoteHead, stderr: "" },
           { code: 0, stdout: "", stderr: "" },
+          { code: 0, stdout: "", stderr: "" },
+          { code: 0, stdout: fetchedCommit, stderr: "" },
           { code: 0, stdout: "feature/other\n", stderr: "" },
           { code: 0, stdout: "", stderr: "" },
           { code: 0, stdout: "after\n", stderr: "" },
@@ -177,11 +191,36 @@ describe("workspace branch auto-sync", () => {
     expect(result).toEqual({
       last_status: "skipped",
       last_message:
-        "Skipped because the workspace changed while origin/main was being fetched.",
+        "Skipped because the workspace changed while origin/master was being fetched.",
       last_branch: "feature/other",
     });
     expect(commands.some((command) => command.includes(" merge "))).toBe(false);
   });
+});
+
+test("does not merge when the remote default cannot be determined", async () => {
+  const commands: string[] = [];
+  const result = await syncWorkspaceBranch({
+    root: "/repo",
+    shQuote,
+    runProcessWithCodeTimeout: runner(
+      [
+        { code: 0, stdout: "true\n", stderr: "" },
+        { code: 0, stdout: "feature/test\n", stderr: "" },
+        { code: 0, stdout: "", stderr: "" },
+        { code: 0, stdout: "before\n", stderr: "" },
+        { code: 128, stdout: "", stderr: "origin unavailable" },
+      ],
+      commands,
+    ),
+  });
+  expect(result).toEqual({
+    last_status: "failed",
+    last_message:
+      "Unable to determine origin's default branch: origin unavailable",
+    last_branch: "feature/test",
+  });
+  expect(commands).toHaveLength(5);
 });
 
 describe("workspace auto-sync lifecycle", () => {

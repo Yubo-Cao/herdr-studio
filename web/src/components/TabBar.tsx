@@ -1,3 +1,4 @@
+import { shortcutTitle, useShortcutPreferences } from "../shortcutPreferences";
 import {
   shallowEqual,
   store,
@@ -6,7 +7,7 @@ import {
 } from "../store";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { PanelRight } from "lucide-react";
+import { MessageSquareText, PanelRight } from "lucide-react";
 import type { Tab } from "../types";
 import { AgentStatusIcon } from "./AgentStatusIcon";
 import { ConfirmDialog, TextInputDialog } from "./ModalDialogs";
@@ -16,11 +17,12 @@ import {
   terminalComposerDraftPaneIds,
 } from "../terminalComposer";
 import { summarizeTabAgents } from "./agentSession";
+import "./TabBar.css";
 
 const LONG_PRESS_MS = 550;
 const LONG_PRESS_MOVE_PX = 10;
-const REQUEST_CLOSE_TAB_EVENT = "herdr-gui:request-close-tab";
-const REQUEST_CLOSE_PANE_EVENT = "herdr-gui:request-close-pane";
+const REQUEST_CLOSE_TAB_EVENT = "roamgate:request-close-tab";
+const REQUEST_CLOSE_PANE_EVENT = "roamgate:request-close-pane";
 
 interface TabMenuState {
   tab: Tab;
@@ -60,12 +62,19 @@ export function requestClosePane(paneId: string) {
 export function TabBar({
   mobile = false,
   inspectorOpen = false,
+  annotationsOpen = false,
+  annotationCount = 0,
   onToggleInspector,
+  onToggleAnnotations,
 }: {
   mobile?: boolean;
   inspectorOpen?: boolean;
+  annotationsOpen?: boolean;
+  annotationCount?: number;
   onToggleInspector?: () => void;
+  onToggleAnnotations?: () => void;
 }) {
+  useShortcutPreferences();
   const s = useStoreSelector(
     (state) => ({
       activeConnectionId: state.activeConnectionId,
@@ -286,7 +295,7 @@ export function TabBar({
               store.createTab(focusedWs.workspace_id);
             }}
             disabled={!!createReason}
-            title={createReason ?? "New tab"}
+            title={createReason ?? shortcutTitle("New tab", "tab.create")}
           >
             +
           </button>
@@ -296,17 +305,34 @@ export function TabBar({
               type="button"
               className={inspectorOpen ? "is-active" : ""}
               aria-expanded={inspectorOpen}
-              title={
+              title={shortcutTitle(
                 inspectorOpen
-                  ? "Close Workspace Inspector (⌘⇧B)"
-                  : "Open Workspace Inspector (⌘⇧B)"
-              }
+                  ? "Close Workspace Inspector"
+                  : "Open Workspace Inspector",
+                "inspector.toggle",
+              )}
               onClick={onToggleInspector}
             >
               <PanelRight size={14} />
               <span>Inspector</span>
               {changedCount > 0 ? (
                 <span className="tabbar-change-count">{changedCount}</span>
+              ) : null}
+            </button>
+            <button
+              type="button"
+              className={annotationsOpen ? "is-active" : ""}
+              aria-expanded={annotationsOpen}
+              title={shortcutTitle(
+                annotationsOpen ? "Close Annotations" : "Open Annotations",
+                "annotations.toggle",
+              )}
+              onClick={onToggleAnnotations}
+            >
+              <MessageSquareText size={14} />
+              <span>Annotations</span>
+              {annotationCount > 0 ? (
+                <span className="tabbar-change-count">{annotationCount}</span>
               ) : null}
             </button>
           </div>

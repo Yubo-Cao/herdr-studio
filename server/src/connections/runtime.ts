@@ -1,4 +1,8 @@
 import {
+  createTaskEventTracker,
+  type TaskEvent,
+} from "../notifications/task-events";
+import {
   assertEndpointCreationSource,
   createEmptyWorkspaceCreator,
 } from "../bridge/endpoint-creation";
@@ -10,10 +14,15 @@ import { createCollaborationService } from "../bridge/collaboration";
 import { assertSupportedHerdrProtocol } from "../bridge/protocol-compat";
 import { createSettingsRpcHandler } from "../bridge/settings-rpc";
 import {
+  readGuiSettings,
+  terminalSurfaceCodecsEnabled,
+} from "../config/gui-settings";
+import {
   createSshTunnelManager,
   type SshTunnelConfig,
   type SshTunnelError,
 } from "../bridge/ssh-tunnel";
+import { dropCoalescedMessage } from "../bridge/websocket-send";
 import { createTerminalBridge } from "../bridge/terminal-bridge";
 import { createHerdrInfoHandler } from "../http/herdr-info";
 import { createImageUploadHandler } from "../http/image-upload";
@@ -91,9 +100,11 @@ export function createLegacyConnectionRuntime(args: {
   config: SshTunnelConfig;
   logger?: Logger;
   safeSend: SafeSend;
+  broadcast?: (payload: string, context?: string) => void;
   clientLabel: (ws: ServerWebSocket<unknown>) => string;
   markRpcError: MarkRpcError;
   onEvent: (event: unknown, identity: ConnectionIdentity) => void;
+  onTaskEvent?: (event: TaskEvent) => void;
   onError?: (error: unknown, identity: ConnectionIdentity) => void;
   onTransportExit?: (error: SshTunnelError) => void;
   /** Test seam for deterministic shutdown coverage. */
@@ -201,15 +212,29 @@ export function createLegacyConnectionRuntime(args: {
       files.resolveWorkspaceGitRoot({ workspace_id: workspaceId }),
     workspaceAutoSyncIsRunning: workspaceAutoSync.isRunning,
     onWorkspaceAutoSyncSettingsChanged: workspaceAutoSync.settingsChanged,
+    onTerminalTransportSettingsChanged: (enabled) => {
+      if (disposed) return;
+      terminalBridge.refreshSurfaceCodecs();
+      args.onEvent(
+        {
+          event: "settings.terminal_transport.updated",
+          data: { surface_codecs: enabled },
+        },
+        identity,
+      );
+    },
     safeSend: args.safeSend,
     markRpcError: args.markRpcError,
   });
   const terminalBridge = createTerminalBridge({
     connectionId: identity.id,
+    broadcast: args.broadcast,
     logger: logger.child("terminal"),
     connectionGeneration: args.connectionGeneration,
     formatError: sanitizeConnectionError,
     clientSocketPath,
+    surfaceCodecsEnabled: async () =>
+      terminalSurfaceCodecsEnabled(await readGuiSettings(), identity.id),
     herdrProtocol: async () => {
       const protocol: unknown = (await herdr.ping()).protocol;
       assertSupportedHerdrProtocol(protocol);
@@ -225,6 +250,14 @@ export function createLegacyConnectionRuntime(args: {
         5000,
       );
       assertEndpointCreationSource(source, result?.pane);
+    },
+    focusedWorkspaceId: async () => {
+      const result = await herdr.call("workspace.list", {}, 5000);
+      return (
+        result?.workspaces?.find(
+          (workspace: { focused?: boolean }) => workspace.focused,
+        )?.workspace_id ?? null
+      );
     },
     lookupPaneId: async (terminalId) => {
       try {
@@ -249,6 +282,7 @@ export function createLegacyConnectionRuntime(args: {
       }
     },
     safeSend: args.safeSend,
+    dropCoalesced: dropCoalescedMessage,
     clientLabel: args.clientLabel,
     markRpcError: args.markRpcError,
     confirmRelayResize: async ({ cols, rows, paneId }) => {
@@ -318,6 +352,38 @@ export function createLegacyConnectionRuntime(args: {
     failureMessage: "agent status subscription failed",
     recoveryMessage: "agent status subscription recovered",
   });
+  const pendingTaskEvents = new Map<string, TaskEvent>();
+  const taskEvents = createTaskEventTracker(async (event) => {
+    if (!args.onTaskEvent || disposed) return;
+    pendingTaskEvents.set(event.paneId, event);
+    // Resolve labels on demand so push works without a browser and after renames.
+    const [workspaceResult, tabResult] = await Promise.all([
+      herdr
+        .call("workspace.get", { workspace_id: event.workspaceId }, 5000)
+        .catch(() => null),
+      herdr
+        .call("tab.list", { workspace_id: event.workspaceId }, 5000)
+        .catch(() => null),
+    ]);
+    // An older lookup must not publish over a newer notification for this pane.
+    if (disposed || pendingTaskEvents.get(event.paneId) !== event) return;
+    pendingTaskEvents.delete(event.paneId);
+    const workspaceLabel = workspaceResult?.workspace?.label;
+    const tab = Array.isArray(tabResult?.tabs)
+      ? tabResult.tabs.find(
+          (tab: { tab_id?: unknown; workspace_id?: unknown } | null) =>
+            tab?.tab_id === event.tabId &&
+            tab?.workspace_id === event.workspaceId,
+        )
+      : undefined;
+    args.onTaskEvent({
+      ...event,
+      workspaceLabel:
+        typeof workspaceLabel === "string" ? workspaceLabel : undefined,
+      tabLabel: typeof tab?.label === "string" ? tab.label : undefined,
+    });
+  });
+  let taskListRevision = 0;
   const agentStatusSubscriptions = createAgentStatusSubscriptionLoop({
     herdr,
     connectionId: identity.id,
@@ -330,8 +396,14 @@ export function createLegacyConnectionRuntime(args: {
         connection: identity.id,
         operation: "pane list",
       }),
-    onPaneListStart: lastStepTurns.beginPaneList,
-    onPaneList: lastStepTurns.reconcilePaneList,
+    onPaneListStart: () => {
+      taskListRevision = taskEvents.beginPaneList();
+      return lastStepTurns.beginPaneList();
+    },
+    onPaneList: (result, revision) => {
+      taskEvents.reconcilePaneList(result, taskListRevision);
+      lastStepTurns.reconcilePaneList(result, revision);
+    },
     log: (message) => {
       agentStatusRecovery.recovered({ connection: identity.id });
       logger.debug(message, { connection: identity.id });
@@ -339,8 +411,11 @@ export function createLegacyConnectionRuntime(args: {
   });
 
   const onHerdrEvent = (event: unknown) => {
+    taskEvents.handleHerdrEvent(event);
     lastStepTurns.handleHerdrEvent(event);
     agentStatusSubscriptions.handleHerdrEvent(event);
+    if ((event as { event?: string })?.event === "workspace.focused")
+      terminalBridge.refreshPopupObserverFocus();
     args.onEvent(event, identity);
   };
   const onHerdrError = (error: unknown) => args.onError?.(error, identity);
@@ -432,6 +507,8 @@ export function createLegacyConnectionRuntime(args: {
     backgroundStarted = false;
     herdr.off("event", onHerdrEvent);
     herdr.off("error", onHerdrError);
+    taskEvents.stop();
+    pendingTaskEvents.clear();
     const autoSyncStop = workspaceAutoSync.stop();
     terminalBridge.dispose();
     const subscriptionStop = subscriptionLoop.stop();

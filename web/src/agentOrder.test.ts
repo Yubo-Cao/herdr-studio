@@ -49,6 +49,7 @@ import {
   groupOrderedAgentPanes,
   parseAgentListPreferences,
   sortAgentPanes,
+  withAgentActivity,
 } from "./agentOrder";
 
 const agents = [
@@ -150,5 +151,182 @@ describe("agent attention and grouping", () => {
     expect(
       parseAgentListPreferences('{"sort":"manual","grouping":"workspace"}'),
     ).toEqual({ sort: "manual", grouping: "workspace" });
+  });
+});
+
+describe("Herdr activity ordering", () => {
+  test("ranks only idle peers by latest state change, with stable ties", () => {
+    const panes = [
+      { pane_id: "old", agent_status: "idle", state_change_seq: 10 },
+      { pane_id: "new", agent_status: "idle", state_change_seq: 30 },
+      { pane_id: "working", agent_status: "working", state_change_seq: 1 },
+      { pane_id: "tie", agent_status: "IDLE", state_change_seq: 30 },
+      { pane_id: "missing", agent_status: "idle" },
+      { pane_id: "blocked", agent_status: "blocked", state_change_seq: 1 },
+    ];
+    expect(
+      sortAgentPanes(panes, ["old", "tie"], "attention").map((p) => p.pane_id),
+    ).toEqual(["blocked", "working", "tie", "new", "old", "missing"]);
+    expect(
+      sortAgentPanes(panes, ["old", "tie"], "manual").map((p) => p.pane_id),
+    ).toEqual(["old", "tie", "new", "working", "missing", "blocked"]);
+    expect(sortAgentPanes(panes, [], "workspace")).toEqual(panes);
+  });
+});
+
+const activityPane = {
+  pane_id: "p1",
+  terminal_id: "t1",
+  workspace_id: "w1",
+  tab_id: "tab1",
+  focused: false,
+  agent: "codex",
+  agent_status: "idle",
+  revision: 1,
+};
+
+describe("Herdr activity metadata", () => {
+  test("reconstructs recency from fresh snapshots without mutating pane data", () => {
+    const result = { agents: [{ ...activityPane, state_change_seq: 42 }] };
+    expect(withAgentActivity([activityPane], result)[0]?.state_change_seq).toBe(
+      42,
+    );
+    expect(
+      withAgentActivity([structuredClone(activityPane)], result)[0]
+        ?.state_change_seq,
+    ).toBe(42);
+    expect(activityPane).not.toHaveProperty("state_change_seq");
+    expect(
+      withAgentActivity([activityPane], {
+        agents: [{ ...activityPane, state_change_seq: 0 }],
+      })[0]?.state_change_seq,
+    ).toBe(0);
+  });
+
+  test("preserves completion recency when acknowledging Done races the two snapshots", () => {
+    for (const [paneStatus, agentStatus] of [
+      ["idle", "done"],
+      ["done", "idle"],
+    ]) {
+      const pane = { ...activityPane, agent_status: paneStatus };
+      const result = {
+        agents: [{ ...pane, agent_status: agentStatus, state_change_seq: 42 }],
+      };
+      const merged = withAgentActivity([pane], result)[0]!;
+      expect(merged.state_change_seq).toBe(42);
+      expect(merged.agent_status).toBe(paneStatus);
+      if (paneStatus === "idle") {
+        const older = {
+          ...activityPane,
+          pane_id: "older",
+          state_change_seq: 10,
+        };
+        expect(
+          sortAgentPanes([older, merged], [], "attention").map(
+            (pane) => pane.pane_id,
+          ),
+        ).toEqual(["p1", "older"]);
+      }
+    }
+  });
+
+  test("does not join activity across terminal, agent, or status changes", () => {
+    for (const mismatch of [
+      { terminal_id: "replacement" },
+      { agent: "claude" },
+      { agent_status: "working" },
+      { pane_id: "other" },
+    ]) {
+      const result = {
+        agents: [{ ...activityPane, state_change_seq: 42, ...mismatch }],
+      };
+      expect(withAgentActivity([activityPane], result)[0]).toBe(activityPane);
+    }
+  });
+
+  test("tolerates missing metadata and rejects invalid sequence numbers", () => {
+    for (const result of [
+      null,
+      {},
+      { agents: {} },
+      { agents: [null, 42, {}] },
+    ]) {
+      expect(withAgentActivity([activityPane], result)).toEqual([activityPane]);
+    }
+    for (const state_change_seq of [
+      undefined,
+      -1,
+      1.5,
+      "42",
+      NaN,
+      Infinity,
+      Number.MAX_SAFE_INTEGER + 1,
+    ]) {
+      expect(
+        withAgentActivity([activityPane], {
+          agents: [{ ...activityPane, state_change_seq }],
+        }),
+      ).toEqual([activityPane]);
+    }
+  });
+});
+
+describe("session activity ordering", () => {
+  test("puts recently used idle agents above old agents with newer status sequences", () => {
+    const panes = [
+      {
+        ...activityPane,
+        pane_id: "stockpyl4",
+        state_change_seq: 482,
+        last_activity_at: 1000,
+      },
+      {
+        ...activityPane,
+        pane_id: "backend",
+        state_change_seq: 471,
+        last_activity_at: 2000,
+      },
+      {
+        ...activityPane,
+        pane_id: "superadmin",
+        state_change_seq: 474,
+        last_activity_at: 3000,
+      },
+      { ...activityPane, pane_id: "missing", state_change_seq: 999 },
+      {
+        ...activityPane,
+        pane_id: "working",
+        agent_status: "working",
+        last_activity_at: 500,
+      },
+    ];
+    expect(
+      sortAgentPanes(panes, [], "attention").map((p) => p.pane_id),
+    ).toEqual(["working", "superadmin", "backend", "stockpyl4", "missing"]);
+    expect(sortAgentPanes(panes, ["stockpyl4"], "manual")).toEqual(panes);
+    expect(sortAgentPanes(panes, [], "workspace")).toEqual(panes);
+  });
+
+  test("retains timestamps across Done/Idle acknowledgements even without a sequence", () => {
+    const merged = withAgentActivity([activityPane], {
+      agents: [
+        { ...activityPane, agent_status: "done", last_activity_at: 1234 },
+      ],
+    });
+    expect(merged[0]?.last_activity_at).toBe(1234);
+    expect(merged[0]?.agent_status).toBe("idle");
+    expect(merged[0]).not.toHaveProperty("state_change_seq");
+  });
+
+  test("rejects invalid activity values independently of valid sequence values", () => {
+    for (const time of [undefined, null, "1234", 0, -1, NaN, Infinity]) {
+      const merged = withAgentActivity([activityPane], {
+        agents: [
+          { ...activityPane, state_change_seq: 42, last_activity_at: time },
+        ],
+      });
+      expect(merged[0]?.state_change_seq).toBe(42);
+      expect(merged[0]).not.toHaveProperty("last_activity_at");
+    }
   });
 });

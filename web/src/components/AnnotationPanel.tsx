@@ -3,6 +3,8 @@ import {
   ArrowUp,
   Clipboard,
   MessageSquareText,
+  Pin,
+  PinOff,
   Send,
   Trash2,
   X,
@@ -11,30 +13,42 @@ import { useEffect, useState } from "react";
 import {
   diffReviewLineLabel,
   fileReviewLineLabel,
+  terminalAnnotationTitle,
   type ReviewAnnotation,
 } from "../annotations";
+import {
+  shortcutLabel,
+  shortcutMatches,
+  shortcutTitle,
+  useShortcutPreferences,
+} from "../shortcutPreferences";
 import type { Pane } from "../types";
 import { ConfirmDialog } from "./ModalDialogs";
+import { ThemedSelect } from "./ThemedSelect";
+import "./AnnotationPanel.css";
 
 function annotationLocation(annotation: ReviewAnnotation) {
+  if (annotation.source === "terminal")
+    return `Terminal · ${annotation.title} · selected passage`;
   if (annotation.source === "diff") {
-    return `${annotation.path} · ${diffReviewLineLabel(annotation)}`;
+    return `Diff · ${annotation.path} · ${diffReviewLineLabel(annotation)}`;
   }
   if (annotation.anchor === "line") {
-    return `${annotation.path} · ${fileReviewLineLabel(annotation)}`;
+    return `File · ${annotation.path} · ${fileReviewLineLabel(annotation)}`;
   }
   return annotation.section.length
-    ? `${annotation.path} · ${annotation.section.join(" › ")}`
-    : `${annotation.path} · selected passage`;
+    ? `Markdown · ${annotation.path} · ${annotation.section.join(" › ")}`
+    : `Markdown · ${annotation.path} · selected passage`;
 }
 
 function paneLabel(pane: Pane) {
-  const id = pane.pane_id.length > 8 ? pane.pane_id.slice(0, 8) : pane.pane_id;
-  return `${pane.agent ?? "Agent"} · ${id}`;
+  return terminalAnnotationTitle(pane);
 }
 
 export function AnnotationPanel({
   open,
+  floating,
+  onToggleFloating,
   annotations,
   agentPanes,
   preferredPaneId,
@@ -47,8 +61,11 @@ export function AnnotationPanel({
   onClear,
   onCopy,
   onSend,
+  onGoToAgent,
 }: {
   open: boolean;
+  floating: boolean;
+  onToggleFloating?: () => void;
   annotations: readonly ReviewAnnotation[];
   agentPanes: readonly Pane[];
   preferredPaneId?: string;
@@ -61,9 +78,20 @@ export function AnnotationPanel({
   onClear: () => void;
   onCopy: () => void;
   onSend: (paneId: string | null) => void;
+  onGoToAgent?: () => void;
 }) {
+  useShortcutPreferences();
+  const copyShortcut = shortcutLabel("annotations.copy");
+  const prefillShortcut = shortcutLabel("annotations.prefill");
+  const hasFeedback = annotations.some((annotation) =>
+    annotation.comment.trim(),
+  );
   const [targetPaneId, setTargetPaneId] = useState("");
   const [confirmClear, setConfirmClear] = useState(false);
+
+  useEffect(() => {
+    if (preferredPaneId) setTargetPaneId(preferredPaneId);
+  }, [preferredPaneId]);
 
   useEffect(() => {
     const preferred = agentPanes.find(
@@ -77,28 +105,68 @@ export function AnnotationPanel({
 
   useEffect(() => {
     if (!open || !focusedAnnotationId) return;
-    requestAnimationFrame(() => {
-      const card = Array.from(
-        document.querySelectorAll<HTMLElement>("[data-review-annotation-id]"),
-      ).find(
-        (element) => element.dataset.reviewAnnotationId === focusedAnnotationId,
-      );
-      card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
-      card?.querySelector("textarea")?.focus({ preventScroll: true });
+    let frame = requestAnimationFrame(() => {
+      frame = requestAnimationFrame(() => {
+        const card = Array.from(
+          document.querySelectorAll<HTMLElement>("[data-review-annotation-id]"),
+        ).find(
+          (element) =>
+            element.dataset.reviewAnnotationId === focusedAnnotationId,
+        );
+        card?.scrollIntoView({ block: "nearest", behavior: "smooth" });
+        card?.querySelector("textarea")?.focus({ preventScroll: true });
+      });
     });
+    return () => cancelAnimationFrame(frame);
   }, [focusedAnnotationId, open]);
 
   if (!open) return null;
 
   return (
-    <aside className="annotation-panel" aria-label="Review annotations">
+    <aside
+      className={`annotation-panel ${floating ? "is-floating" : ""}`}
+      aria-label="Review annotations"
+      onKeyDown={(event) => {
+        if (
+          event.defaultPrevented ||
+          confirmClear ||
+          !(event.target instanceof Node) ||
+          !event.currentTarget.contains(event.target)
+        )
+          return;
+        const copy = shortcutMatches(event.nativeEvent, "annotations.copy");
+        const prefill = shortcutMatches(
+          event.nativeEvent,
+          "annotations.prefill",
+        );
+        if (!copy && !prefill) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (busy || !hasFeedback || event.repeat) return;
+        if (copy) onCopy();
+        else onSend(targetPaneId || null);
+      }}
+    >
       <header className="annotation-panel-head">
         <div>
           <strong>Review feedback</strong>
           <span>
-            {annotations.length} comment{annotations.length === 1 ? "" : "s"}
+            {annotations.length} comment
+            {annotations.length === 1 ? "" : "s"}
           </span>
         </div>
+        {onToggleFloating ? (
+          <button
+            type="button"
+            className="annotation-icon-button annotation-mode-button"
+            aria-label={floating ? "Pin annotations" : "Float annotations"}
+            title={floating ? "Fixed layout" : "Floating layout"}
+            aria-pressed={!floating}
+            onClick={onToggleFloating}
+          >
+            {floating ? <Pin size={16} /> : <PinOff size={16} />}
+          </button>
+        ) : null}
         <button
           type="button"
           className="annotation-icon-button"
@@ -117,7 +185,7 @@ export function AnnotationPanel({
             <strong>No review comments yet</strong>
             <span>
               Click or drag across diff line numbers or a source gutter, or
-              select rendered Markdown text.
+              select rendered Markdown or terminal text.
             </span>
           </div>
         ) : (
@@ -133,9 +201,20 @@ export function AnnotationPanel({
                 <strong title={annotationLocation(annotation)}>
                   {index + 1}. {annotationLocation(annotation)}
                 </strong>
-                {annotation.stale ? <span>Stale anchor</span> : null}
+                {annotation.stale ? (
+                  <span>
+                    {annotation.source === "terminal"
+                      ? "Pane unavailable"
+                      : "Stale anchor"}
+                  </span>
+                ) : null}
               </div>
-              <blockquote>{annotation.quote || "Blank line"}</blockquote>
+              <blockquote
+                tabIndex={0}
+                aria-label={`Selected text for comment ${index + 1}`}
+              >
+                {annotation.quote || "Blank line"}
+              </blockquote>
               <textarea
                 value={annotation.comment}
                 rows={3}
@@ -185,16 +264,15 @@ export function AnnotationPanel({
         {agentPanes.length > 1 ? (
           <label className="annotation-target-picker">
             <span>Agent pane</span>
-            <select
+            <ThemedSelect
+              aria-label="Agent pane"
               value={targetPaneId}
-              onChange={(event) => setTargetPaneId(event.currentTarget.value)}
-            >
-              {agentPanes.map((pane) => (
-                <option key={pane.pane_id} value={pane.pane_id}>
-                  {paneLabel(pane)}
-                </option>
-              ))}
-            </select>
+              options={agentPanes.map((pane) => ({
+                value: pane.pane_id,
+                label: paneLabel(pane),
+              }))}
+              onChange={setTargetPaneId}
+            />
           </label>
         ) : agentPanes.length === 1 ? (
           <div className="annotation-target-summary">
@@ -209,20 +287,34 @@ export function AnnotationPanel({
           <button
             type="button"
             className="ghost"
-            disabled={busy || annotations.length === 0}
+            disabled={busy || !hasFeedback}
             onClick={onCopy}
+            title={shortcutTitle("Copy review feedback", "annotations.copy")}
           >
             <Clipboard size={14} /> Copy
+            {copyShortcut !== "Unassigned" ? <kbd>{copyShortcut}</kbd> : null}
           </button>
           <button
             type="button"
-            disabled={busy || annotations.length === 0}
+            disabled={busy || !hasFeedback}
             onClick={() => onSend(targetPaneId || null)}
+            title={shortcutTitle(
+              agentPanes.length ? "Pre-fill agent" : "Copy feedback",
+              "annotations.prefill",
+            )}
           >
             {agentPanes.length ? <Send size={14} /> : <Clipboard size={14} />}
             {agentPanes.length ? "Pre-fill agent" : "Copy feedback"}
+            {prefillShortcut !== "Unassigned" ? (
+              <kbd>{prefillShortcut}</kbd>
+            ) : null}
           </button>
         </div>
+        {onGoToAgent ? (
+          <button type="button" className="ghost" onClick={onGoToAgent}>
+            Go to agent
+          </button>
+        ) : null}
         <button
           type="button"
           className="annotation-clear-button"

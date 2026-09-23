@@ -1,5 +1,6 @@
 import { basename } from "node:path";
 import { randomUUID } from "node:crypto";
+import { enrichAgentActivity } from "./agent-activity";
 import type { HerdrCall, SessionFile } from "./session-types";
 import {
   createAgentSessionResolverContext,
@@ -10,6 +11,7 @@ import {
   localAgentSessionFiles,
   type AgentSessionFileAccess,
 } from "./session-file-access";
+import { readAntigravitySessionRecords } from "./antigravity-session";
 import {
   createSessionProjectionCache,
   readSessionProjection,
@@ -26,6 +28,12 @@ export function createAgentSessionHandlers(args: {
   const resolverContext = createAgentSessionResolverContext();
   const cache = createSessionProjectionCache(args.files);
   return {
+    listWithActivity: async (params: Record<string, unknown>) =>
+      enrichAgentActivity(
+        await args.herdrCall("agent.list", params),
+        args.files,
+        resolverContext,
+      ),
     readHistory: async (params: Record<string, unknown>) => {
       if (params.history_version !== 2) {
         return readAgentMessageHistory(
@@ -182,12 +190,23 @@ export async function readAgentSessionSummary(
   let text: string | null = null;
   let truncated = false;
   if (includeText) {
-    const bytes = await files.readPrefix(resolved.file.path, previewLimit + 1);
-    truncated =
-      bytes.length > previewLimit || (projected.file.size ?? 0) > previewLimit;
-    text = new TextDecoder("utf-8", { fatal: false }).decode(
-      truncated ? bytes.subarray(0, previewLimit) : bytes,
-    );
+    if (resolved.agent === "agy") {
+      const records = await readAntigravitySessionRecords(resolved.file.path);
+      const ndjson = records.map((r) => JSON.stringify(r)).join("\n");
+      truncated = ndjson.length > previewLimit;
+      text = truncated ? ndjson.slice(0, previewLimit) : ndjson;
+    } else {
+      const bytes = await files.readPrefix(
+        resolved.file.path,
+        previewLimit + 1,
+      );
+      truncated =
+        bytes.length > previewLimit ||
+        (projected.file.size ?? 0) > previewLimit;
+      text = new TextDecoder("utf-8", { fatal: false }).decode(
+        truncated ? bytes.subarray(0, previewLimit) : bytes,
+      );
+    }
   }
   const trajectory = includeTrajectory ? projected.trajectory : null;
   return {
@@ -202,8 +221,10 @@ export async function readAgentSessionSummary(
 }
 
 function contentDispositionFilename(path: string) {
+  const isDb = path.endsWith(".db");
+  const fallbackDefault = isDb ? "session.db" : "session.jsonl";
   const fallback =
-    basename(path).replace(/[^\x20-\x7e]|["\r\n]/g, "_") || "session.jsonl";
+    basename(path).replace(/[^\x20-\x7e]|["\r\n]/g, "_") || fallbackDefault;
   return `attachment; filename="${fallback}"`;
 }
 
@@ -234,9 +255,12 @@ export async function downloadAgentSessionFile(
     });
   }
   const body = await files.readDownloadBody(resolved.file.path);
+  const isDb = resolved.file.path.endsWith(".db");
   return new Response(body, {
     headers: {
-      "content-type": "application/x-ndjson; charset=utf-8",
+      "content-type": isDb
+        ? "application/vnd.sqlite3"
+        : "application/x-ndjson; charset=utf-8",
       "content-length": String(resolved.file.size ?? 0),
       "content-disposition": contentDispositionFilename(resolved.file.path),
       "x-agent-session-path": encodeURIComponent(resolved.file.path),

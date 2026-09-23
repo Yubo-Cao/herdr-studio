@@ -10,6 +10,7 @@ import {
   timestampMs,
 } from "./session-utils";
 import {
+  createTokenUsageReader,
   summarizeTokenUsage,
   tokenUsageForRecord,
   tokenUsageFrom,
@@ -43,7 +44,9 @@ function agentVersionFromRecords(
         : "");
     if (version) return version;
   }
-  return agent === "kimi" ? "kimi-code" : "unknown";
+  if (agent === "kimi") return "kimi-code";
+  if (agent === "agy") return "antigravity-cli";
+  return "unknown";
 }
 
 function sessionIdFromRecords(
@@ -104,13 +107,17 @@ function createTrajectory(
         : basename(file.path).replace(/\.[^.]+$/, "")),
     agent: {
       name:
-        agent === "kimi"
-          ? "kimi-code"
-          : agent === "claude"
-            ? "claude-code"
-            : agent === "grok"
-              ? "grok-build"
-              : agent,
+        agent === "muse"
+          ? "muse-code"
+          : agent === "kimi"
+            ? "kimi-code"
+            : agent === "claude"
+              ? "claude-code"
+              : agent === "grok"
+                ? "grok-build"
+                : agent === "agy"
+                  ? "antigravity-cli"
+                  : agent,
       version: file.agentVersion || agentVersionFromRecords(agent, records),
       model_name: file.modelName || undefined,
     },
@@ -125,7 +132,7 @@ function createTrajectory(
     extra: {
       source_path: file.path,
       source_records: records.length,
-      projection: "herdr-gui-lightweight",
+      projection: "roamgate-lightweight",
     },
   };
 }
@@ -812,6 +819,297 @@ function projectGrokTrajectory(
   return createTrajectory("grok", file, records, steps);
 }
 
+function projectMuseTrajectory(
+  file: SessionFile,
+  records: Record<string, unknown>[],
+) {
+  const steps: Omit<AtifStep, "step_id">[] = [];
+  const acceptedIntents = new Set<string>();
+  const materializedRuns = new Map<string, string>();
+  const failedTools = new Set<string>();
+  const readUsage = createTokenUsageReader();
+  let sessionId = file.sessionId;
+  let modelName = file.modelName;
+  let agentVersion = file.agentVersion;
+  for (const record of records) {
+    if (!isRecord(record.payload)) continue;
+    const payload = record.payload;
+    if (
+      record.payload_type === "runtime.user_intent.materialized" &&
+      isRecord(payload.outcome)
+    ) {
+      materializedRuns.set(
+        stringValue(payload.outcome.run_id),
+        stringValue(payload.intent_id),
+      );
+    }
+    if (
+      record.payload_type === "tool_batch.effect.terminal" &&
+      isRecord(payload.record) &&
+      isRecord(payload.record.outcome) &&
+      payload.record.outcome.kind === "failed"
+    ) {
+      failedTools.add(
+        JSON.stringify([
+          stringValue(payload.run_id),
+          stringValue(payload.record.call_id),
+        ]),
+      );
+    }
+  }
+  records.forEach((record, index) => {
+    const usage = readUsage(record).usage;
+    if (!isRecord(record.payload)) return;
+    const payload = record.payload;
+    const type = stringValue(record.payload_type);
+    if (isRecord(record.stream) && record.stream.kind === "session")
+      sessionId ||= stringValue(record.stream.id);
+    if (type === "runtime.session.metadata" && isRecord(payload.record)) {
+      modelName = stringValue(payload.record.model_id) || modelName;
+      if (isRecord(payload.record.build))
+        agentVersion = stringValue(payload.record.build.semver) || agentVersion;
+      return;
+    }
+    // Muse's recorded_at is Unix microseconds, not milliseconds.
+    const ms =
+      typeof record.recorded_at === "number"
+        ? Math.floor(record.recorded_at / 1000)
+        : NaN;
+    const timestamp =
+      Number.isFinite(ms) && Math.abs(ms) <= 8.64e15
+        ? new Date(ms).toISOString()
+        : messageTime(record, file.mtimeMs, index);
+    if (type === "runtime.user_intent.accepted") {
+      const text = cleanMessageText(textFromContent(payload.model_messages));
+      if (text) {
+        steps.push({ timestamp, source: "user", message: text });
+        const id = stringValue(payload.intent_id);
+        if (id) acceptedIntents.add(id);
+      }
+      return;
+    }
+    if (
+      type !== "runtime.session" ||
+      payload.kind !== "run" ||
+      !isRecord(payload.event)
+    )
+      return;
+    const event = payload.event;
+    if (event.kind === "started") {
+      const runId = stringValue(payload.run_id);
+      if (
+        acceptedIntents.has(runId) ||
+        acceptedIntents.has(materializedRuns.get(runId) ?? "")
+      )
+        return;
+      const text = cleanMessageText(stringValue(event.prompt));
+      if (text) steps.push({ timestamp, source: "user", message: text });
+    } else if (event.kind === "assistant_message_committed") {
+      const text = cleanMessageText(stringValue(event.text));
+      if (text) steps.push({ timestamp, source: "agent", message: text });
+    } else if (event.kind === "reasoning_committed") {
+      const text = cleanMessageText(stringValue(event.text));
+      if (text)
+        steps.push({
+          timestamp,
+          source: "agent",
+          message: "Reasoning",
+          reasoning_content: text,
+        });
+    } else if (
+      event.kind === "assistant_tool_calls_committed" &&
+      Array.isArray(event.tool_calls)
+    ) {
+      for (const call of event.tool_calls.filter(isRecord)) {
+        const name = stringValue(call.name) || "tool";
+        steps.push({
+          timestamp,
+          source: "agent",
+          message: `Tool call: ${name}`,
+          tool_calls: [
+            {
+              tool_call_id:
+                stringValue(call.call_id) ||
+                stringValue(call.id) ||
+                `${index}:${steps.length}`,
+              function_name: name,
+              arguments: toolArguments(call.args),
+            },
+          ],
+        });
+      }
+    } else if (
+      event.kind === "tool_result_batch_committed" &&
+      Array.isArray(event.results)
+    ) {
+      for (const result of event.results.filter(isRecord)) {
+        const content = stringValue(result.text);
+        steps.push({
+          timestamp,
+          source: "system",
+          message: content || "Tool result",
+          observation: {
+            results: [
+              {
+                source_call_id: stringValue(result.tool_call_id),
+                content,
+                extra: {
+                  is_error:
+                    failedTools.has(
+                      JSON.stringify([
+                        stringValue(payload.run_id),
+                        stringValue(result.tool_call_id),
+                      ]),
+                    ) || toolResultExtra(result).is_error,
+                },
+              },
+            ],
+          },
+        });
+      }
+    } else if (event.kind === "terminal" && event.terminal === "failed") {
+      const error =
+        cleanMessageText(stringValue(event.reason)) || "Muse run failed";
+      steps.push({
+        timestamp,
+        source: "agent",
+        message: `Error: ${error}`,
+        extra: { error_message: error },
+      });
+    } else if (event.kind === "model_completed") {
+      modelName = stringValue(event.model) || modelName;
+      const metrics = tokenUsageToMetrics(usage);
+      if (metrics)
+        steps.push({
+          timestamp,
+          source: "system",
+          message: "Token usage",
+          metrics,
+        });
+    }
+  });
+  return createTrajectory(
+    "muse",
+    { ...file, sessionId, modelName, agentVersion },
+    records,
+    steps,
+  );
+}
+
+function projectAntigravityTrajectory(
+  file: SessionFile,
+  records: Record<string, unknown>[],
+) {
+  const steps: Omit<AtifStep, "step_id">[] = [];
+  const createdAt = file.createdAtMs ?? file.mtimeMs;
+  records.forEach((record, index) => {
+    try {
+      const timestamp = messageTime(record, createdAt, index);
+      const type = stringValue(record.type);
+      if (type === "user") {
+        const text = cleanMessageText(textFromContent(record.content));
+        if (text) {
+          steps.push({
+            timestamp,
+            source: "user",
+            message: text,
+            extra: { record_type: type },
+          });
+        }
+        return;
+      }
+      if (type === "system") {
+        const text = cleanMessageText(textFromContent(record.content));
+        if (text) {
+          steps.push({
+            timestamp,
+            source: "system",
+            message: text,
+            extra: { record_type: type },
+          });
+        }
+        return;
+      }
+      if (type === "reasoning") {
+        const reasoning = cleanMessageText(
+          textFromContent(record.summary ?? record.content),
+        );
+        if (!reasoning) return;
+        steps.push({
+          timestamp,
+          source: "agent",
+          message: "Reasoning",
+          reasoning_content: reasoning,
+          metrics: tokenUsageToMetrics(tokenUsageForRecord(record).usage),
+          extra: {
+            record_type: type,
+            model: file.modelName,
+          },
+        });
+        return;
+      }
+      if (type === "assistant") {
+        const text = cleanMessageText(textFromContent(record.content));
+        const toolCalls = Array.isArray(record.tool_calls)
+          ? record.tool_calls.filter(isRecord).map((call, callIndex) => ({
+              tool_call_id: stringValue(call.id) || `${index}:${callIndex}`,
+              function_name: stringValue(call.name) || "tool",
+              arguments: toolArguments(call.arguments),
+            }))
+          : [];
+        const reasoning = cleanMessageText(textFromContent(record.reasoning));
+        const errorMessage = stringValue(record.error_message);
+        if (!text && toolCalls.length === 0 && !reasoning && !errorMessage)
+          return;
+        steps.push({
+          timestamp,
+          source: "agent",
+          message:
+            text ||
+            (toolCalls.length > 0
+              ? `Tool call${toolCalls.length === 1 ? "" : "s"}: ${toolCalls
+                  .map((call) => call.function_name)
+                  .join(", ")}`
+              : errorMessage || "Assistant message"),
+          reasoning_content: reasoning || undefined,
+          tool_calls: toolCalls.length > 0 ? toolCalls : undefined,
+          metrics: tokenUsageToMetrics(tokenUsageForRecord(record).usage),
+          extra: {
+            record_type: type,
+            model: file.modelName,
+            error_message: errorMessage || undefined,
+          },
+        });
+        return;
+      }
+      if (type === "tool_result") {
+        const content = toolOutputText(record.content);
+        steps.push({
+          timestamp,
+          source: "system",
+          message: content || "Tool result",
+          observation: {
+            results: [
+              {
+                source_call_id: stringValue(record.tool_call_id),
+                content: content || "Tool result",
+                extra: {
+                  tool_name: stringValue(record.tool_name) || undefined,
+                  is_error: record.is_error === true,
+                },
+              },
+            ],
+          },
+          extra: { record_type: type },
+        });
+      }
+    } catch {
+      // Fail soft on malformed record
+    }
+  });
+  return createTrajectory("agy", file, records, steps);
+}
+
 export function projectAgentTrajectory(
   agent: string,
   file: SessionFile,
@@ -822,5 +1120,7 @@ export function projectAgentTrajectory(
   if (agent === "kimi") return projectKimiTrajectory(file, records);
   if (agent === "grok") return projectGrokTrajectory(file, records);
   if (agent === "pi") return projectPiTrajectory(file, records);
+  if (agent === "muse") return projectMuseTrajectory(file, records);
+  if (agent === "agy") return projectAntigravityTrajectory(file, records);
   return createTrajectory(agent, file, records, []);
 }

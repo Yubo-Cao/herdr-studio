@@ -1,6 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { RenderOptions } from "beautiful-mermaid";
-import { prepareMermaidSvg, renderMermaidDiagram } from "./mermaidRender";
+import {
+  loadMermaidModule,
+  normalizeMermaidSource,
+  prepareMermaidSvg,
+  renderMermaidDiagram,
+} from "./mermaidRender";
 
 const SAMPLE_SVG = `<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 50" width="100" height="50" style="--bg:#000;--fg:#fff">
 <style>
@@ -77,5 +82,42 @@ describe("renderMermaidDiagram", () => {
       ok: false,
       error: 'Invalid mermaid header: "junk"',
     });
+  });
+});
+
+describe("standalone Mermaid source", () => {
+  test("renders sequence and class diagrams with leading file comments", async () => {
+    const renderer = await loadMermaidModule();
+    for (const source of [
+      "sequenceDiagram\n Alice->>Bob: Hello",
+      "classDiagram\n A --> B",
+    ]) {
+      expect(
+        renderMermaidDiagram(renderer, "\uFEFF%% File header\r\n\r\n" + source)
+          .ok,
+      ).toBe(true);
+    }
+  });
+
+  test("unwraps fenced files and YAML headers without altering diagram labels", async () => {
+    const source = "flowchart LR\n A[Start] --> B[End]";
+    expect(normalizeMermaidSource("```mermaid\n" + source + "\n```")).toBe(
+      source,
+    );
+    expect(normalizeMermaidSource("---\ntitle: Example\n---\n" + source)).toBe(
+      source,
+    );
+    expect(
+      normalizeMermaidSource('%%{init: {"theme": "dark"}}%%\n' + source),
+    ).toBe(source);
+    expect(
+      renderMermaidDiagram(
+        await loadMermaidModule(),
+        "---\ntitle: Example\n---\n" + source,
+      ).ok,
+    ).toBe(true);
+    expect(normalizeMermaidSource("flowchart LR\n A[100%%] --> B")).toContain(
+      "100%%",
+    );
   });
 });

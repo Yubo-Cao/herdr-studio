@@ -142,6 +142,21 @@ describe("workspace file handlers", () => {
       );
       expect(await response.text()).toBe("hello");
 
+      const svg =
+        '<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>';
+      await writeFile(join(root, "vector.svg"), svg);
+      const svgResponse = await handlers.downloadWorkspaceFile({
+        workspace_id: "w1",
+        path: "vector.svg",
+        inline: true,
+      });
+      expect(svgResponse.headers.get("content-type")).toBe("image/svg+xml");
+      expect(svgResponse.headers.get("content-security-policy")).toBe(
+        "sandbox; default-src 'none'; style-src 'unsafe-inline'; img-src data:",
+      );
+      expect(svgResponse.headers.get("x-content-type-options")).toBe("nosniff");
+      expect(await svgResponse.text()).toBe(svg);
+
       const inlineResponse = await handlers.downloadWorkspaceFile({
         workspace_id: "w1",
         path: "guide.pdf",
@@ -163,7 +178,7 @@ describe("workspace file handlers", () => {
     });
   });
 
-  test("resolves existing workspace-relative files in one batch", async () => {
+  test("resolves existing workspace-relative files and directories in one batch", async () => {
     await withTempDir(async (root) => {
       await mkdir(join(root, "a", "b"), { recursive: true });
       await writeFile(join(root, "a", "b", "c.png"), "image");
@@ -207,6 +222,7 @@ describe("workspace file handlers", () => {
         files: [
           { candidate: "a/b/c.png", path: "a/b/c.png" },
           { candidate: "./a/b/c.png", path: "a/b/c.png" },
+          { candidate: "a/b", path: "a/b" },
         ],
       });
     });

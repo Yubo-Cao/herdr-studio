@@ -1,6 +1,14 @@
-import { useEffect, useMemo, useRef } from "react";
+import { resolveWorkspaceMarkdownLink } from "../workspaceFileUrl";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { marked } from "marked";
-import { loadMermaidModule, renderMermaidDiagram } from "../mermaidRender";
+import { lazyWithReload } from "../lazyWithReload";
+import "./markdown.css";
+const MermaidDiagram = lazyWithReload("mermaid-preview", () =>
+  import("./MermaidDiagram").then((module) => ({
+    default: module.MermaidDiagram,
+  })),
+);
 
 const MARKDOWN_ALLOWED_TAGS = new Set([
   "a",
@@ -61,6 +69,8 @@ export function isSafeMarkdownUrl(value: string) {
 type MarkdownRenderOptions = {
   breaks?: boolean;
   imageUrlResolver?: (source: string) => string | null;
+  documentPath?: string;
+  linkUrlResolver?: (path: string) => string;
 };
 
 export type MarkdownSelectionTarget = {
@@ -129,7 +139,7 @@ export function markdownSelectionTarget(
 
 export function sanitizeMarkdownHtml(
   html: string,
-  options: Pick<MarkdownRenderOptions, "imageUrlResolver"> = {},
+  options: MarkdownRenderOptions = {},
 ) {
   const doc = new DOMParser().parseFromString(html, "text/html");
   const walker = doc.createTreeWalker(doc.body, NodeFilter.SHOW_ELEMENT);
@@ -192,11 +202,39 @@ export function sanitizeMarkdownHtml(
     }
 
     if (tag === "a" && element.hasAttribute("href")) {
-      element.setAttribute("target", "_blank");
-      element.setAttribute("rel", "noreferrer noopener");
+      const href = element.getAttribute("href")!;
+      const destination = options.documentPath
+        ? resolveWorkspaceMarkdownLink(href, options.documentPath)
+        : undefined;
+      if (destination === null) {
+        element.removeAttribute("href");
+      } else if (destination) {
+        element.setAttribute("data-document-path", destination.path);
+        element.setAttribute("data-document-fragment", destination.fragment);
+        element.setAttribute(
+          "href",
+          options.linkUrlResolver?.(destination.path) ?? "#",
+        );
+      } else if (!href.startsWith("#")) {
+        element.setAttribute("target", "_blank");
+        element.setAttribute("rel", "noreferrer noopener");
+      }
     }
   }
 
+  const headingIds = new Set<string>();
+  for (const heading of doc.body.querySelectorAll("h1, h2, h3, h4, h5, h6")) {
+    const base = (heading.textContent ?? "")
+      .trim()
+      .toLowerCase()
+      .replace(/[^\p{L}\p{N}\p{M}_\-\s]/gu, "")
+      .replace(/\s/g, "-");
+    let id = base;
+    let suffix = 0;
+    while (headingIds.has(id)) id = `${base}-${++suffix}`;
+    headingIds.add(id);
+    heading.setAttribute("id", id);
+  }
   return doc.body.innerHTML;
 }
 
@@ -220,61 +258,86 @@ export function MarkdownPreview({
   className = "",
   breaks = false,
   imageUrlResolver,
+  documentPath,
+  linkUrlResolver,
+  onOpenDocument,
+  fragment,
   onSelectionChange,
 }: {
   text: string;
   className?: string;
   breaks?: boolean;
   imageUrlResolver?: (source: string) => string | null;
+  documentPath?: string;
+  linkUrlResolver?: (path: string) => string;
+  onOpenDocument?: (path: string, fragment: string) => void;
+  fragment?: string;
   onSelectionChange?: (target: MarkdownSelectionTarget | null) => void;
 }) {
   const html = useMemo(
-    () => renderMarkdown(text, { breaks, imageUrlResolver }),
-    [text, breaks, imageUrlResolver],
+    () =>
+      renderMarkdown(text, {
+        breaks,
+        imageUrlResolver,
+        documentPath,
+        linkUrlResolver,
+      }),
+    [text, breaks, imageUrlResolver, documentPath, linkUrlResolver],
   );
   const articleRef = useRef<HTMLElement | null>(null);
+  useEffect(() => {
+    if (fragment) scrollToMarkdownHeading(articleRef.current, fragment);
+  }, [html, fragment]);
 
+  const openLink = (event: React.MouseEvent<HTMLElement>) => {
+    const target =
+      event.target instanceof Element ? event.target.closest("a") : null;
+    if (!target || !event.currentTarget.contains(target)) return;
+    const path = target.getAttribute("data-document-path");
+    if (path && onOpenDocument) {
+      event.preventDefault();
+      const anchor = target.getAttribute("data-document-fragment") ?? "";
+      if (path === documentPath) {
+        if (anchor) scrollToMarkdownHeading(articleRef.current, anchor);
+        else articleRef.current?.scrollIntoView({ block: "start" });
+      } else onOpenDocument(path, anchor);
+    } else if (target.getAttribute("href")?.startsWith("#")) {
+      event.preventDefault();
+      const hash = target.getAttribute("href")!.slice(1);
+      let anchor = hash;
+      try {
+        anchor = decodeURIComponent(hash);
+      } catch {
+        /* Keep malformed fragments literal. */
+      }
+      scrollToMarkdownHeading(articleRef.current, anchor);
+    }
+  };
+
+  const [diagrams, setDiagrams] = useState<
+    Array<{ target: HTMLElement; code: string }>
+  >([]);
   useEffect(() => {
     const root = articleRef.current;
     if (!root) return;
-    const blocks = Array.from(
-      root.querySelectorAll("pre > code.language-mermaid"),
-    );
-    if (blocks.length === 0) return;
-    let cancelled = false;
-    loadMermaidModule()
-      .then((mermaid) => {
-        if (cancelled) return;
-        for (const codeElement of blocks) {
-          const pre = codeElement.parentElement;
-          if (!pre || pre.tagName !== "PRE" || !pre.isConnected) continue;
-          const code = codeElement.textContent ?? "";
-          if (!code.trim()) continue;
-          const rendered = renderMermaidDiagram(mermaid, code);
-          if (rendered.ok) {
-            const figure = document.createElement("div");
-            figure.className = "mermaid-diagram";
-            figure.setAttribute("role", "img");
-            figure.setAttribute("aria-label", "Mermaid diagram");
-            const svgDocument = new DOMParser().parseFromString(
-              rendered.svg,
-              "image/svg+xml",
-            );
-            const svg = svgDocument.documentElement;
-            if (svg.tagName.toLowerCase() !== "svg") continue;
-            figure.replaceChildren(document.importNode(svg, true));
-            pre.replaceWith(figure);
-          } else {
-            const note = document.createElement("div");
-            note.className = "mermaid-diagram-error";
-            note.textContent = `Mermaid render failed: ${rendered.error}`;
-            pre.before(note);
-          }
-        }
-      })
-      .catch(() => undefined);
+    const diagrams: Array<{ target: HTMLElement; code: string }> = [];
+    const originals: Array<{ target: HTMLElement; pre: HTMLElement }> = [];
+    for (const code of root.querySelectorAll("pre > code.language-mermaid")) {
+      const pre = code.parentElement;
+      if (!pre) continue;
+      const target = document.createElement("div");
+      target.className = "markdown-mermaid-slot";
+      pre.replaceWith(target);
+      originals.push({ target, pre });
+      diagrams.push({ target, code: code.textContent ?? "" });
+    }
+    setDiagrams(diagrams);
     return () => {
-      cancelled = true;
+      // Restore the sanitized code blocks for StrictMode's effect replay.
+      // On navigation the article's new HTML already owns different nodes.
+      for (const { target, pre } of originals) {
+        if (root.contains(target)) target.replaceWith(pre);
+      }
     };
   }, [html]);
 
@@ -296,21 +359,49 @@ export function MarkdownPreview({
   }, [onSelectionChange]);
 
   return (
-    <article
-      ref={articleRef}
-      className={`file-preview-markdown ${className}`.trim()}
-      onPointerDown={() => onSelectionChange?.(null)}
-      onPointerUp={() => {
-        requestAnimationFrame(() => {
+    <>
+      <article
+        ref={articleRef}
+        onClick={openLink}
+        onAuxClick={(event) => {
+          if (event.button === 1) openLink(event);
+        }}
+        className={`file-preview-markdown ${className}`.trim()}
+        onPointerDown={() => onSelectionChange?.(null)}
+        onPointerUp={() => {
+          requestAnimationFrame(() => {
+            const root = articleRef.current;
+            onSelectionChange?.(root ? markdownSelectionTarget(root) : null);
+          });
+        }}
+        onKeyUp={() => {
           const root = articleRef.current;
           onSelectionChange?.(root ? markdownSelectionTarget(root) : null);
-        });
-      }}
-      onKeyUp={() => {
-        const root = articleRef.current;
-        onSelectionChange?.(root ? markdownSelectionTarget(root) : null);
-      }}
-      dangerouslySetInnerHTML={{ __html: html }}
-    />
+        }}
+        dangerouslySetInnerHTML={{ __html: html }}
+      />
+      {diagrams.map(({ target, code }, index) =>
+        createPortal(
+          <Suspense
+            fallback={
+              <div className="file-preview-state" role="status">
+                Rendering diagram
+              </div>
+            }
+          >
+            <MermaidDiagram code={code} />
+          </Suspense>,
+          target,
+          String(index),
+        ),
+      )}
+    </>
   );
+}
+
+function scrollToMarkdownHeading(root: HTMLElement | null, fragment: string) {
+  const heading = Array.from(
+    root?.querySelectorAll<HTMLElement>("h1, h2, h3, h4, h5, h6") ?? [],
+  ).find((element) => element.id === fragment);
+  heading?.scrollIntoView({ block: "start" });
 }

@@ -1,8 +1,14 @@
 # Third-Party Notices
 
-Herdr Studio includes or renders assets from third-party projects. Those assets
+Roamgate includes or renders assets from third-party projects. Those assets
 remain under their original licenses and are not relicensed by the project
 MIT license.
+
+## Roamgate artwork
+
+The Roamgate bird, wordmark, icons, and social images were supplied by the
+project owner. They are not Herdr's official logo. The small application marks
+are resized exports of that artwork, displayed on a warm-white background.
 
 ## Nerd Fonts
 
@@ -18,19 +24,26 @@ upstream licensing terms documented in
 Agent brand icons imported from `@lobehub/icons-static-svg` are provided by
 [Lobe Icons](https://github.com/lobehub/lobe-icons), Copyright (c) 2023
 LobeHub, under the MIT License. See
-[`LICENSES/LOBE-ICONS.txt`](./LICENSES/LOBE-ICONS.txt).
+[`LICENSES/LOBE-ICONS.txt`](./LICENSES/LOBE-ICONS.txt). The static website
+vendors the same Codex and Kimi SVGs as `site/assets/codex.svg` and
+`site/assets/kimi.svg` so it does not need a package install or icon CDN.
 
 ## Pi
 
 `web/src/assets/pi-logo.svg` is adapted from the
 [Pi press kit](https://pi.dev/press-kit), which publishes its assets under the
-MIT License. See [`LICENSES/PI.txt`](./LICENSES/PI.txt).
+MIT License. See [`LICENSES/PI.txt`](./LICENSES/PI.txt). The static website
+uses a copy at `site/assets/pi.svg`.
+
+When updating these website icons, copy them from the application sources
+used by `web/src/components/AgentIcon.tsx`. The deployed site includes their
+notices in `site/assets/agent-icons-LICENSE.txt`.
 
 ## Trademarks
 
 Herdr, Pi, Codex, Claude, Gemini, Kimi, Grok, and other product names and logos
 are trademarks of their respective owners. Their appearance identifies
-compatible tools and does not imply endorsement of Herdr Studio.
+compatible tools and does not imply endorsement of Roamgate.
 
 JavaScript dependencies retain the licenses declared by their respective
 packages.

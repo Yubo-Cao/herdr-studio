@@ -123,6 +123,17 @@ export function terminalEndpointViewportSize(
   const splitLayout = layout.panes.length > 1 && !layout.zoomed;
   const paneChromeCols = splitLayout ? 3 : 1;
   const paneChromeRows = splitLayout ? 2 : 0;
+  // A pane already matching the current layout (±1 cell for xterm fit's
+  // fractional-pixel flooring) means the layout is settled: return the area
+  // verbatim. Recomputing a rounded estimate per pane lets routine focus
+  // switches re-base the shared geometry on ±1-2 cell differences, visibly
+  // reflowing every pane in the tab.
+  if (
+    Math.abs(size.cols - (pane.rect.width - paneChromeCols)) <= 1 &&
+    Math.abs(size.rows - (pane.rect.height - paneChromeRows)) <= 1
+  ) {
+    return { cols: area.width, rows: area.height };
+  }
   const terminalAreaCols = Math.max(
     1,
     Math.round(((size.cols + paneChromeCols) * area.width) / pane.rect.width),
@@ -231,6 +242,10 @@ export class TerminalAttachFrameWatchdog {
     this.clearTimer();
     this.attempt += 1;
     return this.attempt;
+  }
+
+  isCurrent(attempt: number): boolean {
+    return attempt === this.attempt;
   }
 
   /** Records a matching frame whether it arrives before or after the RPC. */

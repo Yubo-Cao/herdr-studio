@@ -6,7 +6,7 @@ export interface WorktreeInfo {
   repo_root: string;
   checkout_path: string;
   is_linked_worktree: boolean;
-  // Added by herdr-gui when a linked worktree was created from a specific
+  // Added by Roamgate when a linked worktree was created from a specific
   // workspace. Herdr itself currently exposes repository identity only.
   parent_workspace_id?: string;
   gui_settings_key?: string;
@@ -96,6 +96,10 @@ export interface Pane {
    * simply finished.
    */
   memory_incident?: PaneMemoryIncident;
+  /** Herdr agent.list state-change sequence, scoped to this server lifetime. */
+  state_change_seq?: number;
+  /** Session file modification time in epoch milliseconds, from the bridge. */
+  last_activity_at?: number;
   revision: number;
 }
 
@@ -168,6 +172,9 @@ export interface FilePreview {
   checkout_path: string;
   root: string;
   path: string;
+  // Omitted for regular files; "directory" targets have no previewable
+  // content and always report a null text.
+  type?: "file" | "directory";
   size: number;
   mtime_ms: number;
   text: string | null;

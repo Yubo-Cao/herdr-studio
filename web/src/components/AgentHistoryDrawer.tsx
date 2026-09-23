@@ -4,23 +4,29 @@ import {
   useMemo,
   useRef,
   useState,
+  type CSSProperties,
   type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
   type RefObject,
 } from "react";
-import { Copy, Download, Eye, RefreshCw, X } from "lucide-react";
+import { Copy, Download, Eye, Info, RefreshCw, X } from "lucide-react";
 import { useStoreSelector } from "../store";
+import { copyTextWithFeedback } from "../copyText";
 import { useConnectionClient } from "../useConnectionClient";
 import type { Pane } from "../types";
-import { formatUiRelativeTime, UI_LOCALE } from "../uiLocale";
+import {
+  DEFAULT_INSPECTOR_NAVIGATION_RATIO,
+  inspectorNavigationRatioAtPosition,
+} from "../workspaceResource";
+import { formatUiDateTime, formatUiRelativeTime } from "../uiLocale";
 import { shortId } from "../utils";
 import { AgentIcon } from "./AgentIcon";
+import { AgentMessageContent } from "./AgentMessageContent";
 import { AgentMessageDialog } from "./AgentMessageDialog";
 import { AgentHistoryCard } from "./AgentHistoryCard";
 import { AgentHistoryFilters } from "./AgentHistoryFilters";
 import {
   ALL_HISTORY_FILTERS,
-  historyEntryCategory,
   historyEntryLabel,
   mergeAgentHistory,
   selectHistoryEntries,
@@ -39,17 +45,7 @@ import {
   formatTokenTotal,
   tokenUsage,
 } from "./agentSession";
-
-function formatHistoryTime(sentAt: string) {
-  const time = new Date(sentAt);
-  if (Number.isNaN(time.getTime())) return sentAt;
-  return time.toLocaleString(UI_LOCALE, {
-    month: "short",
-    day: "numeric",
-    hour: "2-digit",
-    minute: "2-digit",
-  });
-}
+import "./AgentHistoryDrawer.css";
 
 function formatRelativeTime(timestamp: string) {
   const time = new Date(timestamp);
@@ -378,11 +374,13 @@ export function AgentHistoryDrawer({
   pane,
   open,
   embedded = false,
+  wide = false,
   onOpenChange,
 }: {
   pane: Pane;
   open: boolean;
   embedded?: boolean;
+  wide?: boolean;
   onOpenChange: (open: boolean) => void;
 }) {
   const workspaces = useStoreSelector((state) => state.workspaces);
@@ -391,6 +389,7 @@ export function AgentHistoryDrawer({
     workspaces.find((workspace) => workspace.workspace_id === pane.workspace_id)
       ?.label ?? pane.workspace_id;
   const [history, setHistory] = useState<AgentHistory | null>(null);
+  const [query, setQuery] = useState("");
   // Tool entries arrive redacted (metadata only) and are fetched on demand.
   const [filters, setFilters] = useState<HistoryFilters>({
     ...ALL_HISTORY_FILTERS,
@@ -403,9 +402,7 @@ export function AgentHistoryDrawer({
     () => new Set(),
   );
   const [session, setSession] = useState<AgentSessionSummary | null>(null);
-  const [drawerTab, setDrawerTab] = useState<"messages" | "details">(
-    "messages",
-  );
+  const [detailsOpen, setDetailsOpen] = useState(false);
   const [previewPane, setPreviewPane] = useState<Pane | null>(null);
   const [previewSummary, setPreviewSummary] =
     useState<AgentSessionSummary | null>(null);
@@ -420,9 +417,16 @@ export function AgentHistoryDrawer({
   );
   const [visibleRange, setVisibleRange] =
     useState<MessageMinimapVisibleRange | null>(null);
+  // Wide layout: the list sits in a resizable master column and the selected
+  // entry opens in an inline detail panel instead of the modal dialog.
+  const [wideListRatio, setWideListRatio] = useState(
+    DEFAULT_INSPECTOR_NAVIGATION_RATIO,
+  );
+  const [wideSelectedId, setWideSelectedId] = useState<string | null>(null);
   const timelineRef = useRef<HTMLDivElement>(null);
   const contentRef = useRef<HTMLDivElement>(null);
   const minimapIndicatorRef = useRef<HTMLDivElement>(null);
+  const wideSplitRef = useRef<HTMLDivElement>(null);
   const visibleRangeKeyRef = useRef("");
   const highlightTimerRef = useRef<number | null>(null);
   const loadSeqRef = useRef(0);
@@ -550,9 +554,12 @@ export function AgentHistoryDrawer({
     setHighlightedSequence(null);
     visibleRangeKeyRef.current = "";
     setVisibleRange(null);
+    setWideSelectedId(null);
+    setWideListRatio(DEFAULT_INSPECTOR_NAVIGATION_RATIO);
     setHistory(null);
+    setQuery("");
     setSession(null);
-    setDrawerTab("messages");
+    setDetailsOpen(false);
     setExpandedMessage(null);
     setToolEntryTexts(new Map());
     setToolEntryLoading(new Set());
@@ -621,26 +628,56 @@ export function AgentHistoryDrawer({
     ],
   );
 
+  const messages = useMemo(() => history?.messages ?? [], [history?.messages]);
+  // Substitute fetched tool payloads only while their byte lengths still match.
+  const hydrateEntry = useCallback(
+    (entry: AgentHistoryEntry): AgentHistoryEntry => {
+      const overlay = toolEntryTexts.get(entry.id);
+      return overlay !== undefined &&
+        (entry.text_bytes === undefined || overlay.bytes === entry.text_bytes)
+        ? { ...entry, text: overlay.text }
+        : entry;
+    },
+    [toolEntryTexts],
+  );
+  const hydratedMessages = useMemo(
+    () => (toolEntryTexts.size === 0 ? messages : messages.map(hydrateEntry)),
+    [messages, toolEntryTexts, hydrateEntry],
+  );
+  const { visible: visibleMessages, counts } = useMemo(
+    () => selectHistoryEntries(hydratedMessages, filters, query),
+    [hydratedMessages, filters, query],
+  );
+  const wideSelectedEntry = wide
+    ? (visibleMessages.find((entry) => entry.id === wideSelectedId) ?? null)
+    : null;
+  const activeMessage = wide
+    ? !detailsOpen
+      ? wideSelectedEntry
+      : null
+    : expandedMessage;
+
   // A refresh can swap the expanded entry for a redacted stub whose fetched
   // text was pruned (e.g. tool arguments rewritten under the same call id).
   // Refetch instead of showing a blank dialog; failed fetches are not
   // retried automatically (the card's manual Load button still works).
   useEffect(() => {
     if (
-      !expandedMessage ||
-      expandedMessage.role !== "tool" ||
-      expandedMessage.text.length > 0 ||
-      (expandedMessage.text_bytes ?? 0) === 0 ||
-      toolEntryLoading.has(expandedMessage.id) ||
-      toolEntryFailedRef.current.has(expandedMessage.id)
+      !open ||
+      !activeMessage ||
+      activeMessage.role !== "tool" ||
+      activeMessage.text.length > 0 ||
+      (activeMessage.text_bytes ?? 0) === 0 ||
+      toolEntryLoading.has(activeMessage.id) ||
+      toolEntryFailedRef.current.has(activeMessage.id)
     ) {
       return;
     }
-    const overlay = toolEntryTexts.get(expandedMessage.id);
-    if (overlay !== undefined && overlay.bytes === expandedMessage.text_bytes)
+    const overlay = toolEntryTexts.get(activeMessage.id);
+    if (overlay !== undefined && overlay.bytes === activeMessage.text_bytes)
       return;
-    loadToolEntry(expandedMessage);
-  }, [expandedMessage, toolEntryTexts, toolEntryLoading, loadToolEntry]);
+    loadToolEntry(activeMessage);
+  }, [activeMessage, open, toolEntryTexts, toolEntryLoading, loadToolEntry]);
 
   useEffect(() => {
     if (!open) return;
@@ -720,32 +757,15 @@ export function AgentHistoryDrawer({
     [],
   );
 
-  const messages = useMemo(() => history?.messages ?? [], [history?.messages]);
-  // Substitute on-demand fetched tool payloads over their redacted stubs.
-  // Byte-length validation keeps overlays from going stale when a revision
-  // replaces an entry's content under the same id.
-  const hydrateEntry = useCallback(
-    (entry: AgentHistoryEntry): AgentHistoryEntry => {
-      const overlay = toolEntryTexts.get(entry.id);
-      return overlay !== undefined &&
-        (entry.text_bytes === undefined || overlay.bytes === entry.text_bytes)
-        ? { ...entry, text: overlay.text }
-        : entry;
-    },
-    [toolEntryTexts],
-  );
-  const hydratedMessages = useMemo(
-    () => (toolEntryTexts.size === 0 ? messages : messages.map(hydrateEntry)),
-    [messages, toolEntryTexts, hydrateEntry],
-  );
-  const { visible: visibleMessages, counts } = useMemo(
-    () => selectHistoryEntries(hydratedMessages, filters),
-    [hydratedMessages, filters],
-  );
-  const changeFilters = (next: HistoryFilters) => {
+  const changeFilters = (next: HistoryFilters, nextQuery = query) => {
     setFilters(next);
+    setQuery(nextQuery);
     setExpandedMessage((entry) =>
-      entry && next[historyEntryCategory(entry)] ? entry : null,
+      entry &&
+      selectHistoryEntries([hydrateEntry(entry)], next, nextQuery).visible
+        .length
+        ? entry
+        : null,
     );
     if (highlightTimerRef.current !== null) {
       window.clearTimeout(highlightTimerRef.current);
@@ -765,7 +785,7 @@ export function AgentHistoryDrawer({
   useEffect(() => {
     const root = contentRef.current;
     const timeline = timelineRef.current;
-    if (drawerTab !== "messages" || !root || !timeline) {
+    if (detailsOpen || !root || !timeline) {
       visibleRangeKeyRef.current = "";
       setVisibleRange(null);
       return;
@@ -862,31 +882,11 @@ export function AgentHistoryDrawer({
       window.removeEventListener("scroll", onScroll, true);
       window.removeEventListener("resize", schedule);
     };
-  }, [drawerTab, visibleMessages]);
+  }, [detailsOpen, visibleMessages, wide]);
 
   // Stable identity so the message dialog's focus effect only re-runs when the
   // message itself changes, not on every drawer re-render.
   const closeExpandedMessage = useCallback(() => setExpandedMessage(null), []);
-
-  const scrollToMessage = useCallback((sequence: number) => {
-    const card = timelineRef.current?.querySelector(
-      `[data-sequence="${sequence}"]`,
-    );
-    if (!(card instanceof HTMLElement)) return;
-    const reduceMotion = minimapPrefersReducedMotion();
-    card.scrollIntoView({
-      behavior: reduceMotion ? "auto" : "smooth",
-      block: "start",
-    });
-    if (highlightTimerRef.current !== null) {
-      window.clearTimeout(highlightTimerRef.current);
-    }
-    setHighlightedSequence(sequence);
-    highlightTimerRef.current = window.setTimeout(() => {
-      highlightTimerRef.current = null;
-      setHighlightedSequence(null);
-    }, 1200);
-  }, []);
 
   const usage = tokenUsage(session);
   const messageEntries = useMemo(
@@ -896,6 +896,82 @@ export function AgentHistoryDrawer({
         sequence: index + 1,
       })),
     [visibleMessages],
+  );
+
+  const scrollToMessage = useCallback(
+    (sequence: number) => {
+      const card = timelineRef.current?.querySelector(
+        `[data-sequence="${sequence}"]`,
+      );
+      if (!(card instanceof HTMLElement)) return;
+      if (wide) {
+        // Master-detail: the minimap selects the entry in the detail panel
+        // and scrolls its row into view instead of flashing a highlight.
+        const message = messageEntries[sequence - 1]?.message;
+        if (message) setWideSelectedId(message.id);
+        card.scrollIntoView({
+          behavior: minimapPrefersReducedMotion() ? "auto" : "smooth",
+          block: "nearest",
+        });
+        return;
+      }
+      const reduceMotion = minimapPrefersReducedMotion();
+      card.scrollIntoView({
+        behavior: reduceMotion ? "auto" : "smooth",
+        block: "start",
+      });
+      if (highlightTimerRef.current !== null) {
+        window.clearTimeout(highlightTimerRef.current);
+      }
+      setHighlightedSequence(sequence);
+      highlightTimerRef.current = window.setTimeout(() => {
+        highlightTimerRef.current = null;
+        setHighlightedSequence(null);
+      }, 1200);
+    },
+    [messageEntries, wide],
+  );
+
+  const updateWideRatioFromPointer = useCallback(
+    (event: ReactPointerEvent<HTMLDivElement>) => {
+      const split = wideSplitRef.current;
+      if (!split) return;
+      const bounds = split.getBoundingClientRect();
+      setWideListRatio(
+        inspectorNavigationRatioAtPosition(
+          event.clientX - bounds.left,
+          bounds.width,
+        ),
+      );
+    },
+    [],
+  );
+
+  const handleWideResizerKeyDown = useCallback(
+    (event: ReactKeyboardEvent<HTMLDivElement>) => {
+      const split = wideSplitRef.current;
+      if (!split) return;
+      const availableWidth = split.getBoundingClientRect().width;
+      let next: number | null = null;
+      if (event.key === "ArrowLeft" || event.key === "ArrowRight") {
+        next = inspectorNavigationRatioAtPosition(
+          wideListRatio * availableWidth +
+            (event.key === "ArrowLeft" ? -16 : 16),
+          availableWidth,
+        );
+      } else if (event.key === "Home") {
+        next = inspectorNavigationRatioAtPosition(0, availableWidth);
+      } else if (event.key === "End") {
+        next = inspectorNavigationRatioAtPosition(
+          availableWidth,
+          availableWidth,
+        );
+      }
+      if (next === null) return;
+      event.preventDefault();
+      setWideListRatio(next);
+    },
+    [wideListRatio],
   );
   const sessionReady = session?.status === "ok";
   const historyReady = history?.status === "ok" || messages.length > 0;
@@ -913,12 +989,189 @@ export function AgentHistoryDrawer({
       ? history?.updated_at
       : undefined;
 
+  const sessionActions = sessionReady ? (
+    <>
+      <button
+        type="button"
+        className="agent-history-icon"
+        onClick={openSessionPreview}
+        aria-label="Open transcript"
+        title="Open transcript"
+      >
+        <Eye size={14} />
+      </button>
+      <button
+        type="button"
+        className="agent-history-icon"
+        onClick={() => downloadSession(pane, connectionClient)}
+        aria-label="Export raw session"
+        title="Export raw session"
+      >
+        <Download size={14} />
+      </button>
+    </>
+  ) : null;
+
+  const historyFilters = (
+    <>
+      <div className="agent-history-search">
+        <input
+          type="search"
+          aria-label="Search history messages"
+          placeholder="Search loaded messages"
+          title="Search loaded message text. Tool content is searchable after loading it."
+          value={query}
+          onChange={(event) =>
+            changeFilters(filters, event.currentTarget.value)
+          }
+        />
+      </div>
+      <AgentHistoryFilters
+        filters={filters}
+        counts={counts}
+        onToggle={(category) =>
+          changeFilters({
+            ...filters,
+            [category]: !filters[category],
+          })
+        }
+      />
+    </>
+  );
+  const historyMinimap =
+    messageEntries.length > 1 ? (
+      <AgentHistoryMinimap
+        entries={messageEntries}
+        visibleRange={visibleRange}
+        indicatorRef={minimapIndicatorRef}
+        onSelect={scrollToMessage}
+      />
+    ) : null;
+  const historyCards = (
+    <div className="agent-history-timeline" ref={timelineRef}>
+      {messageEntries.map(({ message, sequence }) => (
+        <AgentHistoryCard
+          entry={message}
+          index={sequence}
+          key={message.id}
+          highlighted={highlightedSequence === sequence}
+          selected={wide && wideSelectedId === message.id}
+          contentLoading={toolEntryLoading.has(message.id)}
+          onExpand={
+            wide ? (entry) => setWideSelectedId(entry.id) : setExpandedMessage
+          }
+          onLoadContent={loadToolEntry}
+        />
+      ))}
+    </div>
+  );
+  const historyTimeline = (
+    <div className="agent-history-content" ref={contentRef}>
+      {loading && messages.length === 0 ? (
+        <div className="agent-history-state">
+          <span className="terminal-loading-dot" />
+          Loading messages
+        </div>
+      ) : messageEntries.length === 0 ? (
+        <div className="agent-history-state">
+          {messages.length > 0 ? (
+            <>
+              {query.trim()
+                ? "No entries match the search and selected message types."
+                : "No entries match the selected message types."}
+              <button
+                type="button"
+                className="secondary-btn"
+                onClick={() => changeFilters(ALL_HISTORY_FILTERS, "")}
+              >
+                {query.trim() ? "Reset filters" : "Show all types"}
+              </button>
+            </>
+          ) : (
+            "No history entries were found in this session."
+          )}
+        </div>
+      ) : (
+        historyCards
+      )}
+    </div>
+  );
+
+  // Wide layout: master-detail. The left column is a resizable list of
+  // compact entries; the right column reads the selected entry in full.
+  const wideMessagesPanel = (
+    <div
+      className="agent-history-wide"
+      ref={wideSplitRef}
+      role="region"
+      aria-label="History messages"
+      style={
+        {
+          "--agent-history-list-width": `${wideListRatio * 100}%`,
+        } as CSSProperties
+      }
+    >
+      <div className="agent-history-wide-list">
+        {historyFilters}
+        {historyMinimap}
+        {historyTimeline}
+      </div>
+      <div
+        className="workspace-inspector-split-resizer"
+        role="separator"
+        tabIndex={0}
+        aria-label="Resize message list"
+        aria-orientation="vertical"
+        aria-valuemin={15}
+        aria-valuemax={75}
+        aria-valuenow={Math.round(wideListRatio * 100)}
+        title="Drag to resize; double-click to reset"
+        onPointerDown={(event) => {
+          event.preventDefault();
+          event.currentTarget.setPointerCapture(event.pointerId);
+          updateWideRatioFromPointer(event);
+        }}
+        onPointerMove={(event) => {
+          if (!event.currentTarget.hasPointerCapture(event.pointerId)) return;
+          updateWideRatioFromPointer(event);
+        }}
+        onPointerUp={(event) => {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+        }}
+        onPointerCancel={(event) => {
+          if (event.currentTarget.hasPointerCapture(event.pointerId)) {
+            event.currentTarget.releasePointerCapture(event.pointerId);
+          }
+        }}
+        onDoubleClick={() =>
+          setWideListRatio(DEFAULT_INSPECTOR_NAVIGATION_RATIO)
+        }
+        onKeyDown={handleWideResizerKeyDown}
+      />
+      <div className="agent-history-wide-detail">
+        {wideSelectedEntry ? (
+          <AgentMessageContent
+            message={hydrateEntry(wideSelectedEntry)}
+            embedded
+            onClose={() => setWideSelectedId(null)}
+          />
+        ) : (
+          <div className="agent-history-wide-placeholder">
+            Select a message to read it here.
+          </div>
+        )}
+      </div>
+    </div>
+  );
+
   return (
     <>
       <aside
         className={`agent-history-drawer ${open ? "is-open" : ""} ${
           embedded ? "is-embedded" : ""
-        }`}
+        } ${wide ? "is-wide" : ""}`}
         aria-label="Agent session"
         aria-hidden={!open}
       >
@@ -926,7 +1179,20 @@ export function AgentHistoryDrawer({
           <div className="agent-history-identity">
             <AgentIcon agent={pane.agent} />
             <div className="agent-history-title">
-              <strong>Session</strong>
+              <strong>
+                Session
+                {messages.length > 0 ? (
+                  <span
+                    className="agent-history-count"
+                    aria-label={`${messageEntries.length} of ${messages.length} history entries`}
+                    title="Most recent 200 messages with their tool entries"
+                  >
+                    {messageEntries.length === messages.length
+                      ? messages.length
+                      : `${messageEntries.length}/${messages.length}`}
+                  </span>
+                ) : null}
+              </strong>
               <span title={workspaceLabel}>
                 {workspaceLabel} · {pane.agent ?? "Agent"} ·{" "}
                 {shortId(pane.pane_id)}
@@ -939,6 +1205,18 @@ export function AgentHistoryDrawer({
             {pane.agent_status}
           </span>
           <div className="agent-history-actions">
+            <button
+              type="button"
+              className="agent-history-icon"
+              aria-label="Session details"
+              aria-pressed={detailsOpen}
+              title={detailsOpen ? "Show history" : "Show session details"}
+              onClick={() => setDetailsOpen((current) => !current)}
+              disabled={!hasSessionData}
+            >
+              <Info size={14} />
+            </button>
+            {sessionActions}
             <button
               type="button"
               className={`agent-history-icon ${loading ? "is-loading" : ""}`}
@@ -973,9 +1251,7 @@ export function AgentHistoryDrawer({
                 <button
                   type="button"
                   className="agent-history-icon"
-                  onClick={() =>
-                    void navigator.clipboard?.writeText(unavailableCommand)
-                  }
+                  onClick={() => void copyTextWithFeedback(unavailableCommand)}
                   aria-label="Copy integration command"
                   title="Copy command"
                 >
@@ -994,104 +1270,27 @@ export function AgentHistoryDrawer({
           </div>
         ) : (
           <>
-            <div className="agent-history-tabs">
-              <div
-                className="agent-history-tab-list"
-                role="tablist"
-                aria-label="Session drawer view"
-              >
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={drawerTab === "messages"}
-                  title="Most recent 200 messages with their tool entries"
-                  className={drawerTab === "messages" ? "is-active" : ""}
-                  onClick={() => setDrawerTab("messages")}
-                >
-                  History
-                  {messages.length > 0 ? (
-                    <span>
-                      {messageEntries.length === messages.length
-                        ? messages.length
-                        : `${messageEntries.length}/${messages.length}`}
-                    </span>
-                  ) : null}
-                </button>
-                <button
-                  type="button"
-                  role="tab"
-                  aria-selected={drawerTab === "details"}
-                  className={drawerTab === "details" ? "is-active" : ""}
-                  onClick={() => setDrawerTab("details")}
-                >
-                  Details
-                </button>
-              </div>
-            </div>
-
             {error ? <div className="agent-history-error">{error}</div> : null}
-            {drawerTab === "messages" ? (
-              <div className="agent-history-messages" role="tabpanel">
-                <AgentHistoryFilters
-                  filters={filters}
-                  counts={counts}
-                  onToggle={(category) =>
-                    changeFilters({
-                      ...filters,
-                      [category]: !filters[category],
-                    })
-                  }
-                />
-                {messageEntries.length > 1 ? (
-                  <AgentHistoryMinimap
-                    entries={messageEntries}
-                    visibleRange={visibleRange}
-                    indicatorRef={minimapIndicatorRef}
-                    onSelect={scrollToMessage}
-                  />
-                ) : null}
-                <div className="agent-history-content" ref={contentRef}>
-                  {loading && messages.length === 0 ? (
-                    <div className="agent-history-state">
-                      <span className="terminal-loading-dot" />
-                      Loading messages
-                    </div>
-                  ) : messageEntries.length === 0 ? (
-                    <div className="agent-history-state">
-                      {messages.length > 0 ? (
-                        <>
-                          No entries match the selected message types.
-                          <button
-                            type="button"
-                            className="secondary-btn"
-                            onClick={() => changeFilters(ALL_HISTORY_FILTERS)}
-                          >
-                            Show all types
-                          </button>
-                        </>
-                      ) : (
-                        "No history entries were found in this session."
-                      )}
-                    </div>
-                  ) : (
-                    <div className="agent-history-timeline" ref={timelineRef}>
-                      {messageEntries.map(({ message, sequence }) => (
-                        <AgentHistoryCard
-                          entry={message}
-                          index={sequence}
-                          key={message.id}
-                          highlighted={highlightedSequence === sequence}
-                          contentLoading={toolEntryLoading.has(message.id)}
-                          onExpand={setExpandedMessage}
-                          onLoadContent={loadToolEntry}
-                        />
-                      ))}
-                    </div>
-                  )}
+            {!detailsOpen ? (
+              wide ? (
+                wideMessagesPanel
+              ) : (
+                <div
+                  className="agent-history-messages"
+                  role="region"
+                  aria-label="History messages"
+                >
+                  {historyFilters}
+                  {historyMinimap}
+                  {historyTimeline}
                 </div>
-              </div>
+              )
             ) : (
-              <div className="agent-history-details" role="tabpanel">
+              <div
+                className="agent-history-details"
+                role="region"
+                aria-label="Session details"
+              >
                 {sessionReady ? (
                   <section
                     className="agent-history-overview"
@@ -1108,7 +1307,7 @@ export function AgentHistoryDrawer({
                     <div>
                       <strong
                         title={
-                          updatedAt ? formatHistoryTime(updatedAt) : undefined
+                          updatedAt ? formatUiDateTime(updatedAt) : undefined
                         }
                       >
                         {updatedAt ? formatRelativeTime(updatedAt) : "-"}
@@ -1153,36 +1352,17 @@ export function AgentHistoryDrawer({
                 />
                 <DetailRow
                   label="Updated"
-                  value={updatedAt ? formatHistoryTime(updatedAt) : "-"}
+                  value={updatedAt ? formatUiDateTime(updatedAt) : "-"}
                 />
               </div>
             )}
-
-            {sessionReady ? (
-              <div className="agent-history-footer">
-                <button
-                  type="button"
-                  className="primary-btn"
-                  onClick={openSessionPreview}
-                >
-                  <Eye size={14} />
-                  Open transcript
-                </button>
-                <button
-                  type="button"
-                  className="secondary-btn"
-                  onClick={() => downloadSession(pane, connectionClient)}
-                >
-                  <Download size={14} />
-                  Export raw
-                </button>
-              </div>
-            ) : null}
           </>
         )}
       </aside>
       <AgentMessageDialog
-        message={expandedMessage ? hydrateEntry(expandedMessage) : null}
+        message={
+          !wide && expandedMessage ? hydrateEntry(expandedMessage) : null
+        }
         onClose={closeExpandedMessage}
       />
       <AgentSessionPreviewDialog
@@ -1213,7 +1393,7 @@ function DetailRow({
         <button
           type="button"
           className="agent-history-icon"
-          onClick={() => void navigator.clipboard?.writeText(value)}
+          onClick={() => void copyTextWithFeedback(value)}
           aria-label={`Copy ${label.toLowerCase()}`}
           title={`Copy ${label.toLowerCase()}`}
         >

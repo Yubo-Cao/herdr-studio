@@ -6,9 +6,13 @@ import { focusDialogElement } from "./dialogFocus";
 
 export function CreateWorkspaceDialog({
   open,
+  initialName,
+  initialCwd,
   onClose,
 }: {
   open: boolean;
+  initialName?: string;
+  initialCwd?: string;
   onClose: () => void;
 }) {
   const createReason = useEndpointCreationReason("workspace.create");
@@ -21,8 +25,8 @@ export function CreateWorkspaceDialog({
 
   useEffect(() => {
     if (!open) return;
-    setLabel(luckyWorkspaceName());
-    setCwd("");
+    setLabel(initialName?.trim() || luckyWorkspaceName());
+    setCwd(initialCwd?.trim() ?? "");
     const cancelFocus = focusDialogElement(labelRef.current, { select: true });
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onCloseRef.current();
@@ -32,7 +36,7 @@ export function CreateWorkspaceDialog({
       cancelFocus();
       window.removeEventListener("keydown", onKey);
     };
-  }, [open]);
+  }, [open, initialName, initialCwd]);
 
   if (!open) return null;
 

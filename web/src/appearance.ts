@@ -12,9 +12,6 @@ export type AccentColor = (typeof ACCENT_OPTIONS)[number]["value"];
 
 export const TERMINAL_FONT_STORAGE_KEY = "terminalFontFamily";
 
-export const DEFAULT_TERMINAL_FONT_FAMILY =
-  'SFMono-Regular, Menlo, Monaco, "0xProto Nerd Font Mono", "JetBrainsMonoNL Nerd Font", "MesloLGS NF", "Hack Nerd Font", "FiraCode Nerd Font", Consolas, "Liberation Mono", "Courier New", "Noto Sans Mono CJK SC", "Source Han Mono SC", "Sarasa Mono SC", "Herdr Nerd Symbols", monospace';
-
 const TERMINAL_FONT_PRESETS = [
   ["", "Default (system)", ""],
   ["jetbrains-mono", "JetBrains Mono", '"JetBrains Mono"'],
@@ -65,8 +62,8 @@ export function resolveTerminalFontFamily(value: string | null): string {
     (option) => option.value === normalizeTerminalFontFamily(value),
   );
   return preset?.fontFamily
-    ? `${preset.fontFamily}, ${DEFAULT_TERMINAL_FONT_FAMILY}`
-    : DEFAULT_TERMINAL_FONT_FAMILY;
+    ? `${preset.fontFamily}, ${TERMINAL_FONT_FAMILY}`
+    : TERMINAL_FONT_FAMILY;
 }
 
 export function normalizeAccentColor(value: string | null): AccentColor {
@@ -121,9 +118,25 @@ export function normalizeUiScale(value: string | null): number {
 
 // The terminal surface cancels page zoom so xterm's mouse coordinates, cell
 // measurements, and IME overlay share CSS pixels. Scale its font explicitly.
+// Every xterm surface shares this stack: the Nerd Font families carry the
+// powerline and icon glyphs prompts draw with, and dropping any of them
+// shows tofu boxes wherever the earlier fonts have no glyph.
+export const TERMINAL_FONT_FAMILY =
+  'SFMono-Regular, Menlo, Monaco, "0xProto Nerd Font Mono", "JetBrainsMonoNL Nerd Font", "MesloLGS NF", "Hack Nerd Font", "FiraCode Nerd Font", Consolas, "Liberation Mono", "Courier New", "Noto Sans Mono CJK SC", "Source Han Mono SC", "Sarasa Mono SC", "Herdr Nerd Symbols", monospace';
+
 export function terminalFontOptions(compact: boolean, uiScale: number) {
   return {
     fontSize: ((compact ? 12 : 13) * uiScale) / 100,
     lineHeight: compact ? 1.12 : 1.18,
   };
+}
+
+// Zen mode hides the topbar, tab strip, and sidebar on desktop so only the
+// terminal remains. Mobile keeps its own floating control collapse instead.
+export function normalizeZenMode(value: string | null): boolean {
+  return value === "1";
+}
+
+export function serializeZenMode(value: boolean): string {
+  return value ? "1" : "0";
 }

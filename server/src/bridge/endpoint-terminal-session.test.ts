@@ -1,4 +1,5 @@
-import { afterEach, describe, expect, spyOn, test } from "bun:test";
+import { afterEach, describe, expect, jest, spyOn, test } from "bun:test";
+import { EventEmitter, once } from "node:events";
 import * as net from "node:net";
 import * as path from "node:path";
 import { tmpdir } from "node:os";
@@ -6,12 +7,21 @@ import { BinReader, BinWriter, encodeFrame } from "./bincode";
 import {
   EndpointTerminalSession,
   cropFrame,
+  frameHyperlinkAt,
+  resolvedFrameLink,
 } from "./endpoint-terminal-session";
 import type { CellData, FrameData } from "./thin-client";
+import type { Popup } from "./endpoint-surface";
 import type { ServerWebSocket } from "bun";
 import { createTerminalBridge } from "./terminal-bridge";
 import { silentLogger } from "../utils/logger";
 import { EndpointCreationDeadline } from "./endpoint-creation";
+import {
+  dropCoalescedMessage,
+  flushCoalescedMessages,
+  sendWebSocketMessage,
+  WS_COALESCE_LIMIT_BYTES,
+} from "./websocket-send";
 
 const servers: net.Server[] = [];
 
@@ -70,7 +80,11 @@ type TestPane = {
   mouseReporting: boolean;
   rect?: Rect;
   innerRect?: Rect;
-  scrollOffset?: number;
+  offset?: number;
+  maxOffset?: number;
+  hasScroll?: boolean;
+  contentRevision?: number;
+  focused?: boolean;
 };
 const DEFAULT_PANES: TestPane[] = [
   { paneId: "w1:p1", x: 0, mouseReporting: false },
@@ -84,10 +98,14 @@ function writePane(
   mouseReporting = false,
   rect = { x, y, width: 10, height: 5 },
   innerRect = { x: x + 1, y: y + 1, width: 8, height: 3 },
-  scrollOffset = 0,
+  offset = 0,
+  maxOffset = 100,
+  hasScroll = true,
+  contentRevision = 1,
+  focused = true,
 ) {
   w.string(paneId);
-  w.varint(1);
+  w.varint(contentRevision);
   for (const bounds of [rect, innerRect]) {
     w.varint(bounds.x);
     w.varint(bounds.y);
@@ -95,11 +113,13 @@ function writePane(
     w.varint(bounds.height);
   }
   w.bool(false);
-  w.bool(true); // scroll metrics present
-  w.varint(scrollOffset); // offset_from_bottom
-  w.varint(100); // max_offset_from_bottom
-  w.varint(3); // viewport_rows
-  w.bool(true); // focused
+  w.bool(hasScroll);
+  if (hasScroll) {
+    w.varint(offset); // offset_from_bottom
+    w.varint(maxOffset); // max_offset_from_bottom
+    w.varint(3); // viewport_rows
+  }
+  w.bool(focused); // focused
   w.bool(mouseReporting);
   w.bool(false);
   w.bool(false);
@@ -107,10 +127,13 @@ function writePane(
   w.varint(0);
 }
 
+type TestPopup = Pick<Popup, "terminalId" | "title" | "width" | "height">;
+
 function surfaceFrame(
   revision: number,
   frame: FrameData,
   panes = DEFAULT_PANES,
+  popup: TestPopup | null = null,
 ): Buffer {
   const w = new BinWriter();
   w.variant(13);
@@ -128,10 +151,32 @@ function surfaceFrame(
       pane.mouseReporting,
       pane.rect,
       pane.innerRect,
-      pane.scrollOffset,
+      pane.offset,
+      pane.maxOffset,
+      pane.hasScroll,
+      pane.contentRevision,
+      pane.focused,
     );
-  w.varint(0);
-  w.bool(false);
+  w.varint(0); // splits
+  w.option(popup, (value) => {
+    w.string(value.terminalId);
+    w.string(value.title);
+    for (const size of [value.width, value.height]) {
+      w.option(size, (dimension) => {
+        w.variant(dimension.kind === "cells" ? 0 : 1);
+        if (dimension.kind === "cells") w.varint(dimension.value);
+        else w.u8(dimension.value);
+      });
+    }
+    writeFrame(w, frame);
+    w.bool(false);
+    w.bool(false);
+    w.varint(0);
+    w.varint(0);
+  });
+  w.varint(0); // graphics assets
+  w.varint(0); // graphics placements
+  w.varint(0); // retained assets
   return w.toBuffer();
 }
 
@@ -159,18 +204,23 @@ const WELCOME = {
  * endpoint requests, and streams a two-pane surface.
  */
 async function startSessionServer(handlers: {
+  onHello?: (hello: any) => void;
   onRequest?: (method: string, params: any, connection: number) => unknown;
   methods?: string[] | ((connection: number) => string[]);
   capabilities?: (connection: number) => string[];
   onPaneInput?: (paneId: string, reader: BinReader) => void;
   panes?: TestPane[];
-  onConnection?: (sendSurface: (panes: TestPane[]) => void) => void;
+  onConnection?: (
+    sendSurface: (panes: TestPane[], frame?: FrameData) => void,
+  ) => void;
   onPatchConnection?: (
     send: (cursor: FrameData["cursor"], panes: TestPane[]) => void,
   ) => void;
   onClipboardConnection?: (send: (data: string) => void) => void;
   onDisconnectConnection?: (disconnect: () => void) => void;
+  onControlConnection?: (send: (kind: string, data: string) => void) => void;
   initialSurface?: { frame: FrameData; panes: TestPane[] };
+  popupForSurface?: () => TestPopup | null;
   surfaceForHello?: (
     cols: number,
     rows: number,
@@ -202,6 +252,9 @@ async function startSessionServer(handlers: {
     });
     const connection = ++connectionSeq;
     handlers.onDisconnectConnection?.(() => socket.destroy());
+    handlers.onControlConnection?.((kind, data) =>
+      socket.write(encodeFrame(controlFrame(kind, data))),
+    );
     handlers.onClipboardConnection?.((data) => {
       const w = new BinWriter();
       w.variant(5);
@@ -211,8 +264,18 @@ async function startSessionServer(handlers: {
     let input = Buffer.alloc(0);
     let greeted = false;
     let revision = 1;
-    handlers.onConnection?.((panes) =>
-      socket.write(encodeFrame(surfaceFrame(++revision, frame, panes))),
+    handlers.onConnection?.(
+      (panes, nextFrame = handlers.initialSurface?.frame ?? frame) =>
+        socket.write(
+          encodeFrame(
+            surfaceFrame(
+              ++revision,
+              nextFrame,
+              panes,
+              handlers.popupForSurface?.(),
+            ),
+          ),
+        ),
     );
     handlers.onPatchConnection?.((cursor, panes) => {
       const w = new BinWriter();
@@ -256,6 +319,7 @@ async function startSessionServer(handlers: {
           greeted = true;
           reader.string(); // kind
           const hello = JSON.parse(reader.string());
+          handlers.onHello?.(hello);
           const initialSurface =
             handlers.surfaceForHello?.(
               hello.surface_size.cols,
@@ -291,6 +355,7 @@ async function startSessionServer(handlers: {
                 1,
                 initialSurface?.frame ?? frame,
                 initialSurface?.panes ?? handlers.panes,
+                handlers.popupForSurface?.(),
               ),
             ),
           );
@@ -343,6 +408,81 @@ async function startSessionServer(handlers: {
   });
   return socketPath;
 }
+
+test("popup identity updates without any attached pane viewer", async () => {
+  const frame: FrameData = {
+    cells: [cell("x")],
+    width: 1,
+    height: 1,
+    cursor: null,
+    hyperlinks: [],
+  };
+  let popup: TestPopup | null = {
+    terminalId: "floating",
+    title: "Float",
+    width: { kind: "percent", value: 80 },
+    height: { kind: "cells", value: 20 },
+  };
+  let sendSurface!: (panes: TestPane[], frame?: FrameData) => void;
+  let greeted = false;
+  let observerWorkspace = "other";
+  const socketPath = await startSessionServer({
+    initialSurface: { frame, panes: [] },
+    methods: [...WELCOME.methods, "workspace.focus"],
+    popupForSurface: () =>
+      observerWorkspace === "floating-workspace" ? popup : null,
+    onRequest: (method, params) => {
+      if (method === "workspace.focus") {
+        observerWorkspace = params.workspace_id;
+        sendSurface([], frame);
+      }
+      return {};
+    },
+    onHello: () => {
+      greeted = true;
+    },
+    onConnection: (send) => {
+      sendSurface = send;
+    },
+  });
+  const pushes: Array<{ popup: { terminal_id: string } | null }> = [];
+  const replies: Array<{ result: { popup: { terminal_id: string } | null } }> =
+    [];
+  const bridge = createTerminalBridge({
+    clientSocketPath: socketPath,
+    herdrProtocol: async () => 22,
+    lookupPaneId: async () => null,
+    focusedWorkspaceId: async () => "floating-workspace",
+    broadcast: (payload) => pushes.push(JSON.parse(payload)),
+    safeSend: (_ws, payload) => {
+      replies.push(JSON.parse(payload));
+      return true;
+    },
+    clientLabel: () => "test",
+    markRpcError: () => {},
+  });
+  try {
+    const ws = {} as ServerWebSocket<unknown>;
+    await bridge.handleTerminalRpc(ws, "watch", "terminal.watch_popup", {});
+    await settleUntil(
+      () =>
+        greeted &&
+        pushes.some((push) => push.popup?.terminal_id === "floating"),
+    );
+    await bridge.handleTerminalRpc(ws, "watch2", "terminal.watch_popup", {});
+    expect(observerWorkspace).toBe("floating-workspace");
+    expect(replies.at(-1)?.result.popup?.terminal_id).toBe("floating");
+    popup = null;
+    sendSurface([], frame);
+    await settleUntil(() => pushes.at(-1)?.popup === null);
+    expect(pushes.map((push) => push.popup?.terminal_id ?? null)).toEqual([
+      "floating",
+      null,
+    ]);
+  } finally {
+    bridge.dispose();
+  }
+});
 
 test.each(["cursor only", "other split pane"])(
   "restores a hidden cursor when a patch updates %s",
@@ -505,20 +645,23 @@ describe("EndpointTerminalSession", () => {
       );
       const frames: Array<{ width: number; height: number }> = [];
       session.on("terminal", (frame) => frames.push(frame));
+      jest.useFakeTimers();
       try {
         await session.connect(cols, 69);
         const settle = await requested.promise;
-        await Bun.sleep(60);
+        jest.advanceTimersByTime(60);
         expect(frames).toEqual([]);
+        const rendered = once(session, "terminal");
         settle();
-        await Bun.sleep(60);
+        await rendered;
         expect(frames).toEqual([
           expect.objectContaining({ width: cols, height: 69 }),
         ]);
-        await Bun.sleep(550);
+        jest.advanceTimersByTime(550);
         expect(frames).toHaveLength(1); // no stale timer repaint
       } finally {
         session.close();
+        jest.useRealTimers();
       }
     },
   );
@@ -546,23 +689,29 @@ describe("EndpointTerminalSession", () => {
     );
     const frames: Array<{ width: number; mouseReporting: boolean }> = [];
     session.on("terminal", (frame) => frames.push(frame));
+    jest.useFakeTimers();
     try {
       await session.connect(134, 69);
       const send = await requested.promise;
       expect(frames).toEqual([]);
       for (let i = 0; i < 7; i++) {
         send(true);
-        await Bun.sleep(100);
+        // The reply shares the socket with surfaces: drain the sent frame
+        // before advancing its deadline, without a wall-clock sleep.
+        await session.focus(() => true);
+        jest.advanceTimersByTime(100);
+        if (i < 4) expect(frames).toEqual([]);
       }
       expect(frames.length).toBeGreaterThan(0);
       expect(frames.at(-1)).toEqual(
         expect.objectContaining({ width: 64, mouseReporting: true }),
       );
       send(false);
-      await Bun.sleep(40);
+      await session.focus(() => true);
       expect(frames.at(-1)?.mouseReporting).toBe(false);
     } finally {
       session.close();
+      jest.useRealTimers();
     }
   });
 
@@ -586,17 +735,21 @@ describe("EndpointTerminalSession", () => {
       );
       const frames: unknown[] = [];
       session.on("terminal", (frame) => frames.push(frame));
+      jest.useFakeTimers();
       try {
         await session.connect(134, 69);
         await requested.promise;
         expect(frames).toEqual([]);
+        const closed = once(session, "close");
         if (side === "local") session.close();
         else disconnect();
-        await Bun.sleep(600);
+        await closed;
+        jest.advanceTimersByTime(600);
         expect(session.isClosed).toBe(true);
         expect(frames).toEqual([]);
       } finally {
         session.close();
+        jest.useRealTimers();
       }
     },
   );
@@ -859,41 +1012,6 @@ describe("EndpointTerminalSession", () => {
     await expect(session.connect(80, 24)).rejects.toThrow("no pane found");
   });
 
-  test("queued downward scrolling ignores stale surface offsets", async () => {
-    const offsets: number[] = [];
-    let sendSurface!: (panes: TestPane[]) => void;
-    const socketPath = await startSessionServer({
-      panes: [{ ...DEFAULT_PANES[0]!, scrollOffset: 100 }],
-      onConnection: (send) => {
-        sendSurface = send;
-      },
-      onRequest: (method, params) => {
-        if (method === "pane.scroll") offsets.push(params.offset_from_bottom);
-      },
-    });
-    const session = new EndpointTerminalSession(
-      socketPath,
-      "term_scroll",
-      async () => "w1:p1",
-    );
-    try {
-      await session.connect(80, 24);
-      session.scroll("down", 10);
-      await settleUntil(() => offsets.length === 1);
-      sendSurface([{ ...DEFAULT_PANES[0]!, scrollOffset: 100 }]);
-      await new Promise((resolve) => setTimeout(resolve, 30));
-      session.scroll("down", 10);
-      await settleUntil(() => offsets.length === 2);
-      sendSurface([{ ...DEFAULT_PANES[0]!, scrollOffset: 90 }]);
-      await new Promise((resolve) => setTimeout(resolve, 30));
-      session.scroll("down", 10);
-      await settleUntil(() => offsets.length === 3);
-      expect(offsets).toEqual([90, 80, 70]);
-    } finally {
-      session.close();
-    }
-  });
-
   test("classifies input and sends pane.scroll with absolute offsets", async () => {
     const requests: Array<{ method: string; params: any }> = [];
     const inputs: string[] = [];
@@ -1097,9 +1215,22 @@ test("accepted presses retain clamped drag and release ownership outside the pan
 test("terminal bridge carries endpoint mouse state and targets each attached terminal explicitly", async () => {
   const inputs: string[] = [];
   const scrollRequests: unknown[] = [];
+  const senders: Array<(panes: TestPane[]) => void> = [];
   const socketPath = await startSessionServer({
-    onRequest: (method, params) => {
-      if (method === "pane.scroll") scrollRequests.push(params);
+    onConnection: (send) => senders.push(send),
+    onRequest: (method, params, connection) => {
+      if (method === "pane.scroll") {
+        scrollRequests.push(params);
+        senders[connection - 1]([
+          { paneId: "w1:p1", x: 0, mouseReporting: true },
+          {
+            paneId: "w1:p2",
+            x: 10,
+            mouseReporting: true,
+            offset: params.offset_from_bottom,
+          },
+        ]);
+      }
     },
     panes: [
       { paneId: "w1:p1", x: 0, mouseReporting: true },
@@ -1152,20 +1283,26 @@ test("terminal bridge carries endpoint mouse state and targets each attached ter
       ["down", "history"],
       ["up", "page-key"],
     ]) {
+      const beforeScrolls = scrollRequests.length;
+      const beforeInputs = inputs.length;
       await bridge.handleTerminalRpc(ws, "history", "terminal.scroll", {
         terminal_id: "right",
         direction,
         lines: 7,
         source,
       });
+      // Verify each routing mode separately; bursts intentionally coalesce.
+      if (source === "page-key")
+        await settleUntil(() => inputs.length > beforeInputs);
+      else await settleUntil(() => scrollRequests.length > beforeScrolls);
     }
     await Bun.sleep(40);
     expect(scrollRequests).toEqual([
       { pane_id: "w1:p2", offset_from_bottom: 7 },
       { pane_id: "w1:p2", offset_from_bottom: 0 },
-      { pane_id: "w1:p2", offset_from_bottom: 7 },
     ]);
-    expect(inputs).toHaveLength(2);
+    expect(inputs).toHaveLength(3);
+    expect(inputs.at(-1)).toBe("w1:p2");
   } finally {
     bridge.dispose();
   }
@@ -1349,6 +1486,247 @@ test("invalid initial surface hints are rejected before opening an endpoint", as
     expect(connections).toBe(0);
   } finally {
     bridge.dispose();
+  }
+});
+
+test.each([
+  "terminal.resize",
+  "terminal.attach",
+  "terminal.detach",
+  "stream.close",
+  "cleanup",
+  "dispose",
+] as const)(
+  "invalidates coalesced endpoint frames only for their connection and generation on %s",
+  async (action) => {
+    const peers: Array<(panes: TestPane[], frame?: FrameData) => void> = [];
+    const socketPath = await startSessionServer({
+      onConnection: (send) => peers.push(send),
+    });
+    let buffered = WS_COALESCE_LIMIT_BYTES + 1;
+    const sent: string[] = [];
+    const received = new EventEmitter();
+    const latest = new Map<string, string>();
+    const browser = {
+      close: () => {},
+      getBufferedAmount: () => buffered,
+      send: (payload: string) => {
+        sent.push(payload);
+        return payload.length;
+      },
+    } as unknown as ServerWebSocket<unknown>;
+    const cleanup = () => {};
+    const identities = [
+      { connectionId: "alpha", connectionGeneration: 1 },
+      { connectionId: "beta", connectionGeneration: 1 },
+      { connectionId: "alpha", connectionGeneration: 2 },
+    ];
+    const bridges = identities.map((identity) =>
+      createTerminalBridge({
+        ...identity,
+        clientSocketPath: socketPath,
+        herdrProtocol: async () => 22,
+        lookupPaneId: async () => "w1:p1",
+        safeSend: (ws, payload, context, coalesceKey) => {
+          const result = sendWebSocketMessage(ws, payload, {
+            cleanup,
+            context,
+            coalesceKey,
+          });
+          if (JSON.parse(payload).terminal_closed) received.emit("closed");
+          if (JSON.parse(payload).terminal) {
+            latest.set(
+              `${identity.connectionId}:${identity.connectionGeneration}`,
+              payload,
+            );
+            received.emit("frame");
+          }
+          return result;
+        },
+        dropCoalesced: dropCoalescedMessage,
+        clientLabel: () => "test",
+        markRpcError: () => undefined,
+      }),
+    );
+    const params = {
+      terminal_id: "same-terminal",
+      cols: 8,
+      rows: 3,
+      relay_active: false,
+    };
+    const terminalPayloads = () =>
+      sent.filter((payload) => JSON.parse(payload).terminal);
+    const repaint = async (peer: number, symbol: string) => {
+      const ready = once(received, "frame");
+      peers[peer](DEFAULT_PANES, {
+        cells: Array.from({ length: 50 }, () => cell(symbol)),
+        width: 10,
+        height: 5,
+        cursor: null,
+        hyperlinks: [],
+      });
+      await ready;
+    };
+    try {
+      for (const bridge of bridges) {
+        const ready = once(received, "frame");
+        await bridge.handleTerminalRpc(
+          browser,
+          "attach",
+          "terminal.attach",
+          params,
+        );
+        await ready;
+      }
+      await repaint(0, "Z");
+      expect(terminalPayloads()).toEqual([]);
+      buffered = 0;
+      flushCoalescedMessages(browser, { cleanup });
+      expect(terminalPayloads().sort()).toEqual([...latest.values()].sort());
+      expect(terminalPayloads()).toHaveLength(3);
+
+      // Invalidating alpha's old generation must not discard beta or alpha's new generation.
+      sent.length = 0;
+      buffered = WS_COALESCE_LIMIT_BYTES + 1;
+      for (let i = 0; i < peers.length; i++) await repaint(i, "Y");
+      const viewer = action === "terminal.attach" ? { ...browser } : browser;
+      if (action === "cleanup") bridges[0].cleanupWs(viewer);
+      else if (action === "dispose") bridges[0].dispose();
+      else if (action === "stream.close") {
+        const closed = once(received, "closed");
+        bridges[0].refreshSurfaceCodecs();
+        await closed;
+        expect(
+          sent.some((payload) => JSON.parse(payload).terminal_closed),
+        ).toBe(true);
+      } else
+        await bridges[0].handleTerminalRpc(
+          viewer,
+          "invalidate",
+          action,
+          params,
+        );
+      buffered = 0;
+      flushCoalescedMessages(browser, { cleanup });
+      expect(terminalPayloads().sort()).toEqual(
+        [latest.get("beta:1")!, latest.get("alpha:2")!].sort(),
+      );
+      if (viewer !== browser) bridges[0].cleanupWs(viewer);
+    } finally {
+      for (const bridge of bridges) bridge.dispose();
+    }
+  },
+);
+
+test("a delayed close notifies only old viewers and preserves a replacement's held frame", async () => {
+  const sessions: EndpointTerminalSession[] = [];
+  const originalConnect = EndpointTerminalSession.prototype.connect;
+  const connect = spyOn(
+    EndpointTerminalSession.prototype,
+    "connect",
+  ).mockImplementation(function (
+    this: EndpointTerminalSession,
+    cols: number,
+    rows: number,
+  ) {
+    sessions.push(this);
+    return originalConnect.call(this, cols, rows);
+  });
+  const peers: Array<(panes: TestPane[]) => void> = [];
+  const socketPath = await startSessionServer({
+    onConnection: (send) => peers.push(send),
+  });
+  let buffered = WS_COALESCE_LIMIT_BYTES + 1;
+  const messages: { viewer: unknown; message: any }[] = [];
+  const frames = new EventEmitter();
+  const latest = new Map<unknown, string>();
+  const viewers = [0, 1].map(() => ({
+    close() {},
+    getBufferedAmount: () => buffered,
+    send(payload: string) {
+      messages.push({ viewer: this, message: JSON.parse(payload) });
+      return payload.length;
+    },
+  })) as unknown as ServerWebSocket<unknown>[];
+  const bridge = createTerminalBridge({
+    clientSocketPath: socketPath,
+    herdrProtocol: async () => 22,
+    lookupPaneId: async () => "w1:p1",
+    safeSend(viewer, payload, context, coalesceKey) {
+      const sent = sendWebSocketMessage(viewer, payload, {
+        cleanup() {},
+        context,
+        coalesceKey,
+      });
+      if (JSON.parse(payload).terminal) {
+        latest.set(viewer, payload);
+        frames.emit(String(viewers.indexOf(viewer)));
+      }
+      return sent;
+    },
+    dropCoalesced: dropCoalescedMessage,
+    clientLabel: () => "test",
+    markRpcError() {},
+  });
+  const attach = (index: number) =>
+    bridge.handleTerminalRpc(
+      viewers[index],
+      `attach-${index}`,
+      "terminal.attach",
+      {
+        terminal_id: "term",
+        cols: 8,
+        rows: 3,
+        relay_active: false,
+      },
+    );
+  let restoreEmit: (() => void) | undefined;
+  try {
+    for (let i = 0; i < viewers.length; i++) {
+      const frame = once(frames, String(i));
+      await attach(i);
+      if (i > 0) peers[0]([{ ...DEFAULT_PANES[0], mouseReporting: true }]);
+      await frame;
+    }
+    const old = sessions[0];
+    const emit = old.emit.bind(old);
+    const delayedClose = deferred<() => void>();
+    const intercepted = spyOn(old, "emit").mockImplementation(
+      (event, ...args) => {
+        if (event === "close") {
+          delayedClose.resolve(() => {
+            emit(event, ...args);
+          });
+          return true;
+        }
+        return emit(event, ...args);
+      },
+    );
+    restoreEmit = () => intercepted.mockRestore();
+    bridge.refreshSurfaceCodecs();
+    const deliverClose = await delayedClose.promise;
+    const replacementFrame = once(frames, "0");
+    await attach(0);
+    await replacementFrame;
+    expect(sessions).toHaveLength(2);
+    messages.length = 0;
+    restoreEmit();
+    deliverClose();
+    expect(
+      messages
+        .filter(({ message }) => message.terminal_closed)
+        .map(({ viewer }) => viewer),
+    ).toEqual([viewers[1]]);
+    buffered = 0;
+    for (const viewer of viewers)
+      flushCoalescedMessages(viewer, { cleanup() {} });
+    expect(messages.filter(({ message }) => message.terminal)).toEqual([
+      { viewer: viewers[0], message: JSON.parse(latest.get(viewers[0])!) },
+    ]);
+  } finally {
+    restoreEmit?.();
+    bridge.dispose();
+    connect.mockRestore();
   }
 });
 
@@ -1585,6 +1963,276 @@ async function settleUntil(predicate: () => boolean) {
   for (let i = 0; i < 200 && !predicate(); i++) await Bun.sleep(5);
   expect(predicate()).toBe(true);
 }
+
+test.each(["endpoint.surface-delta.v1", "endpoint.surface-reuse.v1"])(
+  "invalid %s notifies only its viewers and reattachment obtains a fresh frame",
+  async (kind) => {
+    const peers: Array<(kind: string, data: string) => void> = [];
+    const socketPath = await startSessionServer({
+      capabilities: () => ["surface_delta", "surface_reuse"],
+      onControlConnection: (send) => peers.push(send),
+    });
+    const { bridge, ws, replies } = creationBridge(socketPath);
+    const other = {} as ServerWebSocket<unknown>;
+    try {
+      await bridge.handleTerminalRpc(ws, "attach-a", "terminal.attach", {
+        terminal_id: "a",
+        cols: 8,
+        rows: 3,
+      });
+      await bridge.handleTerminalRpc(other, "attach-b", "terminal.attach", {
+        terminal_id: "b",
+        cols: 8,
+        rows: 3,
+      });
+      const before = replies.filter(
+        (r) => r.terminal?.terminal_id === "a",
+      ).length;
+      peers[0](kind, "invalid");
+      await settleUntil(() => replies.some((r) => r.terminal_closed));
+      expect(
+        replies
+          .filter((r) => r.terminal_closed)
+          .map((r) => r.terminal_closed.terminal_id),
+      ).toEqual(["a"]);
+      expect(bridge.statusTerminals().map((t) => t.terminal_id)).toEqual(["b"]);
+      await bridge.handleTerminalRpc(ws, "reattach-a", "terminal.attach", {
+        terminal_id: "a",
+        cols: 8,
+        rows: 3,
+      });
+      expect(peers).toHaveLength(3);
+      expect(
+        replies.filter((r) => r.terminal?.terminal_id === "a").length,
+      ).toBeGreaterThan(before);
+      expect(replies.find((r) => r.id === "reattach-a")?.result.ok).toBe(true);
+      expect(replies.filter((r) => r.error)).toEqual([]);
+    } finally {
+      bridge.dispose();
+    }
+  },
+);
+
+test("changing surface codecs reconnects every endpoint viewer, but not other connections", async () => {
+  const hellos: any[] = [];
+  const requests: string[] = [];
+  const socketPath = await startSessionServer({
+    onHello: (hello) => hellos.push(hello),
+    onRequest: (method) => {
+      requests.push(method);
+    },
+  });
+  const viewers = [{}, {}, {}] as ServerWebSocket<unknown>[];
+  const messages: { viewer: unknown; message: any }[] = [];
+  let enabled = true;
+  const bridge = createTerminalBridge({
+    clientSocketPath: socketPath,
+    connectionId: "alpha",
+    connectionGeneration: 1,
+    herdrProtocol: async () => 22,
+    surfaceCodecsEnabled: async () => enabled,
+    lookupPaneId: async () => "w1:p1",
+    clientLabel: () => "test",
+    markRpcError: () => {},
+    safeSend: (viewer, payload) => {
+      messages.push({ viewer, message: JSON.parse(payload) });
+      return true;
+    },
+  });
+  const unaffected = creationBridge(socketPath);
+  const attach = (index: number) =>
+    bridge.handleTerminalRpc(
+      viewers[index],
+      `attach-${index}`,
+      "terminal.attach",
+      {
+        terminal_id: index === 2 ? "other-pane" : "same-pane",
+        cols: 8,
+        rows: 3,
+      },
+    );
+  try {
+    await unaffected.attach();
+    for (let i = 0; i < 3; i++) await attach(i);
+    expect(hellos).toHaveLength(3);
+    for (const next of [false, true]) {
+      messages.length = 0;
+      enabled = next;
+      bridge.refreshSurfaceCodecs();
+      await settleUntil(
+        () =>
+          messages.filter(({ message }) => message.terminal_closed).length ===
+          3,
+      );
+      expect(
+        messages
+          .filter(({ message }) => message.terminal_closed)
+          .map(({ viewer }) =>
+            viewers.indexOf(viewer as ServerWebSocket<unknown>),
+          )
+          .sort(),
+      ).toEqual([0, 1, 2]);
+      for (const { message } of messages.filter(
+        ({ message }) => message.terminal_closed,
+      )) {
+        expect(message.terminal_closed.reason).toBe(
+          "terminal_configuration_changed",
+        );
+        expect(message.connection_id).toBe("alpha");
+      }
+      expect(unaffected.bridge.statusTerminals()).toHaveLength(1);
+      expect(unaffected.replies.some((reply) => reply.terminal_closed)).toBe(
+        false,
+      );
+      for (let i = 0; i < 3; i++) await attach(i);
+      expect(
+        hellos
+          .slice(-2)
+          .map((hello) => [hello.surface_delta, hello.surface_reuse]),
+      ).toEqual([
+        [next, next],
+        [next, next],
+      ]);
+      expect(bridge.statusTerminals()).toHaveLength(2);
+      expect(messages.some(({ message }) => message.terminal?.full)).toBe(true);
+      expect(messages.filter(({ message }) => message.error)).toEqual([]);
+    }
+    expect(requests.some((method) => /kill|destroy|close/.test(method))).toBe(
+      false,
+    );
+  } finally {
+    bridge.dispose();
+    unaffected.bridge.dispose();
+  }
+});
+
+test("configuration refresh during handshake still notifies the viewer to retry", async () => {
+  const socketPath = path.join(
+    tmpdir(),
+    `herdr-gui-handshake-${crypto.randomUUID()}.sock`,
+  );
+  const hello = deferred<void>();
+  const closed = deferred<void>();
+  const server = net.createServer((socket) => {
+    socket.once("data", () => hello.resolve());
+    socket.once("close", () => closed.resolve());
+  });
+  servers.push(server);
+  await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+  const { bridge, ws, replies } = creationBridge(socketPath);
+  const attaching = bridge.handleTerminalRpc(ws, "attach", "terminal.attach", {
+    terminal_id: "term",
+    cols: 8,
+    rows: 3,
+  });
+  try {
+    await hello.promise;
+    bridge.refreshSurfaceCodecs();
+    await Promise.all([attaching, closed.promise]);
+    expect(
+      replies
+        .filter((reply) => reply.terminal_closed)
+        .map((reply) => reply.terminal_closed),
+    ).toEqual([
+      { terminal_id: "term", reason: "terminal_configuration_changed" },
+    ]);
+  } finally {
+    bridge.dispose();
+    await attaching;
+  }
+});
+
+test.each([false, true])(
+  "configuration reattachment survives obsolete lookup failure (different viewer: %s)",
+  async (differentViewer) => {
+    const lookup = deferred<string>();
+    let lookups = 0;
+    const inputs: string[] = [];
+    const senders: Array<(panes: TestPane[]) => void> = [];
+    const socketPath = await startSessionServer({
+      onConnection: (send) => senders.push(send),
+      onPaneInput: (id) => inputs.push(id),
+    });
+    const { bridge, ws, replies } = creationBridge(socketPath, {
+      lookup: async () => (++lookups === 1 ? lookup.promise : "w1:p1"),
+    });
+    const replacementViewer = differentViewer
+      ? ({} as ServerWebSocket<unknown>)
+      : ws;
+    const attach = (viewer: ServerWebSocket<unknown>, id: string) =>
+      bridge.handleTerminalRpc(viewer, id, "terminal.attach", {
+        terminal_id: "term",
+        cols: 8,
+        rows: 3,
+      });
+    const prior = attach(ws, "prior");
+    try {
+      await settleUntil(() => lookups === 1);
+      bridge.refreshSurfaceCodecs();
+      await settleUntil(() => replies.some((r) => r.terminal_closed));
+      await attach(replacementViewer, "replacement");
+      expect(replies.find((r) => r.id === "replacement")?.result.ok).toBe(true);
+      lookup.resolve("w1:p1");
+      await prior;
+      expect(replies.find((r) => r.id === "prior")?.error).toBeDefined();
+      expect(bridge.statusTerminals()).toHaveLength(1);
+      const frames = replies.filter((r) => r.terminal).length;
+      senders[1]([{ paneId: "w1:p1", x: 0, mouseReporting: true }]);
+      await settleUntil(
+        () => replies.filter((r) => r.terminal).length > frames,
+      );
+      await bridge.handleTerminalRpc(
+        replacementViewer,
+        "input",
+        "terminal.input",
+        { terminal_id: "term", data: "eA==" },
+      );
+      await settleUntil(() => inputs.length === 1);
+      expect(replies.find((r) => r.id === "input")?.error).toBeUndefined();
+      expect(replies.filter((r) => r.terminal_closed)).toHaveLength(1);
+    } finally {
+      lookup.resolve("w1:p1");
+      await prior;
+      bridge.dispose();
+    }
+  },
+);
+
+test("an attach waiting for settings cannot negotiate an obsolete codec preference", async () => {
+  const hellos: any[] = [];
+  const socketPath = await startSessionServer({
+    onHello: (hello) => hellos.push(hello),
+  });
+  const oldSettings = deferred<boolean>();
+  let reads = 0;
+  const bridge = createTerminalBridge({
+    clientSocketPath: socketPath,
+    herdrProtocol: async () => 22,
+    surfaceCodecsEnabled: () =>
+      ++reads === 1 ? oldSettings.promise : Promise.resolve(true),
+    lookupPaneId: async () => "w1:p1",
+    clientLabel: () => "test",
+    markRpcError: () => {},
+    safeSend: () => true,
+  });
+  try {
+    const attaching = bridge.handleTerminalRpc(
+      {} as ServerWebSocket<unknown>,
+      "attach",
+      "terminal.attach",
+      { terminal_id: "pane", cols: 8, rows: 3 },
+    );
+    await settleUntil(() => reads === 1);
+    bridge.refreshSurfaceCodecs();
+    oldSettings.resolve(false);
+    await attaching;
+    expect(reads).toBe(2);
+    expect(hellos.map((hello) => hello.surface_delta)).toEqual([true]);
+  } finally {
+    oldSettings.resolve(false);
+    bridge.dispose();
+  }
+});
 
 function creationBridge(
   socketPath: string,
@@ -1887,14 +2535,14 @@ describe("attached endpoint creation and input readiness", () => {
         { browser_source: creationSource },
         () => true,
       );
+      await bridge.handleTerminalRpc(ws, "input", "terminal.input", {
+        terminal_id: "term1",
+        data: "WA==",
+      });
       await bridge.handleTerminalRpc(ws, "scroll", "terminal.scroll", {
         terminal_id: "term1",
         direction: "up",
         lines: 1,
-      });
-      await bridge.handleTerminalRpc(ws, "input", "terminal.input", {
-        terminal_id: "term1",
-        data: "WA==",
       });
       await settleUntil(() => inputs.length === 1);
       expect(requests).toEqual(["pane.focus", "tab.create"]);
@@ -2511,6 +3159,191 @@ test("reconnect replaces advertisements while other connection runtimes retain t
   }
 });
 
+describe("wheel bursts with delayed endpoint frames", () => {
+  test("a stale repaint cannot rewind pending wheel movement", async () => {
+    const first = deferred<void>();
+    const requests: number[] = [];
+    let send!: (panes: TestPane[]) => void;
+    const socketPath = await startSessionServer({
+      onConnection: (push) => {
+        send = push;
+      },
+      onRequest: async (method, params) => {
+        if (method !== "pane.scroll") return;
+        requests.push(params.offset_from_bottom);
+        if (requests.length === 1) await first.promise;
+        send([{ ...DEFAULT_PANES[0], offset: params.offset_from_bottom }]);
+      },
+    });
+    const session = new EndpointTerminalSession(
+      socketPath,
+      "term1",
+      async () => "w1:p1",
+    );
+    let frames = 0;
+    session.on("terminal", () => frames++);
+    try {
+      await session.connect(8, 3, { cols: 10, rows: 5 });
+      session.scroll("up", 3);
+      await settleUntil(() => requests.length === 1);
+      session.scroll("up", 3);
+      const before = frames;
+      send(DEFAULT_PANES); // old viewport arrives while the first request is pending
+      await settleUntil(() => frames > before);
+      session.scroll("up", 3);
+      first.resolve();
+      await Bun.sleep(60);
+      expect(requests[requests.length - 1]).toBe(9);
+      expect(
+        requests.every((offset, i) => i === 0 || offset >= requests[i - 1]),
+      ).toBe(true);
+      expect(requests.length).toBeLessThanOrEqual(2);
+    } finally {
+      first.resolve();
+      session.close();
+    }
+  });
+});
+
+test("wheel targets survive RPC replies before their surface acknowledgements", async () => {
+  const requests: number[] = [];
+  let send!: (panes: TestPane[]) => void;
+  const socketPath = await startSessionServer({
+    onConnection: (push) => {
+      send = push;
+    },
+    onRequest: (method, params) => {
+      if (method === "pane.scroll") requests.push(params.offset_from_bottom);
+    },
+  });
+  const session = new EndpointTerminalSession(
+    socketPath,
+    "term1",
+    async () => "w1:p1",
+  );
+  let frames = 0;
+  session.on("terminal", () => frames++);
+  const publish = async (offset: number) => {
+    const before = frames;
+    send([{ ...DEFAULT_PANES[0], offset }]);
+    await settleUntil(() => frames > before);
+  };
+  try {
+    await session.connect(8, 3, { cols: 10, rows: 5 });
+    session.scroll("up", 3);
+    await settleUntil(() => requests.length === 1);
+    await session.focus(() => true); // RPC completed, but no surface yet
+    session.scroll("up", 3);
+    await session.focus(() => true);
+    session.scroll("up", 3);
+    await session.focus(() => true);
+    expect(requests).toEqual([3]); // all unsent movement coalesces behind the frame
+    await publish(3);
+    await settleUntil(() => requests.length === 2);
+    await publish(9); // final acknowledgement retires the pending intent
+    await publish(20); // subsequent scrolling by another client is authoritative
+    session.scroll("down", 2);
+    await settleUntil(() => requests.length === 3);
+    expect(requests).toEqual([3, 9, 18]);
+  } finally {
+    session.close();
+  }
+});
+
+for (const scenario of ["reverse", "grow", "close", "input"] as const) {
+  test(`pending wheel burst handles ${scenario}`, async () => {
+    const first = deferred<void>();
+    const requests: number[] = [];
+    let send!: (panes: TestPane[]) => void;
+    let maxOffset = 100;
+    const socketPath = await startSessionServer({
+      onConnection: (push) => {
+        send = push;
+      },
+      onRequest: async (method, params) => {
+        if (method !== "pane.scroll") return;
+        requests.push(params.offset_from_bottom);
+        if (requests.length === 1) await first.promise;
+        if (scenario !== "close")
+          send([
+            {
+              ...DEFAULT_PANES[0],
+              offset: params.offset_from_bottom,
+              maxOffset,
+            },
+          ]);
+      },
+    });
+    const session = new EndpointTerminalSession(
+      socketPath,
+      "term1",
+      async () => "w1:p1",
+    );
+    let frames = 0;
+    session.on("terminal", () => frames++);
+    try {
+      await session.connect(8, 3, { cols: 10, rows: 5 });
+      session.scroll("up", 3);
+      await settleUntil(() => requests.length === 1);
+      if (scenario === "grow") {
+        maxOffset = 105;
+        const before = frames;
+        send([{ ...DEFAULT_PANES[0], maxOffset }]);
+        await settleUntil(() => frames > before);
+        session.scroll("up", 2);
+      } else {
+        session.scroll("up", 12);
+        if (scenario === "reverse") session.scroll("down", 20);
+        else if (scenario === "input") session.input(Buffer.from("x"));
+        else session.close();
+      }
+      first.resolve();
+      if (scenario !== "close" && scenario !== "input")
+        await settleUntil(() => requests.length === 2);
+      else await Bun.sleep(30);
+      expect(requests).toEqual(
+        scenario === "grow" ? [3, 10] : scenario === "reverse" ? [3, 0] : [3],
+      );
+    } finally {
+      first.resolve();
+      session.close();
+    }
+  });
+}
+
+test("failed scrolling releases pending intent for the next wheel gesture", async () => {
+  const requests: number[] = [];
+  const failed = deferred<void>();
+  const socketPath = await startSessionServer({
+    onRequest: (method, params) => {
+      if (method !== "pane.scroll") return;
+      requests.push(params.offset_from_bottom);
+      if (requests.length === 1) throw new Error("scroll rejected");
+    },
+  });
+  const session = new EndpointTerminalSession(
+    socketPath,
+    "term1",
+    async () => "w1:p1",
+    {
+      ...silentLogger,
+      debug: (message) => {
+        if (message === "endpoint pane.scroll failed") failed.resolve();
+      },
+    },
+  );
+  try {
+    await session.connect(8, 3, { cols: 10, rows: 5 });
+    session.scroll("up", 3);
+    await failed.promise;
+    session.scroll("up", 2);
+    await settleUntil(() => requests.length === 2);
+    expect(requests).toEqual([3, 2]);
+  } finally {
+    session.close();
+  }
+});
+
 describe("attached endpoint cursor focus", () => {
   test("focuses an owned attachment without input and rejects other viewers", async () => {
     const requests: Array<{ method: string; params: any }> = [];
@@ -2665,5 +3498,1040 @@ describe("attached endpoint cursor focus", () => {
         bridge.dispose();
       }
     });
+  }
+});
+
+async function scrollFixture(
+  onScroll: (offset: number, index: number) => unknown = () => ({}),
+) {
+  const requests: number[] = [];
+  let send!: (panes: TestPane[]) => void;
+  const socketPath = await startSessionServer({
+    onConnection: (push) => {
+      send = push;
+    },
+    onRequest: (method, params) => {
+      if (method !== "pane.scroll") return;
+      requests.push(params.offset_from_bottom);
+      return onScroll(params.offset_from_bottom, requests.length);
+    },
+  });
+  const session = new EndpointTerminalSession(
+    socketPath,
+    "term1",
+    async () => "w1:p1",
+  );
+  await session.connect(8, 3, { cols: 10, rows: 5 });
+  return {
+    session,
+    requests,
+    send,
+    // Focus is a public command-lane fence, not a private scheduler assertion.
+    fence: () => session.focus(() => true),
+    publish: async (offset: number, maxOffset = 100) => {
+      const frame = new Promise<void>((resolve) =>
+        session.once("terminal", () => resolve()),
+      );
+      send([{ ...DEFAULT_PANES[0], offset, maxOffset }]);
+      await frame;
+    },
+  };
+}
+
+function paneScrollResult(offset: number, maxOffset = 100) {
+  return {
+    type: "pane_info",
+    pane: {
+      pane_id: "w1:p1",
+      scroll: {
+        offset_from_bottom: offset,
+        max_offset_from_bottom: maxOffset,
+        viewport_rows: 3,
+      },
+      revision: 999, // terminal metadata revision, deliberately unrelated to surfaces
+    },
+  };
+}
+
+describe("scroll dispatch reconciliation", () => {
+  test("growth after RPC completion cannot create an unsent hidden target", async () => {
+    const f = await scrollFixture();
+    try {
+      f.session.scroll("up", 3);
+      await f.fence();
+      await f.publish(0, 105);
+      await f.publish(3, 105);
+      await f.fence();
+      expect(f.requests).toEqual([3]);
+      f.session.scroll("up", 2);
+      await f.fence();
+      expect(f.requests).toEqual([3, 5]);
+    } finally {
+      f.session.close();
+    }
+  });
+
+  test("external viewport replacement retires a completed dispatch without its exact target", async () => {
+    const f = await scrollFixture();
+    try {
+      f.session.scroll("up", 3);
+      await f.fence();
+      await f.publish(20);
+      f.session.scroll("down", 2);
+      await f.fence();
+      expect(f.requests).toEqual([3, 18]);
+    } finally {
+      f.session.close();
+    }
+  });
+
+  test("rapid gestures coalesce across multiple delayed surfaces without stale replay", async () => {
+    const f = await scrollFixture();
+    try {
+      for (let i = 0; i < 3; i++) {
+        f.session.scroll("up", 3);
+        await f.fence();
+      }
+      expect(f.requests).toEqual([3]);
+      await f.publish(3);
+      await f.fence();
+      expect(f.requests).toEqual([3, 9]);
+      await f.publish(3); // queued repaint of the preceding viewport
+      f.session.scroll("up", 2);
+      await f.fence();
+      expect(f.requests).toEqual([3, 9]);
+      await f.publish(9);
+      await f.fence();
+      await f.publish(11);
+      await f.fence();
+      expect(f.requests).toEqual([3, 9, 11]);
+      await f.publish(20);
+      f.session.scroll("down", 2);
+      await f.fence();
+      expect(f.requests).toEqual([3, 9, 11, 18]);
+    } finally {
+      f.session.close();
+    }
+  });
+
+  test("surface before RPC completion cannot retire newer wheel intent", async () => {
+    const hold = deferred<void>();
+    const f = await scrollFixture(async (_offset, index) => {
+      if (index === 1) await hold.promise;
+    });
+    try {
+      f.session.scroll("up", 3);
+      await settleUntil(() => f.requests.length === 1);
+      await f.publish(3);
+      f.session.scroll("up", 3);
+      f.session.scroll("up", 3);
+      hold.resolve();
+      await f.fence();
+      await settleUntil(() => f.requests.length === 2);
+      await f.publish(9);
+      await f.fence();
+      expect(f.requests).toEqual([3, 9]);
+    } finally {
+      hold.resolve();
+      f.session.close();
+    }
+  });
+
+  test("undispatched reversal retires a no-op before the next gesture", async () => {
+    const f = await scrollFixture();
+    try {
+      f.session.scroll("up", 3);
+      f.session.scroll("down", 3);
+      await f.fence();
+      expect(f.requests).toEqual([]);
+      f.session.scroll("up", 2);
+      await f.fence();
+      expect(f.requests).toEqual([2]);
+    } finally {
+      f.session.close();
+    }
+  });
+
+  test("undispatched reversal retains wheel intent arriving during no-op completion", async () => {
+    const f = await scrollFixture();
+    try {
+      f.session.scroll("up", 3);
+      f.session.scroll("down", 3);
+      // Let the queued callback run, but not its promise completion handlers.
+      await Promise.resolve();
+      f.session.scroll("up", 2);
+      await f.fence();
+      await settleUntil(() => f.requests.length > 0);
+      expect(f.requests).toEqual([2]);
+    } finally {
+      f.session.close();
+    }
+  });
+
+  test("reversal awaits its own surface instead of reviving the earlier offset", async () => {
+    const f = await scrollFixture();
+    try {
+      f.session.scroll("up", 3);
+      await f.fence();
+      f.session.scroll("down", 3);
+      await f.fence();
+      expect(f.requests).toEqual([3]);
+      await f.publish(3);
+      await f.fence();
+      await f.publish(3);
+      f.session.scroll("down", 1);
+      await f.fence();
+      expect(f.requests).toEqual([3, 0]);
+      await f.publish(0);
+      f.session.scroll("up", 2);
+      await f.fence();
+      expect(f.requests).toEqual([3, 0, 2]);
+    } finally {
+      f.session.close();
+    }
+  });
+
+  test("waiting for a surface does not block focus, resize, or application input", async () => {
+    const requests: number[] = [];
+    const resizes: number[][] = [];
+    const inputs: string[] = [];
+    const socketPath = await startSessionServer({
+      onRequest: (method, params) => {
+        if (method === "pane.scroll") requests.push(params.offset_from_bottom);
+      },
+      onResize: (cols, rows) => {
+        resizes.push([cols, rows]);
+      },
+      onPaneInput: (paneId) => {
+        inputs.push(paneId);
+      },
+    });
+    const session = new EndpointTerminalSession(
+      socketPath,
+      "term1",
+      async () => "w1:p1",
+    );
+    try {
+      await session.connect(8, 3, { cols: 10, rows: 5 });
+      session.scroll("up", 3);
+      await session.focus(() => true);
+      session.scroll("up", 2);
+      session.resize(8, 3);
+      await session.focus(() => true);
+      expect(requests).toEqual([3]);
+      expect(resizes).toEqual([[10, 5]]);
+      session.input(Buffer.from("x"));
+      await session.focus(() => true);
+      expect(inputs).toEqual(["w1:p1"]);
+    } finally {
+      session.close();
+    }
+  });
+
+  test("a clamped no-op result needs no surface and leaves the command lane usable", async () => {
+    const f = await scrollFixture((_offset, index) =>
+      index === 1 ? paneScrollResult(0, 0) : {},
+    );
+    try {
+      f.session.scroll("up", 3);
+      await f.fence();
+      // History can regrow without changing the viewport's offset.
+      await f.publish(0, 100);
+      f.session.scroll("up", 2);
+      await f.fence();
+      expect(f.requests).toEqual([3, 2]);
+    } finally {
+      f.session.close();
+    }
+  });
+
+  test("history shrink settles an opaque-result dispatch at its clamped surface", async () => {
+    const f = await scrollFixture();
+    try {
+      f.session.scroll("up", 3);
+      await f.fence();
+      await f.publish(0, 0);
+      await f.fence();
+      await f.publish(0, 100);
+      f.session.scroll("up", 2);
+      await f.fence();
+      expect(f.requests).toEqual([3, 2]);
+    } finally {
+      f.session.close();
+    }
+  });
+
+  test("growth during a pending RPC preserves queued movement despite older result metrics", async () => {
+    const hold = deferred<void>();
+    const f = await scrollFixture(async (offset, index) => {
+      if (index === 1) {
+        await hold.promise;
+        return paneScrollResult(offset, 100);
+      }
+    });
+    try {
+      f.session.scroll("up", 3);
+      await settleUntil(() => f.requests.length === 1);
+      f.session.scroll("up", 97);
+      await f.publish(0, 105);
+      hold.resolve();
+      await f.fence();
+      expect(f.requests).toEqual([3]);
+      await f.publish(3, 105);
+      await f.fence();
+      expect(f.requests).toEqual([3, 105]);
+      await f.publish(105, 105);
+      await f.fence();
+      expect(f.requests).toEqual([3, 105]);
+    } finally {
+      hold.resolve();
+      f.session.close();
+    }
+  });
+
+  test("a server-clamped nonzero result settles at its applied viewport", async () => {
+    const f = await scrollFixture((_offset, index) =>
+      index === 1 ? paneScrollResult(2, 2) : {},
+    );
+    try {
+      f.session.scroll("up", 3);
+      await f.fence();
+      await f.publish(2, 2);
+      f.session.scroll("down", 1);
+      await f.fence();
+      expect(f.requests).toEqual([3, 1]);
+    } finally {
+      f.session.close();
+    }
+  });
+
+  test.each([
+    {},
+    { ...paneScrollResult(0, 0), type: "other" },
+    {
+      type: "pane_info",
+      pane: { ...paneScrollResult(0, 0).pane, pane_id: "other" },
+    },
+    paneScrollResult(-1),
+    paneScrollResult(3, 2),
+    paneScrollResult(Number.MAX_SAFE_INTEGER + 1),
+  ])(
+    "unrecognized scroll result %# waits for viewport feedback",
+    async (result) => {
+      const f = await scrollFixture(() => result);
+      try {
+        f.session.scroll("up", 3);
+        await f.fence();
+        f.session.scroll("up", 2);
+        await f.fence();
+        expect(f.requests).toEqual([3]);
+        await f.publish(3);
+        await f.fence();
+        expect(f.requests).toEqual([3, 5]);
+      } finally {
+        f.session.close();
+      }
+    },
+  );
+
+  test.each(["input", "pane disappears", "metrics disappear", "close"])(
+    "%s cancels waiting and queued scroll intent",
+    async (reason) => {
+      const f = await scrollFixture();
+      try {
+        f.session.scroll("up", 3);
+        await f.fence();
+        f.session.scroll("up", 6);
+        if (reason === "input") f.session.input(Buffer.from("x"));
+        else if (reason === "pane disappears") f.send([]);
+        else if (reason === "metrics disappear")
+          f.send([{ ...DEFAULT_PANES[0], hasScroll: false }]);
+        else f.session.close();
+        if (reason !== "close") {
+          await f.fence();
+          await f.publish(0);
+          f.session.scroll("up", 2);
+          await f.fence();
+          expect(f.requests).toEqual([3, 2]);
+        } else {
+          const replacement = await scrollFixture();
+          try {
+            replacement.session.scroll("up", 2);
+            await replacement.fence();
+            expect(replacement.requests).toEqual([2]);
+          } finally {
+            replacement.session.close();
+          }
+          expect(f.requests).toEqual([3]);
+        }
+      } finally {
+        f.session.close();
+      }
+    },
+  );
+});
+
+test("full page keys use semantic pane input even when history scrolling is unavailable", async () => {
+  const inputs: Array<{ paneId: string; code: number; modifiers: number }> = [];
+  const requests: string[] = [];
+  const socketPath = await startSessionServer({
+    methods: ["pane.focus"],
+    onRequest: (method) => {
+      requests.push(method);
+    },
+    onPaneInput: (paneId, reader) => {
+      expect(reader.varint()).toBe(1); // one event
+      expect(reader.variant()).toBe(0); // Key
+      const code = reader.variant();
+      const modifiers = reader.u8();
+      inputs.push({ paneId, code, modifiers });
+    },
+  });
+  const { bridge, ws, replies, attach } = creationBridge(socketPath);
+  try {
+    await attach();
+    for (const direction of ["up", "down"]) {
+      await bridge.handleTerminalRpc(ws, direction, "terminal.scroll", {
+        terminal_id: "term1",
+        direction,
+        lines: 20,
+        source: "page-key",
+      });
+      expect(replies.find((r) => r.id === direction)?.result).toEqual({
+        ok: true,
+      });
+    }
+    await settleUntil(() => inputs.length === 2);
+    expect(inputs).toEqual([
+      { paneId: "w1:p1", code: 8, modifiers: 0 },
+      { paneId: "w1:p1", code: 9, modifiers: 0 },
+    ]);
+    expect(requests).toEqual(["pane.focus"]);
+  } finally {
+    bridge.dispose();
+  }
+});
+
+for (const invalidate of [false, true]) {
+  test(`page-key input waits for attachment readiness${invalidate ? " and rejects a stale request" : ""}`, async () => {
+    const lookup = deferred<string>();
+    let started = false;
+    let current = true;
+    const inputs: string[] = [];
+    const socketPath = await startSessionServer({
+      onPaneInput: (id) => inputs.push(id),
+    });
+    const { bridge, ws, replies, attach } = creationBridge(socketPath, {
+      lookup: async () => {
+        started = true;
+        return lookup.promise;
+      },
+    });
+    try {
+      const attaching = attach();
+      await settleUntil(() => started);
+      const page = bridge.handleTerminalRpc(
+        ws,
+        "page",
+        "terminal.scroll",
+        {
+          terminal_id: "term1",
+          direction: "down",
+          source: "page-key",
+          lines: 24,
+        },
+        () => current,
+      );
+      await Bun.sleep(10);
+      expect(inputs).toEqual([]);
+      expect(replies.find((r) => r.id === "page")).toBeUndefined();
+      if (invalidate) current = false;
+      lookup.resolve("w1:p1");
+      await Promise.all([attaching, page]);
+      if (invalidate) {
+        expect(replies.find((r) => r.id === "page")?.error).toBeDefined();
+        expect(inputs).toEqual([]);
+      } else {
+        expect(replies.find((r) => r.id === "page")?.result).toEqual({
+          ok: true,
+        });
+        await settleUntil(() => inputs.length === 1);
+        expect(inputs).toEqual(["w1:p1"]);
+      }
+    } finally {
+      bridge.dispose();
+    }
+  });
+}
+
+function linkFrame(rows: string[], width = 24): FrameData {
+  return {
+    width,
+    height: rows.length,
+    cursor: null,
+    hyperlinks: [],
+    cells: rows.flatMap((text) => {
+      const cells: CellData[] = [];
+      for (const symbol of new Intl.Segmenter(undefined, {
+        granularity: "grapheme",
+      }).segment(text)) {
+        cells.push(cell(symbol.segment));
+        for (let i = 1; i < Bun.stringWidth(symbol.segment); i++)
+          cells.push(cell(" "));
+      }
+      while (cells.length < width) cells.push(cell(" "));
+      return cells;
+    }),
+  };
+}
+
+const resolvedRegions = (
+  regions: { row: number; start_col: number; end_col: number }[],
+) => ({ type: "pane_link_resolved", regions });
+
+describe("read-only terminal links", () => {
+  test("OSC8 hit testing follows wide cells, combining glyphs and the actual split crop", async () => {
+    const frame = linkFrame(["", "    界e\u0301 label", ""], 24);
+    frame.hyperlinks = [
+      "https://example.org/hidden",
+      "file://localhost/tmp/docs",
+    ];
+    frame.cells[28]!.hyperlink = 0;
+    frame.cells[30]!.hyperlink = 1;
+    const cropped = cropFrame(frame, { x: 4, y: 1, width: 12, height: 1 });
+    expect(frameHyperlinkAt(cropped, 0, 0)).toBe(frame.hyperlinks[0]);
+    expect(frameHyperlinkAt(cropped, 0, 1)).toBe(frame.hyperlinks[0]);
+    expect(frameHyperlinkAt(cropped, 0, 2)).toBe(frame.hyperlinks[1]);
+    expect(frameHyperlinkAt(cropped, 0, 3)).toBeUndefined();
+    cropped.cells[2]!.hyperlink = 99;
+    expect(frameHyperlinkAt(cropped, 0, 2)).toBeNull();
+  });
+
+  test("owned OSC8 target needs no upstream link capability and rejects stale tokens", async () => {
+    const frame = linkFrame(["", "    label", ""], 24);
+    frame.cells[28]!.hyperlink = 0;
+    frame.hyperlinks = ["file://localhost/tmp/docs"];
+    const panes: TestPane[] = [
+      {
+        paneId: "w1:p1",
+        x: 0,
+        mouseReporting: false,
+        rect: { x: 0, y: 0, width: 24, height: 3 },
+        innerRect: { x: 4, y: 1, width: 12, height: 1 },
+      },
+    ];
+    const requests: string[] = [];
+    let send!: (panes: TestPane[], frame?: FrameData) => void;
+    const socketPath = await startSessionServer({
+      initialSurface: { frame, panes },
+      methods: ["pane.focus"],
+      onConnection: (value) => {
+        send = value;
+      },
+      onRequest: (method) => {
+        requests.push(method);
+      },
+    });
+    const session = new EndpointTerminalSession(
+      socketPath,
+      "terminal",
+      async () => "w1:p1",
+    );
+    let token = "";
+    session.on("terminal", (value) => {
+      token = value.linkFrame;
+    });
+    try {
+      await session.connect(12, 1, { cols: 24, rows: 3 });
+      expect(await session.resolveLink(token, 0, 0)).toEqual({
+        regions: [],
+        url: null,
+        uri: frame.hyperlinks[0],
+      });
+      const old = token;
+      const next = once(session, "terminal");
+      send(panes, { ...frame, hyperlinks: ["javascript:alert(1)"] });
+      await next;
+      await expect(session.resolveLink(old, 0, 0)).rejects.toThrow(
+        "frame changed",
+      );
+      expect(await session.resolveLink(token, 0, 0)).toEqual({
+        regions: [],
+        url: null,
+        uri: "javascript:alert(1)",
+      });
+      expect(requests).not.toContain("pane.link.resolve");
+      expect(requests).not.toContain("pane.link.activate");
+    } finally {
+      session.close();
+    }
+  });
+
+  test("recovers wrapped URLs from pane display cells, including wide and combining text", () => {
+    const frame = linkFrame([
+      "",
+      "See https://example.com/",
+      "界e\u0301/guide",
+      "",
+    ]);
+    const regions = [
+      { row: 1, start_col: 4, end_col: 23 },
+      { row: 2, start_col: 0, end_col: 8 },
+    ];
+    expect(resolvedFrameLink(resolvedRegions(regions), frame, 2, 1)).toEqual({
+      regions,
+      url: "https://example.com/界e\u0301/guide",
+    });
+  });
+
+  test("accepts only a single blank spacer before a wrapped wide glyph", () => {
+    const frame = linkFrame(["", " https://example.com/ab", "界/c", ""]);
+    const regions = [
+      { row: 1, start_col: 1, end_col: 22 },
+      { row: 2, start_col: 0, end_col: 3 },
+    ];
+    const resolve = () =>
+      resolvedFrameLink(resolvedRegions(regions), frame, 2, 0).url;
+    expect(resolve()).toBe("https://example.com/ab界/c");
+    frame.cells[47]!.symbol = "x";
+    expect(resolve()).toBeNull();
+    frame.cells[47]!.symbol = " ";
+    frame.cells[48]!.symbol = "a";
+    expect(resolve()).toBeNull();
+    frame.cells[48]!.symbol = "界";
+    regions[0]!.end_col--;
+    expect(resolve()).toBeNull();
+  });
+
+  test("rejects clipped head and tail instead of opening a visible URL fragment", () => {
+    const head = linkFrame(["https://example.com/part", ""]);
+    const headRegions = [{ row: 0, start_col: 0, end_col: 22 }];
+    expect(resolvedFrameLink(resolvedRegions(headRegions), head, 0, 2)).toEqual(
+      { regions: headRegions, url: null },
+    );
+    const tail = linkFrame(["", " https://example.com/tail"]);
+    const tailRegions = [{ row: 1, start_col: 1, end_col: 23 }];
+    expect(
+      resolvedFrameLink(resolvedRegions(tailRegions), tail, 1, 2).url,
+    ).toBeNull();
+    // Ghostty omits the spacer before a wide glyph that wrapped offscreen.
+    expect(
+      resolvedFrameLink(
+        resolvedRegions([{ row: 1, start_col: 1, end_col: 22 }]),
+        tail,
+        1,
+        2,
+      ).url,
+    ).toBeNull();
+  });
+
+  test("does not reinterpret OSC 8 labels or malformed/out-of-crop regions as URLs", () => {
+    const frame = linkFrame(["", "https://example.com", ""]);
+    const region = { row: 1, start_col: 0, end_col: 18 };
+    frame.cells[24]!.hyperlink = 0;
+    frame.hyperlinks = ["https://example.org/real-target"];
+    expect(
+      resolvedFrameLink(resolvedRegions([region]), frame, 1, 1).url,
+    ).toBeNull();
+    for (const invalid of [
+      [{ ...region, end_col: 24 }],
+      [{ ...region, row: 3 }],
+      [{ ...region, start_col: -1 }],
+      [region, region],
+      [{ ...region, row: 0 }],
+    ])
+      expect(resolvedFrameLink(resolvedRegions(invalid), frame, 1, 1)).toEqual({
+        regions: [],
+        url: null,
+      });
+  });
+
+  test.each(["frame", "scroll", "resize", "input", "close"])(
+    "drops delayed resolution after %s and never activates plugins",
+    async (change) => {
+      let send!: (panes: TestPane[]) => void;
+      let finish!: (result: unknown) => void;
+      let dispatched!: () => void;
+      const pending = new Promise<void>((resolve) => {
+        dispatched = resolve;
+      });
+      const requests: { method: string; params: any }[] = [];
+      const socketPath = await startSessionServer({
+        methods: [
+          "pane.focus",
+          "pane.scroll",
+          "pane.link.resolve",
+          "pane.link.activate",
+        ],
+        onConnection: (value) => {
+          send = value;
+        },
+        onRequest: (method, params) => {
+          requests.push({ method, params });
+          if (method === "pane.link.resolve") {
+            dispatched();
+            return new Promise((resolve) => {
+              finish = resolve;
+            });
+          }
+        },
+      });
+      const session = new EndpointTerminalSession(
+        socketPath,
+        "terminal",
+        async () => "w1:p1",
+      );
+      let token = "";
+      session.on("terminal", (frame) => {
+        token = frame.linkFrame;
+      });
+      try {
+        await session.connect(8, 3, { cols: 10, rows: 5 });
+        const result = session
+          .resolveLink(token, 1, 2)
+          .catch((error: unknown) => error);
+        await pending;
+        expect(requests.at(-1)).toEqual({
+          method: "pane.link.resolve",
+          params: {
+            pane_id: "w1:p1",
+            viewport_row: 1,
+            col: 2,
+            content_revision: 1,
+            offset_from_bottom: 0,
+          },
+        });
+        if (change === "frame") {
+          const next = once(session, "terminal");
+          send(DEFAULT_PANES.map((pane) => ({ ...pane, contentRevision: 2 })));
+          await next;
+        } else if (change === "scroll") session.scroll("up", 2);
+        else if (change === "resize") session.resize(9, 3);
+        else if (change === "input") session.input(Buffer.from("a"));
+        else session.close();
+        finish(resolvedRegions([{ row: 1, start_col: 0, end_col: 7 }]));
+        expect(await result).toBeInstanceOf(Error);
+        expect(requests.some((r) => r.method === "pane.link.activate")).toBe(
+          false,
+        );
+      } finally {
+        session.close();
+      }
+    },
+  );
+
+  test.each(["reversal", "clamped"])(
+    "%s scroll without a surface keeps new lookups usable but retires pending replies",
+    async (kind) => {
+      const held = deferred<unknown>();
+      const dispatched = deferred<void>();
+      let requests = 0;
+      let scrolls = 0;
+      const socketPath = await startSessionServer({
+        methods: ["pane.focus", "pane.scroll", "pane.link.resolve"],
+        onRequest: (method) => {
+          if (method === "pane.scroll") {
+            scrolls++;
+            return paneScrollResult(0, 0);
+          }
+          if (method === "pane.link.resolve") {
+            if (++requests === 1) {
+              dispatched.resolve();
+              return held.promise;
+            }
+            return resolvedRegions([]);
+          }
+        },
+      });
+      const session = new EndpointTerminalSession(
+        socketPath,
+        "terminal",
+        async () => "w1:p1",
+      );
+      let token = "";
+      let frames = 0;
+      session.on("terminal", (frame) => {
+        token = frame.linkFrame;
+        frames++;
+      });
+      try {
+        await session.connect(8, 3, { cols: 10, rows: 5 });
+        const displayed = token;
+        const frameCount = frames;
+        const stale = session.resolveLink(displayed, 1, 2).catch((e) => e);
+        await dispatched.promise;
+        session.scroll("up", 3);
+        if (kind === "reversal") session.scroll("down", 3);
+        await session.focus(() => false);
+        held.resolve(resolvedRegions([]));
+        expect(await stale).toBeInstanceOf(Error);
+        expect(await session.resolveLink(displayed, 1, 2)).toEqual({
+          regions: [],
+          url: null,
+        });
+        expect(token).toBe(displayed);
+        expect(frames).toBe(frameCount);
+        expect(scrolls).toBe(kind === "reversal" ? 0 : 1);
+      } finally {
+        held.resolve(resolvedRegions([]));
+        session.close();
+      }
+    },
+  );
+
+  test("resolve and focus full-surface emissions retain link identity, but content and intent do not", async () => {
+    const frame = linkFrame(["", " https://example.com/a", ""], 24);
+    const panes: TestPane[] = [
+      {
+        paneId: "w1:p1",
+        x: 0,
+        mouseReporting: false,
+        rect: { x: 0, y: 0, width: 24, height: 3 },
+        innerRect: { x: 0, y: 0, width: 24, height: 3 },
+      },
+    ];
+    let send!: (panes: TestPane[], frame?: FrameData) => void;
+    const methods: string[] = [];
+    const socketPath = await startSessionServer({
+      initialSurface: { frame, panes },
+      methods: ["pane.focus", "pane.scroll", "pane.link.resolve"],
+      onConnection: (value) => {
+        send = value;
+      },
+      onRequest: async (method) => {
+        methods.push(method);
+        // Real Herdr emits a new full surface as a side effect of each RPC.
+        if (method === "pane.link.resolve") {
+          const shown = once(session, "terminal");
+          send(panes, structuredClone(frame));
+          await shown;
+          return resolvedRegions([{ row: 1, start_col: 1, end_col: 21 }]);
+        }
+        send(panes, {
+          ...frame,
+          cursor: { x: 2, y: 1, visible: true, shape: 1 },
+        });
+      },
+    });
+    const session = new EndpointTerminalSession(
+      socketPath,
+      "terminal",
+      async () => "w1:p1",
+    );
+    let token = "";
+    session.on("terminal", (value) => {
+      token = value.linkFrame;
+    });
+    try {
+      await session.connect(24, 3);
+      const original = token;
+      expect((await session.resolveLink(original, 1, 2)).url).toBe(
+        "https://example.com/a",
+      );
+      expect(token).toBe(original);
+      // A bounded wheel is an intent no-op and produces no acknowledgement.
+      session.scroll("down", 3);
+      expect((await session.resolveLink(original, 1, 2)).url).toBe(
+        "https://example.com/a",
+      );
+      const focused = once(session, "terminal");
+      await session.focus(() => true);
+      await focused;
+      expect(token).toBe(original);
+      expect((await session.resolveLink(original, 1, 2)).url).toBe(
+        "https://example.com/a",
+      );
+      expect(
+        methods.filter((method) => method === "pane.link.resolve"),
+      ).toHaveLength(3);
+      for (const change of [
+        "cells",
+        "hyperlink",
+        "scroll",
+        "viewport",
+        "revision",
+        "input",
+      ]) {
+        const restored = once(session, "terminal");
+        send(panes, frame);
+        await restored;
+        const before = token;
+        const changed = structuredClone(frame);
+        const metadata = structuredClone(panes);
+        if (change === "cells") changed.cells[25]!.symbol = "X";
+        if (change === "hyperlink") {
+          changed.cells[25]!.hyperlink = 0;
+          changed.hyperlinks = ["https://example.org/other"];
+        }
+        if (change === "scroll") metadata[0]!.offset = 1;
+        if (change === "viewport") metadata[0]!.innerRect!.width = 23;
+        if (change === "revision") metadata[0]!.contentRevision = 2;
+        if (change === "input") session.input(Buffer.from("a"));
+        const shown = once(session, "terminal");
+        send(metadata, changed);
+        await shown;
+        expect(token).not.toBe(before);
+        await expect(session.resolveLink(before, 1, 2)).rejects.toThrow(
+          "frame changed",
+        );
+      }
+      expect(methods).not.toContain("pane.link.activate");
+    } finally {
+      session.close();
+    }
+  });
+
+  test("uses only the attached socket's methods and rejects cells outside its split crop", async () => {
+    const requests: string[] = [];
+    const socketPath = await startSessionServer({
+      methods: (connection) =>
+        connection === 1 ? ["pane.focus", "pane.link.resolve"] : ["pane.focus"],
+      onRequest: (method) => {
+        requests.push(method);
+        return resolvedRegions([]);
+      },
+      panes: [{ paneId: "w1:p2", x: 10, mouseReporting: false }],
+    });
+    const first = new EndpointTerminalSession(
+      socketPath,
+      "t2",
+      async () => "w1:p2",
+    );
+    const second = new EndpointTerminalSession(
+      socketPath,
+      "t2",
+      async () => "w1:p2",
+    );
+    let token = "";
+    first.on("terminal", (frame) => {
+      token = frame.linkFrame;
+    });
+    let secondToken = "";
+    second.on("terminal", (frame) => {
+      secondToken = frame.linkFrame;
+    });
+    try {
+      await first.connect(8, 3, { cols: 20, rows: 5 });
+      await first.resolveLink(token, 1, 2);
+      await expect(first.resolveLink(token, 0, 8)).rejects.toThrow();
+      await second.connect(8, 3, { cols: 20, rows: 5 });
+      await expect(second.resolveLink(token, 1, 2)).rejects.toThrow();
+      expect(await second.resolveLink(secondToken, 1, 2)).toEqual({
+        regions: [],
+        url: null,
+      });
+      expect(requests.filter((r) => r === "pane.link.resolve")).toHaveLength(1);
+    } finally {
+      first.close();
+      second.close();
+    }
+  });
+});
+
+test("terminal.link.resolve requires this viewer's attachment and frame token", async () => {
+  const requests: { method: string; params: any }[] = [];
+  const socketPath = await startSessionServer({
+    methods: ["pane.focus", "pane.link.resolve"],
+    onRequest: (method, params) => {
+      requests.push({ method, params });
+      return resolvedRegions([]);
+    },
+  });
+  const { bridge, ws, replies, attach } = creationBridge(socketPath);
+  try {
+    await attach();
+    const frame = replies.find((reply) => reply.terminal?.link_frame)?.terminal
+      .link_frame;
+    expect(frame).toBeString();
+    const params = { terminal_id: "term1", frame, row: 1, col: 2 };
+    await bridge.handleTerminalRpc(
+      ws,
+      "resolve",
+      "terminal.link.resolve",
+      params,
+    );
+    expect(replies.find((reply) => reply.id === "resolve")?.result).toEqual({
+      regions: [],
+      url: null,
+    });
+    await bridge.handleTerminalRpc(
+      {} as ServerWebSocket<unknown>,
+      "other-viewer",
+      "terminal.link.resolve",
+      params,
+    );
+    await bridge.handleTerminalRpc(ws, "bad-cell", "terminal.link.resolve", {
+      ...params,
+      row: 0.5,
+    });
+    await bridge.handleTerminalRpc(ws, "bad-frame", "terminal.link.resolve", {
+      ...params,
+      frame: "prior-socket:1",
+    });
+    await bridge.handleTerminalRpc(ws, "detach", "terminal.detach", {
+      terminal_id: "term1",
+    });
+    await bridge.handleTerminalRpc(
+      ws,
+      "detached",
+      "terminal.link.resolve",
+      params,
+    );
+    for (const id of ["other-viewer", "bad-cell", "bad-frame", "detached"])
+      expect(replies.find((reply) => reply.id === id)?.error).toBeDefined();
+    expect(requests.filter((r) => r.method === "pane.link.resolve")).toEqual([
+      {
+        method: "pane.link.resolve",
+        params: {
+          pane_id: "w1:p1",
+          viewport_row: 1,
+          col: 2,
+          content_revision: 1,
+          offset_from_bottom: 0,
+        },
+      },
+    ]);
+  } finally {
+    bridge.dispose();
+  }
+});
+
+test("optional link lookup timeout does not block scroll or disconnect the terminal", async () => {
+  const started = deferred<void>();
+  const scrolled = deferred<void>();
+  const socketPath = await startSessionServer({
+    methods: ["pane.focus", "pane.scroll", "pane.link.resolve"],
+    onRequest: (method) => {
+      if (method === "pane.link.resolve") {
+        started.resolve();
+        return new Promise(() => {});
+      }
+      if (method === "pane.scroll") scrolled.resolve();
+    },
+  });
+  const session = new EndpointTerminalSession(
+    socketPath,
+    "terminal",
+    async () => "w1:p1",
+  );
+  let frame = "";
+  session.on("terminal", (value) => {
+    frame = value.linkFrame;
+  });
+  try {
+    await session.connect(8, 3, { cols: 10, rows: 5 });
+    jest.useFakeTimers();
+    const lookup = session
+      .resolveLink(frame, 1, 2)
+      .catch((error: unknown) => error);
+    await started.promise;
+    session.scroll("up", 1);
+    await scrolled.promise;
+    jest.advanceTimersByTime(1500);
+    expect(await lookup).toBeInstanceOf(Error);
+    expect(session.isClosed).toBe(false);
+  } finally {
+    jest.useRealTimers();
+    session.close();
   }
 });

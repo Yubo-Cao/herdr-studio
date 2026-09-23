@@ -1,5 +1,9 @@
+import { defaultShortcutBindings } from "./shortcutBindings";
 import { describe, expect, test } from "bun:test";
-import { paneShortcutAction } from "./paneShortcuts";
+import { paneShortcutAction as resolveShortcut } from "./paneShortcuts";
+
+const paneShortcutAction = (event: Parameters<typeof resolveShortcut>[0]) =>
+  resolveShortcut(event, defaultShortcutBindings("mac"));
 
 function keyEvent(
   overrides: Partial<Parameters<typeof paneShortcutAction>[0]> = {},
@@ -46,6 +50,19 @@ describe("pane shortcuts", () => {
     expect(
       paneShortcutAction(keyEvent({ key: "D", metaKey: true, shiftKey: true })),
     ).toEqual({ type: "split", direction: "down" });
+  });
+
+  test("maps Cmd+Shift+Enter to pane zoom", () => {
+    expect(
+      paneShortcutAction(
+        keyEvent({ key: "Enter", metaKey: true, shiftKey: true }),
+      ),
+    ).toEqual({ type: "zoom" });
+    // Cmd+Enter sends the composer draft; plain Enter stays terminal input.
+    expect(
+      paneShortcutAction(keyEvent({ key: "Enter", metaKey: true })),
+    ).toBeNull();
+    expect(paneShortcutAction(keyEvent({ key: "Enter" }))).toBeNull();
   });
 
   test("rejects extra or missing modifiers", () => {

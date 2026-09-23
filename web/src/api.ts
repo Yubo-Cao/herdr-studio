@@ -179,6 +179,8 @@ export interface TerminalPush {
   full: boolean;
   /** Present only for endpoint full pane repaints; absent on legacy streams. */
   mouse_reporting?: boolean;
+  /** Opaque identity from this terminal socket's advertised read-only resolver. */
+  link_frame?: string;
   /** Absolute rows of a complete endpoint pane viewport. */
   history?: import("./terminalHistorySelection").TerminalHistoryViewport;
   /** base64-encoded ANSI bytes */
@@ -191,6 +193,40 @@ export interface TerminalClipboardPush {
   terminal_id: string;
   /** Standard base64 text emitted by Herdr's Clipboard server message. */
   data: string;
+}
+
+export interface PopupStatePush {
+  connection_id: string;
+  connection_generation?: number;
+  popup: {
+    terminal_id: string;
+    title: string;
+    width: { kind: "cells" | "percent"; value: number } | null;
+    height: { kind: "cells" | "percent"; value: number } | null;
+  } | null;
+}
+
+function isValidPopupSize(value: unknown): boolean {
+  if (value === null) return true;
+  if (!value || typeof value !== "object") return false;
+  const size = value as Record<string, unknown>;
+  return (
+    (size.kind === "cells" || size.kind === "percent") &&
+    typeof size.value === "number"
+  );
+}
+
+function isValidPopupPayload(value: unknown): boolean {
+  if (value === null) return true;
+  if (!value || typeof value !== "object") return false;
+  const popup = value as Record<string, unknown>;
+  return (
+    typeof popup.terminal_id === "string" &&
+    popup.terminal_id.length > 0 &&
+    typeof popup.title === "string" &&
+    isValidPopupSize(popup.width) &&
+    isValidPopupSize(popup.height)
+  );
 }
 
 export interface TerminalClosedPush {
@@ -236,6 +272,16 @@ const MAX_WS_BUFFERED_BYTES = 4 * 1024 * 1024;
 
 export function isBridgeGlobalMethod(method: string): boolean {
   return method.startsWith("bridge.") || method.startsWith("connections.");
+}
+
+export async function logoutBrowserSession(): Promise<void> {
+  const response = await fetch("/api/logout", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "x-roamgate-logout": "1" },
+  });
+  if (!response.ok) throw new Error("Could not log out. Please try again.");
+  location.replace("/login");
 }
 
 function wsUrl(): string {
@@ -322,6 +368,7 @@ export class Bridge {
   private terminalClosedHandlers = new Set<
     (closed: TerminalClosedPush) => void
   >();
+  private popupHandlers = new Set<(popup: PopupStatePush) => void>();
   private statusHandlers = new Set<(s: ConnectionStatus) => void>();
   private controlHandlers = new Set<(c: BridgeControlMsg) => void>();
   private helloHandlers = new Set<(hello: BridgeHello) => void>();
@@ -504,7 +551,17 @@ export class Bridge {
     ws.onerror = () => {
       // onclose will handle reconnect.
     };
-    ws.onclose = () => this.handleDisconnect(ws, "bridge disconnected");
+    ws.onclose = (event) => {
+      if (this.ws !== ws) return;
+      if (event?.code === 4001) {
+        this.disconnect("logged out");
+        // Clear the shared cookie in every tab before navigating. A close frame
+        // can arrive before the initiating tab receives its logout response.
+        void logoutBrowserSession().catch(() => location.replace("/login"));
+        return;
+      }
+      this.handleDisconnect(ws, "bridge disconnected");
+    };
   }
 
   disconnect(reason = "bridge connection paused") {
@@ -648,6 +705,7 @@ export class Bridge {
       return;
     }
     if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) return;
+    // pi-lens-ignore: no-unsafe-dictionary-any
     const msg = parsed as Record<string, any>;
     const owns = (field: string) =>
       Object.prototype.hasOwnProperty.call(msg, field);
@@ -657,6 +715,7 @@ export class Bridge {
     const hasTerminal = owns("terminal");
     const hasClipboard = owns("terminal_clipboard");
     const hasTerminalClosed = owns("terminal_closed");
+    const hasPopup = owns("popup");
     const hasControl = owns("control");
     const kindCount = [
       hasHello,
@@ -665,6 +724,7 @@ export class Bridge {
       hasTerminal,
       hasClipboard,
       hasTerminalClosed,
+      hasPopup,
       hasControl,
     ].filter(Boolean).length;
     if (kindCount !== 1) return;
@@ -849,6 +909,26 @@ export class Bridge {
       return;
     }
 
+    if (hasPopup) {
+      if (
+        !isValidPopupPayload(msg.popup) ||
+        !this.pushGenerationMatches(
+          msg.connection_id,
+          msg.connection_generation,
+        )
+      ) {
+        return;
+      }
+      const popup = scopedPayload(
+        msg.connection_id,
+        msg.connection_generation,
+        { popup: msg.popup },
+        this._hello?.capabilities?.connection_runtime_generation === true,
+      );
+      if (popup) this.popupHandlers.forEach((handler) => handler(popup));
+      return;
+    }
+
     if (
       msg.control &&
       typeof msg.control === "object" &&
@@ -1007,6 +1087,11 @@ export class Bridge {
   ): () => void {
     this.terminalClipboardHandlers.add(cb);
     return () => this.terminalClipboardHandlers.delete(cb);
+  }
+
+  onPopup(cb: (popup: PopupStatePush) => void): () => void {
+    this.popupHandlers.add(cb);
+    return () => this.popupHandlers.delete(cb);
   }
 
   onTerminalClosed(cb: (closed: TerminalClosedPush) => void): () => void {

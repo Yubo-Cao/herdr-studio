@@ -1,5 +1,6 @@
 import type { ConnectionClient } from "./api";
 import { connectionHttpPath } from "./connectionHttp";
+import { relativePathWithinCheckout } from "./workspaceResource";
 
 type FileUrlClient = Pick<
   ConnectionClient,
@@ -22,6 +23,8 @@ export function workspaceFileUrl(
   );
   url.searchParams.set("workspace_id", workspaceId);
   url.searchParams.set("path", path);
+  if (/^(?:\/|[a-z]:[\\/])/i.test(path))
+    url.searchParams.set("scope", "filesystem");
   if (options.inline) url.searchParams.set("inline", "1");
   if (options.revision !== undefined) {
     url.searchParams.set("resource_revision", String(options.revision));
@@ -29,12 +32,18 @@ export function workspaceFileUrl(
   return `${url.pathname}${url.search}`;
 }
 
+export function workspaceMarkdownDocumentPath(path: string, root: string) {
+  // In-workspace absolute previews follow workspace-root link semantics. Keep
+  // external preview bases absolute so their relative links still open siblings.
+  return relativePathWithinCheckout(root, path) ?? path;
+}
+
 /**
- * Resolve a Markdown image reference against its workspace-relative document.
+ * Resolve a Markdown resource reference against its workspace-relative document.
  * Undefined means the source is not workspace-local; null means it attempted to
  * address a local path but could not be resolved inside the workspace root.
  */
-export function resolveWorkspaceMarkdownImagePath(
+export function resolveWorkspaceMarkdownPath(
   source: string,
   markdownPath: string,
 ): string | null | undefined {
@@ -53,9 +62,11 @@ export function resolveWorkspaceMarkdownImagePath(
   }
   if (!resourcePath) return null;
 
+  const document = markdownPath.replace(/\\/g, "/");
+  const prefix = document.match(/^(?:[a-z]:)?\//i)?.[0] ?? "";
   const parts = resourcePath.startsWith("/")
     ? []
-    : markdownPath.replace(/\\/g, "/").split("/").slice(0, -1);
+    : document.slice(prefix.length).split("/").slice(0, -1);
   for (const part of resourcePath.split("/")) {
     if (!part || part === ".") continue;
     if (part.includes("\0")) return null;
@@ -66,7 +77,7 @@ export function resolveWorkspaceMarkdownImagePath(
     }
     parts.push(part);
   }
-  return parts.length > 0 ? parts.join("/") : null;
+  return parts.length > 0 ? `${prefix}${parts.join("/")}` : null;
 }
 
 export function resolveWorkspaceMarkdownImageUrl(
@@ -76,11 +87,33 @@ export function resolveWorkspaceMarkdownImageUrl(
   workspaceId: string,
   revision?: number,
 ) {
-  const path = resolveWorkspaceMarkdownImagePath(source, markdownPath);
+  const path = resolveWorkspaceMarkdownPath(source, markdownPath);
   if (path === undefined) return source;
   if (path === null) return null;
   return workspaceFileUrl(client, workspaceId, path, {
     inline: true,
     revision,
   });
+}
+
+// Kept for callers resolving image references.
+export const resolveWorkspaceMarkdownImagePath = resolveWorkspaceMarkdownPath;
+
+export function resolveWorkspaceMarkdownLink(
+  source: string,
+  markdownPath: string,
+): { path: string; fragment: string } | null | undefined {
+  const trimmed = source.trim();
+  const path = trimmed.startsWith("#")
+    ? markdownPath
+    : resolveWorkspaceMarkdownPath(trimmed, markdownPath);
+  if (path === null || path === undefined) return path;
+  const hashIndex = trimmed.indexOf("#");
+  let fragment = hashIndex < 0 ? "" : trimmed.slice(hashIndex + 1);
+  try {
+    fragment = decodeURIComponent(fragment);
+  } catch {
+    /* Keep malformed fragments literal. */
+  }
+  return { path, fragment };
 }

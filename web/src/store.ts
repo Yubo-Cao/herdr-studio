@@ -1,3 +1,18 @@
+import { roamgateLocalStorage, roamgateSessionStorage } from "./browserStorage";
+import { syncTaskPush, type TaskNotificationPreferences } from "./taskPush";
+import {
+  isTaskNotificationTarget,
+  prepareTaskNotifications,
+  showTaskNotification,
+  type TaskNotificationTarget,
+} from "./taskNotifications";
+export {
+  bindTaskNotificationActivation,
+  isTaskNotificationTarget,
+  TASK_NOTIFICATION_ACTIVATE_EVENT,
+  type TaskNotificationTarget,
+} from "./taskNotifications";
+import { withAgentActivity } from "./agentOrder";
 import {
   type EndpointAvailability,
   parseEndpointAdvertisement,
@@ -19,6 +34,7 @@ import {
   type ConnectionStatus,
   type ConnectionSummary,
   type HerdrEventMsg,
+  type PopupStatePush,
   parseConnectionSummary,
 } from "./api";
 import {
@@ -33,6 +49,13 @@ import {
   forgetTerminalRelayViewportsExcept,
   terminalRelayViewportForTab,
 } from "./terminalResize";
+import {
+  clearTabLayouts,
+  forgetTabLayoutsExcept,
+  provisionalTabLayout,
+  rememberTabLayout,
+  tabLayoutFor,
+} from "./tabLayout";
 import type { GitDiffEntry, Pane, PaneLayout, Tab, Workspace } from "./types";
 import {
   gitFileActionLabel,
@@ -55,6 +78,8 @@ export interface ServerSessionState {
   layout: PaneLayout | null;
   selectedPaneId: string | null;
   recentPaneIds: string[];
+  /** A plugin's session-modal floating pane (e.g. Herdr Float), if open. */
+  popup: PopupInfo | null;
   error: string | null;
   pendingFocusWorkspaceId: string | null;
   pendingFocusWorkspaceSeq: number;
@@ -62,6 +87,8 @@ export interface ServerSessionState {
   terminalAttachEpoch: number;
   lastRefresh: number;
 }
+
+export type PopupInfo = NonNullable<PopupStatePush["popup"]>;
 
 export interface State extends ServerSessionState {
   status: ConnectionStatus;
@@ -74,6 +101,9 @@ export interface State extends ServerSessionState {
   sessionsByConnectionId: Record<string, ServerSessionState>;
   notice: Notice | null;
   taskNotificationsEnabled: boolean;
+  taskNotificationPreferences: TaskNotificationPreferences;
+  taskNotificationTransport: "local" | "push";
+  taskNotificationBusy: boolean;
   taskNotificationPermission: NotificationPermission | "unsupported";
   automaticUpdateChecksEnabled: boolean;
   updateInfo: UpdateInfo | null;
@@ -141,6 +171,7 @@ type WorktreeRemovalCleanup = {
 };
 
 const TASK_NOTIFICATIONS_KEY = "taskNotificationsEnabled";
+const TASK_NOTIFICATION_PREFERENCES_KEY = "taskNotificationPreferences";
 const AUTOMATIC_UPDATE_CHECKS_KEY = "automaticUpdateChecksEnabled";
 const PENDING_UPDATE_RELOAD_KEY = "pendingUpdateReloadVersion";
 export const DEFAULT_NOTICE_AUTO_DISMISS_MS = 15 * 1000;
@@ -169,6 +200,7 @@ export function emptyServerSessionState(
     layout: null,
     selectedPaneId: null,
     recentPaneIds: [],
+    popup: null,
     error: null,
     pendingFocusWorkspaceId: null,
     pendingFocusWorkspaceSeq: 0,
@@ -178,9 +210,7 @@ export function emptyServerSessionState(
   };
 }
 
-export const TASK_NOTIFICATION_ACTIVATE_EVENT =
-  "herdr:task-notification-activate";
-export const WORKTREE_REMOVED_EVENT = "herdr:worktree-removed";
+export const WORKTREE_REMOVED_EVENT = "roamgate:worktree-removed";
 
 export interface WorktreeRemovedTarget {
   connectionId: string;
@@ -193,64 +223,6 @@ export function noticeAutoDismissDelay(notice: Notice): number | null {
   return notice.autoDismissMs ?? DEFAULT_NOTICE_AUTO_DISMISS_MS;
 }
 
-export interface TaskNotificationTarget {
-  connectionId: string;
-  runtimeGeneration: number;
-  workspaceId: string;
-  paneId: string;
-}
-
-type ClickableNotification = Pick<Notification, "close" | "onclick">;
-
-export function isTaskNotificationTarget(
-  value: unknown,
-): value is TaskNotificationTarget {
-  if (!value || typeof value !== "object") return false;
-  const target = value as Partial<TaskNotificationTarget>;
-  return (
-    typeof target.connectionId === "string" &&
-    target.connectionId.length > 0 &&
-    typeof target.runtimeGeneration === "number" &&
-    Number.isSafeInteger(target.runtimeGeneration) &&
-    target.runtimeGeneration >= 0 &&
-    typeof target.workspaceId === "string" &&
-    target.workspaceId.length > 0 &&
-    typeof target.paneId === "string" &&
-    target.paneId.length > 0
-  );
-}
-
-/** Connect a system notification click to the in-app pane navigation path. */
-export function bindTaskNotificationActivation(
-  notification: ClickableNotification,
-  target: TaskNotificationTarget,
-  activate: (target: TaskNotificationTarget) => void = (nextTarget) => {
-    window.dispatchEvent(
-      new CustomEvent<TaskNotificationTarget>(
-        TASK_NOTIFICATION_ACTIVATE_EVENT,
-        {
-          detail: nextTarget,
-        },
-      ),
-    );
-  },
-  focusWindow: () => void = () => window.focus(),
-) {
-  notification.onclick = () => {
-    try {
-      notification.close();
-    } catch {
-      // Notification cleanup must not block navigation.
-    }
-    try {
-      focusWindow();
-    } catch {
-      // Browsers may deny focus even for a notification click.
-    }
-    activate(target);
-  };
-}
-
 function notificationPermission(): NotificationPermission | "unsupported" {
   if (typeof window === "undefined" || !("Notification" in window)) {
     return "unsupported";
@@ -258,10 +230,25 @@ function notificationPermission(): NotificationPermission | "unsupported" {
   return Notification.permission;
 }
 
+function storedTaskNotificationPreferences(): TaskNotificationPreferences {
+  try {
+    const stored = JSON.parse(
+      roamgateLocalStorage.getItem(TASK_NOTIFICATION_PREFERENCES_KEY) ?? "{}",
+    );
+    return {
+      completed: stored.completed !== false,
+      blocked: stored.blocked !== false,
+    };
+  } catch {
+    return { completed: true, blocked: true };
+  }
+}
+
 function storedTaskNotificationsEnabled() {
   return (
+    notificationPermission() === "granted" &&
     typeof localStorage !== "undefined" &&
-    localStorage.getItem(TASK_NOTIFICATIONS_KEY) === "true"
+    roamgateLocalStorage.getItem(TASK_NOTIFICATIONS_KEY) === "true"
   );
 }
 
@@ -277,14 +264,14 @@ export function automaticUpdateChecksEnabledFromStorage(
 
 function storedAutomaticUpdateChecksEnabled(): boolean {
   return automaticUpdateChecksEnabledFromStorage(
-    typeof localStorage === "undefined" ? undefined : localStorage,
+    typeof localStorage === "undefined" ? undefined : roamgateLocalStorage,
   );
 }
 
 function storedPendingRestartVersion(): string | null {
   if (typeof sessionStorage === "undefined") return null;
   try {
-    return sessionStorage.getItem(PENDING_UPDATE_RELOAD_KEY);
+    return roamgateSessionStorage.getItem(PENDING_UPDATE_RELOAD_KEY);
   } catch {
     return null;
   }
@@ -294,9 +281,9 @@ function storePendingRestartVersion(version: string | null) {
   if (typeof sessionStorage === "undefined") return;
   try {
     if (version) {
-      sessionStorage.setItem(PENDING_UPDATE_RELOAD_KEY, version);
+      roamgateSessionStorage.setItem(PENDING_UPDATE_RELOAD_KEY, version);
     } else {
-      sessionStorage.removeItem(PENDING_UPDATE_RELOAD_KEY);
+      roamgateSessionStorage.removeItem(PENDING_UPDATE_RELOAD_KEY);
     }
   } catch {
     // Storage may be unavailable in private or restricted browser contexts.
@@ -320,7 +307,7 @@ const initial: State = {
   status: "disconnected",
   connectionPaused:
     typeof localStorage !== "undefined" &&
-    localStorage.getItem("connectionPaused") === "true",
+    roamgateLocalStorage.getItem("connectionPaused") === "true",
   bridgeStatus: null,
   connections: [],
   defaultConnectionId: LEGACY_DEFAULT_CONNECTION_ID,
@@ -332,6 +319,12 @@ const initial: State = {
   ...initialSession,
   notice: null,
   taskNotificationsEnabled: storedTaskNotificationsEnabled(),
+  taskNotificationPreferences: storedTaskNotificationPreferences(),
+  taskNotificationTransport:
+    roamgateLocalStorage.getItem("taskNotificationTransport") === "push"
+      ? "push"
+      : "local",
+  taskNotificationBusy: false,
   taskNotificationPermission: notificationPermission(),
   automaticUpdateChecksEnabled: storedAutomaticUpdateChecksEnabled(),
   updateInfo: null,
@@ -371,6 +364,7 @@ function serverSessionFromState(snapshot: State): ServerSessionState {
     layout: snapshot.layout,
     selectedPaneId: snapshot.selectedPaneId,
     recentPaneIds: snapshot.recentPaneIds,
+    popup: snapshot.popup,
     error: snapshot.error,
     pendingFocusWorkspaceId: snapshot.pendingFocusWorkspaceId,
     pendingFocusWorkspaceSeq: snapshot.pendingFocusWorkspaceSeq,
@@ -678,7 +672,7 @@ function reloadWhenUpdatedServerIsReady(
               pendingRestartVersion: null,
               notice: {
                 kind: "success",
-                message: `Herdr Studio ${expectedVersion} is running`,
+                message: `Roamgate ${expectedVersion} is running`,
                 detail:
                   "Reloading the application to use the updated frontend.",
                 loading: true,
@@ -700,7 +694,7 @@ function reloadWhenUpdatedServerIsReady(
       notice: {
         kind: "error",
         message: "Updated server did not become ready",
-        detail: `Could not verify Herdr Studio ${expectedVersion}. Reload the page after checking the server process.`,
+        detail: `Could not verify Roamgate ${expectedVersion}. Reload the page after checking the server process.`,
       },
     });
   })().finally(() => {
@@ -800,7 +794,9 @@ export class TaskCompletionTracker {
       if (
         tracker.ready &&
         previousStatus === "working" &&
-        (nextStatus === "done" || nextStatus === "idle")
+        (nextStatus === "done" ||
+          nextStatus === "idle" ||
+          nextStatus === "blocked")
       ) {
         completed.push(pane);
       }
@@ -833,23 +829,59 @@ function taskNotificationBody(
   return parts.join(" · ");
 }
 
+let taskNotificationPreferenceVersion = 0;
+
+function reportTaskNotificationFailure(error: unknown, version: number) {
+  if (version !== taskNotificationPreferenceVersion) return;
+  taskNotificationPreferenceVersion++;
+  set({
+    taskNotificationsEnabled: false,
+    taskNotificationBusy: false,
+    taskNotificationPermission: notificationPermission(),
+    notice: {
+      kind: "error",
+      message: "Task notifications are unavailable",
+      detail: error instanceof Error ? error.message : String(error),
+    },
+  });
+  try {
+    roamgateLocalStorage.setItem(TASK_NOTIFICATIONS_KEY, "false");
+  } catch {
+    // The runtime preference still reflects the failed notification transport.
+  }
+}
+
 function maybeShowBrowserTaskNotification(
   title: string,
   body: string,
   tag: string,
   target: TaskNotificationTarget,
 ) {
-  if (!state.taskNotificationsEnabled) return;
-  if (notificationPermission() !== "granted") return;
-  try {
-    const notification = new Notification(title, {
-      body,
-      tag,
-    });
-    bindTaskNotificationActivation(notification, target);
-  } catch {
-    // Browser notification support varies by browser and deployment context.
+  if (
+    !state.taskNotificationsEnabled ||
+    state.taskNotificationBusy ||
+    state.taskNotificationTransport === "push"
+  )
+    return;
+  const version = taskNotificationPreferenceVersion;
+  if (notificationPermission() !== "granted") {
+    reportTaskNotificationFailure(
+      new Error(
+        "Enable notifications for this site in the browser settings, then try again.",
+      ),
+      version,
+    );
+    return;
   }
+  void showTaskNotification(
+    title,
+    { body, tag },
+    target,
+    () =>
+      state.taskNotificationsEnabled &&
+      version === taskNotificationPreferenceVersion &&
+      taskNotificationTargetIsCurrent(state, target),
+  ).catch((error) => reportTaskNotificationFailure(error, version));
 }
 
 export function taskNotificationTarget(
@@ -878,7 +910,7 @@ export function taskNotificationTargetIsCurrent(
 
 export function taskNotificationTag(target: TaskNotificationTarget): string {
   return JSON.stringify([
-    "herdr-task",
+    "roamgate-task",
     target.connectionId,
     target.runtimeGeneration,
     target.paneId,
@@ -904,26 +936,27 @@ export function taskNotificationTargetFromNotice(
 }
 
 function notifyTaskCompleted(pane: Pane, workspaces: Workspace[], tabs: Tab[]) {
-  if (!state.taskNotificationsEnabled) return;
+  const blocked = pane.agent_status === "blocked";
+  if (
+    !state.taskNotificationsEnabled ||
+    !state.taskNotificationPreferences[blocked ? "blocked" : "completed"]
+  )
+    return;
   const runtimeGeneration = state.serverRuntimeGeneration;
   if (runtimeGeneration === null) return;
   const body = taskNotificationBody(pane, workspaces, tabs);
-  const title = "Herdr task completed";
+  const title = blocked
+    ? "Roamgate agent needs input"
+    : "Roamgate task completed";
   const target = taskNotificationTarget(
     state.activeConnectionId,
     runtimeGeneration,
     pane,
   );
-  maybeShowBrowserTaskNotification(
-    title,
-    body,
-    taskNotificationTag(target),
-    target,
-  );
   set({
     notice: {
-      kind: "success",
-      message: "Task completed",
+      kind: blocked ? "info" : "success",
+      message: blocked ? "Agent needs input" : "Task completed",
       detail: body,
       actionLabel: pane.agent ? "Open agent" : "Open workspace",
       actionConnectionId: state.activeConnectionId,
@@ -933,6 +966,12 @@ function notifyTaskCompleted(pane: Pane, workspaces: Workspace[], tabs: Tab[]) {
       autoDismissMs: TASK_COMPLETED_TOAST_DISMISS_MS,
     },
   });
+  maybeShowBrowserTaskNotification(
+    title,
+    body,
+    taskNotificationTag(target),
+    target,
+  );
 }
 
 function activePaneIdForTaskNotifications(snapshot: State) {
@@ -1117,20 +1156,24 @@ async function refreshNow(lease = captureConnectionLease()) {
     settledAt: state.pendingFocusWorkspaceSettledAt,
   };
   try {
-    const [wsRes, tabRes, paneRes] = await Promise.all([
+    const [wsRes, tabRes, paneRes, agentRes] = await Promise.all([
       lease.client.call("workspace.list"),
       lease.client.call("tab.list"),
       lease.client.call("pane.list"),
+      // Older servers may omit agent metadata; ordinary navigation still works.
+      lease.client.call("agent.list").catch(() => null),
     ]);
     if (!leaseIsCurrent(lease)) return;
     const workspaces: Workspace[] = wsRes?.workspaces ?? [];
     const tabs: Tab[] = tabRes?.tabs ?? [];
-    const panes: Pane[] = paneRes?.panes ?? [];
+    const panes = withAgentActivity(paneRes?.panes ?? [], agentRes);
+    const liveTabIds = new Set(tabs.map((tab) => tab.tab_id));
     forgetTerminalRelayViewportsExcept(
       lease.connectionId,
       lease.generation,
-      new Set(tabs.map((tab) => tab.tab_id)),
+      liveTabIds,
     );
+    forgetTabLayoutsExcept(lease.connectionId, lease.generation, liveTabIds);
     const completedPanes = trackTaskCompletions(lease.connectionId, panes);
 
     const navigationMode =
@@ -1219,6 +1262,7 @@ async function refreshNow(lease = captureConnectionLease()) {
               )));
         const layout = staleLayout ? null : observedLayout;
         if (staleLayout) queuedConnectionKeys.add(refreshKey);
+        rememberTabLayout(lease.connectionId, lease.generation, layout);
         next.layout =
           navigationMode === "browser-local"
             ? projectBrowserLayout(layout, next.selectedPaneId ?? null)
@@ -1350,7 +1394,7 @@ async function checkForUpdate(showErrors = false) {
   try {
     const r = await fetch("/api/update/check", {
       credentials: "same-origin",
-      headers: { "x-herdr-gui-update": "1" },
+      headers: { "x-roamgate-update": "1" },
     });
     if (!r.ok) {
       if (showErrors) {
@@ -1379,7 +1423,7 @@ async function checkForUpdate(showErrors = false) {
         notice: showErrors
           ? {
               kind: "success",
-              message: "Herdr Studio is up to date",
+              message: "Roamgate is up to date",
               detail: info.latest_version
                 ? `Current version: ${info.current_version}`
                 : undefined,
@@ -1447,7 +1491,7 @@ function selectConnectionNow(connectionId: string, refresh = true): boolean {
     state.activeConnectionId === LEGACY_DEFAULT_CONNECTION_ID &&
     typeof localStorage !== "undefined"
   ) {
-    migrateLegacyConnectionStorage(localStorage, connectionId);
+    migrateLegacyConnectionStorage(roamgateLocalStorage, connectionId);
   }
   stopPolling();
   disposeTerminalConnection(
@@ -1458,6 +1502,7 @@ function selectConnectionNow(connectionId: string, refresh = true): boolean {
     true,
   );
   clearTerminalRelayViewports();
+  clearTabLayouts();
   focusActionChain = Promise.resolve();
   const generation = bridge.setActiveConnection(connectionId);
   state = activateConnectionState(state, connectionId, generation);
@@ -1470,6 +1515,10 @@ function selectConnectionNow(connectionId: string, refresh = true): boolean {
   ) {
     startPolling();
     void refreshNow(captureConnectionLease());
+    // Popup state is tracked per connection on the bridge, so a switch needs
+    // its own query: otherwise only the connection that was active when the
+    // socket came up ever reports one.
+    void store.watchPopup();
   }
   return true;
 }
@@ -1488,6 +1537,7 @@ function resetActiveConnectionLease(
     false,
   );
   clearTerminalRelayViewports();
+  clearTabLayouts();
   focusActionChain = Promise.resolve();
   taskCompletionTracker.reset(state.activeConnectionId);
   const generation = bridge.advanceActiveConnectionGeneration();
@@ -1873,6 +1923,19 @@ export function worktreeRemovalCompletionNotice(
   };
 }
 
+function handlePopupPush(push: PopupStatePush) {
+  if (
+    !state.connectionPaused &&
+    connectionEventIsActive(
+      state,
+      push.connection_id,
+      push.connection_generation,
+    )
+  ) {
+    set({ popup: push.popup });
+  }
+}
+
 function handleHerdrEvent(event: HerdrEventMsg) {
   if (
     !state.connectionPaused &&
@@ -1969,12 +2032,23 @@ function navigateBrowser(workspaceId: string, tabId?: string, paneId?: string) {
     state.panes,
   );
   const activeTabId = projected.browserNavigation.tabIds[workspaceId];
+  // Render the target tab from its last known geometry instead of blanking the
+  // terminal area until pane.layout answers. The refresh below corrects it.
+  const nextLayout =
+    state.layout?.tab_id === activeTabId
+      ? state.layout
+      : provisionalTabLayout(
+          tabLayoutFor(
+            state.activeConnectionId,
+            state.connectionGeneration,
+            activeTabId,
+          ),
+          state.panes,
+          activeTabId,
+        );
   set({
     ...projected,
-    layout:
-      state.layout?.tab_id === activeTabId
-        ? projectBrowserLayout(state.layout, projected.selectedPaneId)
-        : null,
+    layout: projectBrowserLayout(nextLayout, projected.selectedPaneId),
     pendingFocusWorkspaceId: null,
     pendingFocusWorkspaceSettledAt: null,
     error: null,
@@ -2045,6 +2119,21 @@ export const store = {
   init() {
     if (initialized) return;
     initialized = true;
+    void store.restoreTaskNotifications();
+    window.addEventListener("storage", (event) => {
+      const key = event.key?.replace(/^roamgate:/, "");
+      if (
+        key === TASK_NOTIFICATIONS_KEY ||
+        key === TASK_NOTIFICATION_PREFERENCES_KEY ||
+        event.key === null
+      ) {
+        set({
+          taskNotificationsEnabled: storedTaskNotificationsEnabled(),
+          taskNotificationPreferences: storedTaskNotificationPreferences(),
+        });
+        void store.restoreTaskNotifications();
+      }
+    });
     bridge.onHello((hello) => {
       const defaultConnectionId = hello.default_connection_id;
       set({ defaultConnectionId });
@@ -2065,6 +2154,7 @@ export const store = {
         terminalReattachPending = true;
         bridge.setConnectionRuntimeGenerations([]);
         clearTerminalRelayViewports();
+        clearTabLayouts();
         focusActionChain = Promise.resolve();
         queuedConnectionKeys.clear();
       }
@@ -2112,6 +2202,9 @@ export const store = {
           rearmTerminalAttachmentsAfterCatalog(true);
           void refreshNow();
           void refreshBridgeStatus();
+          // Popup state is pushed only on change, so ask once per
+          // settled connection.
+          void store.watchPopup();
         });
         if (state.pendingRestartVersion) {
           void reloadWhenUpdatedServerIsReady(state.pendingRestartVersion);
@@ -2119,11 +2212,12 @@ export const store = {
       }
     });
     bridge.onEvent(handleHerdrEvent);
+    bridge.onPopup(handlePopupPush);
     bridge.onControl((control) => {
       if (control.type === "pause_connection") {
         store.pauseConnection(
           control.reason ??
-            "Another Herdr Studio client paused this connection. Resume when you want this browser to sync again.",
+            "Another Roamgate client paused this connection. Resume when you want this browser to sync again.",
         );
       }
     });
@@ -2182,7 +2276,7 @@ export const store = {
     detail = "This browser will stop syncing until you resume it.",
   ) {
     connectionRecoveryIntent = null;
-    localStorage.setItem("connectionPaused", "true");
+    roamgateLocalStorage.setItem("connectionPaused", "true");
     stopPolling();
     disposeTerminalConnection(
       {
@@ -2227,7 +2321,7 @@ export const store = {
 
   resumeConnection() {
     connectionRecoveryIntent = state.connectionPaused ? "resume" : "reconnect";
-    localStorage.setItem("connectionPaused", "false");
+    roamgateLocalStorage.setItem("connectionPaused", "false");
     set({
       connectionPaused: false,
       error: null,
@@ -2613,6 +2707,54 @@ export const store = {
     );
   },
 
+  runGitFileActionBatch(
+    workspaceId: string,
+    gitAction: GitFileAction,
+    entries: Pick<GitDiffEntry, "path" | "old_path" | "mtime_ms" | "size">[],
+  ) {
+    const label = gitFileActionLabel(gitAction);
+    let completed = 0;
+    return action(
+      async (lease) => {
+        try {
+          for (const entry of entries) {
+            await lease.client.call("git.file_action", {
+              workspace_id: workspaceId,
+              action: gitAction,
+              path: entry.path,
+              old_path: entry.old_path,
+              mtime_ms: entry.mtime_ms,
+              size: entry.size,
+            });
+            completed += 1;
+          }
+        } catch (error) {
+          if (completed && leaseIsCurrent(lease)) void refreshNow(lease);
+          throw error;
+        }
+        setForConnection(lease, {
+          notice: {
+            kind: "success",
+            message: `${gitFileActionSuccessMessage(gitAction)} (${
+              completed === 1 ? "1 file" : `${completed} files`
+            })`,
+            autoDismissMs: 5000,
+          },
+        });
+        return completed;
+      },
+      {
+        refresh: "immediate",
+        failureNotice: (error) => ({
+          kind: "error",
+          message: `${label} failed`,
+          detail: `${completed} of ${entries.length} files completed. ${error.message}`,
+          detailMode: "text",
+        }),
+      },
+    );
+  },
+
   runGitRepoAction(
     workspaceId: string,
     gitAction: GitRepoAction,
@@ -2654,9 +2796,9 @@ export const store = {
           notice: {
             kind: "info",
             message: "Creating worktree",
-            detail: `Updating origin/main before creating ${branch}.`,
+            detail: `Updating origin's default branch before creating ${branch}.`,
             detailMode: "output",
-            detailTitle: "git fetch origin main",
+            detailTitle: "Fetch origin's default branch",
             loading: true,
           },
         });
@@ -2677,13 +2819,16 @@ export const store = {
           setForConnection(lease, { notice: setupNotice });
         } else {
           const commit = String(result?.base_sync?.commit ?? "").slice(0, 12);
+          const base = String(
+            result?.base_sync?.base ?? "origin's default branch",
+          );
           setForConnection(lease, {
             notice: {
               kind: "success",
               message: "Worktree created",
               detail: commit
-                ? `${branch} starts from origin/main at ${commit}.`
-                : `${branch} starts from the latest origin/main.`,
+                ? `${branch} starts from ${base} at ${commit}.`
+                : `${branch} starts from the latest ${base}.`,
               autoDismissMs: 5000,
             },
           });
@@ -2929,15 +3074,103 @@ export const store = {
     set({ notice });
   },
 
+  async restoreTaskNotifications() {
+    const version = ++taskNotificationPreferenceVersion;
+    set({ taskNotificationBusy: true });
+    try {
+      if (state.taskNotificationsEnabled) await prepareTaskNotifications();
+      if (version !== taskNotificationPreferenceVersion) return;
+      const transport = await syncTaskPush(
+        state.taskNotificationsEnabled,
+        state.taskNotificationPreferences,
+      );
+      if (version === taskNotificationPreferenceVersion) {
+        roamgateLocalStorage.setItem("taskNotificationTransport", transport);
+        set({ taskNotificationTransport: transport });
+      }
+    } catch (error) {
+      if (version === taskNotificationPreferenceVersion)
+        set({
+          notice: {
+            kind: "error",
+            message: "Background notification sync failed",
+            detail: (error as Error).message,
+          },
+        });
+    } finally {
+      if (version === taskNotificationPreferenceVersion)
+        set({ taskNotificationBusy: false });
+    }
+  },
+
+  async setTaskNotificationPreference(
+    kind: keyof TaskNotificationPreferences,
+    enabled: boolean,
+  ) {
+    const version = ++taskNotificationPreferenceVersion;
+    const preferences = {
+      ...state.taskNotificationPreferences,
+      [kind]: enabled,
+    };
+    set({ taskNotificationBusy: true });
+    try {
+      const transport = await syncTaskPush(
+        state.taskNotificationsEnabled,
+        preferences,
+      );
+      if (version !== taskNotificationPreferenceVersion) return;
+      roamgateLocalStorage.setItem("taskNotificationTransport", transport);
+      roamgateLocalStorage.setItem(
+        TASK_NOTIFICATION_PREFERENCES_KEY,
+        JSON.stringify(preferences),
+      );
+      set({
+        taskNotificationPreferences: preferences,
+        taskNotificationTransport: transport,
+      });
+    } catch (error) {
+      if (version === taskNotificationPreferenceVersion)
+        set({
+          notice: {
+            kind: "error",
+            message: "Notification preference was not saved",
+            detail: (error as Error).message,
+          },
+        });
+    } finally {
+      if (version === taskNotificationPreferenceVersion)
+        set({ taskNotificationBusy: false });
+    }
+  },
+
   async setTaskNotificationsEnabled(enabled: boolean) {
+    const version = ++taskNotificationPreferenceVersion;
+    set({ taskNotificationBusy: true });
     if (!enabled) {
-      localStorage.setItem(TASK_NOTIFICATIONS_KEY, "false");
+      try {
+        await syncTaskPush(false, state.taskNotificationPreferences);
+      } catch (error) {
+        if (version === taskNotificationPreferenceVersion)
+          set({
+            taskNotificationBusy: false,
+            notice: {
+              kind: "error",
+              message: "Notification revocation failed",
+              detail: (error as Error).message,
+            },
+          });
+        return;
+      }
+      if (version !== taskNotificationPreferenceVersion) return;
+      roamgateLocalStorage.setItem(TASK_NOTIFICATIONS_KEY, "false");
       set({
         taskNotificationsEnabled: false,
+        taskNotificationBusy: false,
+        taskNotificationTransport: "local",
         taskNotificationPermission: notificationPermission(),
         notice: {
           kind: "info",
-          message: "Task notifications disabled",
+          message: "Task notifications disabled on this device",
           autoDismissMs: 5000,
         },
       });
@@ -2945,15 +3178,16 @@ export const store = {
     }
 
     if (notificationPermission() === "unsupported") {
-      localStorage.setItem(TASK_NOTIFICATIONS_KEY, "false");
+      roamgateLocalStorage.setItem(TASK_NOTIFICATIONS_KEY, "false");
       set({
         taskNotificationsEnabled: false,
         taskNotificationPermission: "unsupported",
+        taskNotificationBusy: false,
         notice: {
           kind: "error",
           message: "Browser notifications are not supported",
           detail:
-            "This browser or deployment context does not expose the Notification API.",
+            "Use a browser with notification support over HTTPS. On iPhone or iPad, open Roamgate from the Home Screen (iOS/iPadOS 16.4 or later).",
         },
       });
       return;
@@ -2964,10 +3198,13 @@ export const store = {
       if (permission === "default") {
         permission = await Notification.requestPermission();
       }
+      if (version !== taskNotificationPreferenceVersion) return;
     } catch (e) {
-      localStorage.setItem(TASK_NOTIFICATIONS_KEY, "false");
+      if (version !== taskNotificationPreferenceVersion) return;
+      roamgateLocalStorage.setItem(TASK_NOTIFICATIONS_KEY, "false");
       set({
         taskNotificationsEnabled: false,
+        taskNotificationBusy: false,
         taskNotificationPermission: notificationPermission(),
         notice: {
           kind: "error",
@@ -2979,16 +3216,44 @@ export const store = {
     }
 
     const granted = permission === "granted";
-    localStorage.setItem(TASK_NOTIFICATIONS_KEY, granted ? "true" : "false");
+    let transport: "local" | "push" = "local";
+    if (granted) {
+      set({ taskNotificationBusy: true });
+      try {
+        await prepareTaskNotifications();
+        if (version !== taskNotificationPreferenceVersion) return;
+        transport = await syncTaskPush(
+          true,
+          state.taskNotificationPreferences,
+          true,
+        );
+      } catch (error) {
+        reportTaskNotificationFailure(error, version);
+        return;
+      } finally {
+        if (version === taskNotificationPreferenceVersion)
+          set({ taskNotificationBusy: false });
+      }
+    }
+    if (version !== taskNotificationPreferenceVersion) return;
+    roamgateLocalStorage.setItem("taskNotificationTransport", transport);
+    roamgateLocalStorage.setItem(
+      TASK_NOTIFICATIONS_KEY,
+      granted ? "true" : "false",
+    );
     set({
       taskNotificationsEnabled: granted,
+      taskNotificationTransport: transport,
+      taskNotificationBusy: false,
       taskNotificationPermission: permission,
       notice: granted
         ? {
             kind: "success",
             message: "Task notifications enabled",
             detail:
-              "Herdr Studio will notify you when an agent task completes.",
+              transport === "push"
+                ? "This device receives completion and input-required notifications even when Roamgate is closed, subject to your platform settings."
+                : "Local notifications work while this page is running. Background delivery requires Web Push support and server configuration.",
             autoDismissMs: 5000,
           }
         : {
@@ -3006,7 +3271,10 @@ export const store = {
 
   setAutomaticUpdateChecksEnabled(enabled: boolean) {
     try {
-      localStorage.setItem(AUTOMATIC_UPDATE_CHECKS_KEY, String(enabled));
+      roamgateLocalStorage.setItem(
+        AUTOMATIC_UPDATE_CHECKS_KEY,
+        String(enabled),
+      );
     } catch {
       // The in-memory preference still applies when storage is unavailable.
     }
@@ -3056,7 +3324,7 @@ export const store = {
       const r = await fetch("/api/update/install", {
         method: "POST",
         credentials: "same-origin",
-        headers: { "x-herdr-gui-update": "1" },
+        headers: { "x-roamgate-update": "1" },
       });
       const body = await r.json().catch(() => null);
       if (!r.ok) {
@@ -3073,7 +3341,7 @@ export const store = {
             dismissedUpdateVersion: latestVersion,
             notice: {
               kind: "info",
-              message: "Restarting the herdr-gui process",
+              message: "Restarting the Roamgate process",
               detail:
                 "The binary was updated. Waiting for the external process supervisor to start the new version.",
               loading: true,
@@ -3088,8 +3356,8 @@ export const store = {
           dismissedUpdateVersion: latestVersion,
           notice: {
             kind: "success",
-            message: `Herdr Studio ${installedVersion} installed`,
-            detail: "Restart the herdr-gui process to use the new version.",
+            message: `Roamgate ${installedVersion} installed`,
+            detail: "Restart the Roamgate process to use the new version.",
           },
         });
         return;
@@ -3100,7 +3368,7 @@ export const store = {
         dismissedUpdateVersion: latestVersion,
         notice: {
           kind: "success",
-          message: "Herdr Studio is already up to date",
+          message: "Roamgate is already up to date",
         },
       });
     } catch (e) {
@@ -3191,6 +3459,7 @@ export const store = {
         amount,
       });
       const layout = result?.resize?.layout;
+      rememberTabLayout(lease.connectionId, lease.generation, layout ?? null);
       if (layout && state.layout?.tab_id === layout.tab_id)
         setForConnection(lease, {
           layout:
@@ -3228,6 +3497,71 @@ export const store = {
       }
       await refreshNow(lease);
       return result;
+    });
+  },
+
+  /**
+   * Ask the bridge which popup Herdr currently has open. Pushes only fire on
+   * change, so a browser that just connected, or just switched connection, has
+   * to ask once.
+   */
+  watchPopup() {
+    return action(async (lease) => {
+      const result = (await lease.client.call("terminal.watch_popup", {})) as
+        | { popup: PopupInfo | null }
+        | undefined;
+      setForConnection(lease, { popup: result?.popup ?? null });
+    });
+  },
+
+  /** Close the open popup, if any (Herdr's generic popup.close method). */
+  closePopup() {
+    return action((lease) => lease.client.call("popup.close", {}));
+  },
+
+  /**
+   * Hide the popup if one is open, otherwise invoke the plugin action that
+   * opens it.
+   *
+   * Asks Herdr rather than trusting this client's popup state, which can lag
+   * behind: opening on a stale "none" is refused with "a popup pane is already
+   * open", and that refusal only ever reaches the plugin's command log, so the
+   * key would look dead. "popup_not_open" is the definitive answer that
+   * nothing was open and the action should run.
+   */
+  togglePluginPopup(
+    pluginId: string,
+    actionId: string,
+    context: Record<string, unknown> = {},
+  ) {
+    return action(async (lease) => {
+      try {
+        await lease.client.call("popup.close", {});
+        return;
+      } catch (error) {
+        const message = error instanceof Error ? error.message : String(error);
+        if (!message.includes("popup_not_open")) throw error;
+      }
+      if (!leaseIsCurrent(lease)) return;
+      // Herdr opens a popup in whichever Space it has focused, and a plugin
+      // handed a different one declines: herdr-float reports "Space changed"
+      // and exits successfully, so the key looks dead. Match Herdr's focus to
+      // the Space the action is invoked for.
+      const workspaceId = context.workspace_id;
+      if (typeof workspaceId === "string" && workspaceId) {
+        const focused = store.get().workspaces.find((w) => w.focused);
+        if (focused?.workspace_id !== workspaceId) {
+          await lease.client.call("workspace.focus", {
+            workspace_id: workspaceId,
+          });
+          if (!leaseIsCurrent(lease)) return;
+        }
+      }
+      await lease.client.call("plugin.action.invoke", {
+        plugin_id: pluginId,
+        action_id: actionId,
+        context,
+      });
     });
   },
 

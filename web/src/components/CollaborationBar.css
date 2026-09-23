@@ -1,0 +1,50 @@
+/* Topbar collaborator roster and profile editor. */
+.collaboration-bar {
+  position: relative;
+  flex: 0 0 auto;
+}
+.collaboration-roster,
+.collaboration-avatars {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+.collaboration-avatar {
+  display: inline-flex;
+  width: var(--ui-control-height);
+  height: var(--ui-control-height);
+  padding: 0;
+  border: 0;
+  border-radius: 50%;
+  background: transparent;
+  color: var(--text);
+}
+.collaboration-avatar.is-self {
+  outline: 1px solid var(--accent);
+  outline-offset: 1px;
+}
+.collaboration-peer {
+  display: inline-flex;
+}
+.collaboration-count,
+.collaboration-live,
+.collaboration-overflow {
+  min-width: 22px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.collaboration-live {
+  color: var(--success-text);
+}
+.collaboration-editor {
+  display: flex;
+  gap: 4px;
+}
+@media (max-width: 768px) {
+  .collaboration-live,
+  .collaboration-roster > svg,
+  .collaboration-peer,
+  .collaboration-overflow {
+    display: none;
+  }
+}

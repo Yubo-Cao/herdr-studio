@@ -2,9 +2,14 @@ import { describe, expect, test } from "bun:test";
 import {
   clampUiScale,
   normalizeAccentColor,
+  normalizeTerminalFontFamily,
   normalizeThemePreference,
   normalizeUiScale,
+  normalizeZenMode,
   resolveSystemTheme,
+  resolveTerminalFontFamily,
+  serializeZenMode,
+  TERMINAL_FONT_FAMILY,
   UI_SCALE_DEFAULT,
   UI_SCALE_MAX,
   UI_SCALE_MIN,
@@ -79,5 +84,35 @@ describe("normalizeUiScale", () => {
   test("parses and clamps stored values", () => {
     expect(normalizeUiScale("110")).toBe(110);
     expect(normalizeUiScale("999")).toBe(UI_SCALE_MAX);
+  });
+});
+
+describe("zen mode", () => {
+  test("stays off until it is stored", () => {
+    expect(normalizeZenMode(null)).toBe(false);
+    expect(normalizeZenMode("")).toBe(false);
+    expect(normalizeZenMode("true")).toBe(false);
+  });
+
+  test("round-trips through storage", () => {
+    expect(normalizeZenMode(serializeZenMode(true))).toBe(true);
+    expect(normalizeZenMode(serializeZenMode(false))).toBe(false);
+  });
+});
+
+describe("terminal font", () => {
+  test("keeps presets and maps legacy primary families to them", () => {
+    expect(normalizeTerminalFontFamily("fira-code")).toBe("fira-code");
+    expect(normalizeTerminalFontFamily('"JetBrains Mono"')).toBe(
+      "jetbrains-mono",
+    );
+    expect(normalizeTerminalFontFamily('"Custom Corporate Mono"')).toBe("");
+  });
+
+  test("prepends the chosen preset to the shared fallback stack", () => {
+    expect(resolveTerminalFontFamily(null)).toBe(TERMINAL_FONT_FAMILY);
+    expect(resolveTerminalFontFamily("fira-code")).toBe(
+      `"Fira Code", ${TERMINAL_FONT_FAMILY}`,
+    );
   });
 });
