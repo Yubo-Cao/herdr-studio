@@ -93,6 +93,10 @@ import { runProcessWithCodeTimeout, shQuote } from "./utils/process-utils";
 import { rpcLogLevel } from "./utils/rpc-logging";
 import { syncWorktreeBase } from "./worktree/create";
 import {
+  createVoiceHandlers,
+  voiceProviderFromEnv,
+} from "./voice/transcription";
+import {
   removeWorktreeWithRecovery,
   WORKTREE_REMOVE_TIMEOUT_MS,
 } from "./worktree/remove";
@@ -114,6 +118,7 @@ if (herdrCommandResult !== null) {
 const config = loadServerConfig(APP_VERSION);
 configureServerLogger(config.logLevel);
 const logger = serverLogger;
+const voice = createVoiceHandlers({ provider: () => voiceProviderFromEnv() });
 const webPush = createWebPushService({
   warn: (message) => logger.warn(message),
 });
@@ -1362,6 +1367,18 @@ function main() {
           }
           if (url.pathname === "/api/notifications/push") {
             return webPush.handle(req);
+          }
+          if (url.pathname === "/api/voice/status" && req.method === "GET") {
+            return voice.status();
+          }
+          if (
+            url.pathname === "/api/voice/transcribe" &&
+            req.method === "POST"
+          ) {
+            // Local recognizers and remote providers can exceed Bun's default
+            // ten-second idle timeout for a long segment.
+            server.timeout(req, 75);
+            return voice.transcribe(req);
           }
           if (url.pathname === "/api/health") {
             return Response.json({

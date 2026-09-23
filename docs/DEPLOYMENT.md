@@ -368,6 +368,26 @@ for reuse when re-enabled. Password changes do not revoke device subscriptions.
 while suspended/closed. Encrypted payloads contain agent names/routing IDs, not
 terminal output, and may appear on lock screens.
 
+## Voice input
+
+The composer's microphone button dictates into the draft. The bridge
+transcribes each speech segment with the first configured provider; with none,
+the button reports that voice input is unavailable. Keys stay in the service
+environment (`~/.config/roamgate/roamgate.env`) and never reach the browser.
+
+| Variable | Provider |
+| --- | --- |
+| `ELEVENLABS_API_KEY` | ElevenLabs Scribe (`scribe_v1`) |
+| `ROAMGATE_VOICE_API_KEY` with optional `ROAMGATE_VOICE_BASE_URL` (default OpenAI) and `ROAMGATE_VOICE_MODEL` (default `gpt-4o-transcribe`) | Any OpenAI-compatible `/audio/transcriptions` endpoint |
+| `ROAMGATE_VOICE_FUNASR_MODEL_DIR`, optional `ROAMGATE_VOICE_FUNASR_CLI` | Local Fun-ASR-Nano through `llama-funasr-cli` |
+| `ROAMGATE_VOICE_COMMAND` | A local command as a JSON argv array containing `{input}` (the WAV path); stdout is the transcript |
+
+`ROAMGATE_VOICE_PROVIDER` (`elevenlabs`, `openai`, `funasr`, `command`, or
+`off`) selects one explicitly; otherwise the order is command, Fun-ASR,
+OpenAI-compatible, ElevenLabs. `ROAMGATE_VOICE_LANGUAGE` pins the language;
+by default providers detect it. Browsers allow microphone capture only on
+HTTPS or localhost origins.
+
 ## Logging
 
 Logs use one line per event: timestamp, severity, scope, bounded key/value context.

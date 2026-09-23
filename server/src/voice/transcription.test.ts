@@ -1,0 +1,209 @@
+import { describe, expect, test } from "bun:test";
+import { chmod, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import {
+  assertVoiceWav,
+  cleanTranscript,
+  createVoiceHandlers,
+  transcribeVoice,
+  voiceProviderFromEnv,
+} from "./transcription";
+
+function wav(samples = 1600) {
+  const bytes = new Uint8Array(44 + samples * 2);
+  const view = new DataView(bytes.buffer);
+  const tag = (offset: number, value: string) =>
+    [...value].forEach((char, index) =>
+      view.setUint8(offset + index, char.charCodeAt(0)),
+    );
+  tag(0, "RIFF");
+  view.setUint32(4, 36 + samples * 2, true);
+  tag(8, "WAVE");
+  tag(12, "fmt ");
+  view.setUint32(16, 16, true);
+  view.setUint16(20, 1, true);
+  view.setUint16(22, 1, true);
+  view.setUint32(24, 16_000, true);
+  view.setUint32(28, 32_000, true);
+  view.setUint16(32, 2, true);
+  view.setUint16(34, 16, true);
+  tag(36, "data");
+  view.setUint32(40, samples * 2, true);
+  return bytes;
+}
+
+describe("voice provider configuration", () => {
+  test("is off without configuration", () => {
+    expect(voiceProviderFromEnv({})).toBeNull();
+    expect(
+      voiceProviderFromEnv({
+        ROAMGATE_VOICE_PROVIDER: "off",
+        ELEVENLABS_API_KEY: "k",
+      }),
+    ).toBeNull();
+  });
+
+  test("builds the Fun-ASR command from a model directory", () => {
+    const provider = voiceProviderFromEnv({
+      ROAMGATE_VOICE_FUNASR_MODEL_DIR: "/models/nano",
+    });
+    expect(provider).toMatchObject({ kind: "command", label: "Fun-ASR" });
+    expect(provider?.kind === "command" && provider.argv).toContain("{input}");
+    expect(provider?.kind === "command" && provider.argv[0]).toBe(
+      "llama-funasr-cli",
+    );
+  });
+
+  test("prefers an explicit command and validates it", () => {
+    expect(
+      voiceProviderFromEnv({
+        ROAMGATE_VOICE_COMMAND: '["asr","{input}"]',
+        ROAMGATE_VOICE_API_KEY: "k",
+      }),
+    ).toMatchObject({ kind: "command", argv: ["asr", "{input}"] });
+    expect(() =>
+      voiceProviderFromEnv({ ROAMGATE_VOICE_COMMAND: "asr file" }),
+    ).toThrow("JSON array");
+    expect(() =>
+      voiceProviderFromEnv({ ROAMGATE_VOICE_COMMAND: '["asr"]' }),
+    ).toThrow("{input}");
+  });
+
+  test("configures an OpenAI-compatible endpoint", () => {
+    expect(
+      voiceProviderFromEnv({
+        ROAMGATE_VOICE_API_KEY: "secret",
+        ROAMGATE_VOICE_BASE_URL: "https://openrouter.ai/api/v1/",
+        ROAMGATE_VOICE_MODEL: "whisper-large-v3-turbo",
+        ROAMGATE_VOICE_LANGUAGE: "zh",
+      }),
+    ).toEqual({
+      kind: "openai",
+      label: "openai-compatible",
+      baseUrl: "https://openrouter.ai/api/v1",
+      model: "whisper-large-v3-turbo",
+      apiKey: "secret",
+      language: "zh",
+    });
+  });
+});
+
+describe("voice audio", () => {
+  test("accepts only canonical 16 kHz mono PCM16 WAV", () => {
+    expect(() => assertVoiceWav(wav())).not.toThrow();
+    const stereo = wav();
+    new DataView(stereo.buffer).setUint16(22, 2, true);
+    expect(() => assertVoiceWav(stereo)).toThrow("16 kHz mono");
+    expect(() => assertVoiceWav(new Uint8Array(10))).toThrow("empty");
+    expect(() => assertVoiceWav(wav(16_000 * 61))).toThrow("60 seconds");
+  });
+
+  test("joins transcript lines like the local runtimes", () => {
+    expect(cleanTranscript("  hello \n\n world \n")).toBe("hello world");
+  });
+
+  test("runs a local command with the segment path", async () => {
+    const dir = await mkdtemp(join(tmpdir(), "roamgate-voice-test-"));
+    try {
+      const script = join(dir, "asr.sh");
+      await writeFile(
+        script,
+        '#!/bin/sh\nhead -c 4 "$1" >/dev/null && printf "  \u4f60\u597d world\\n\\n"\n',
+      );
+      await chmod(script, 0o755);
+      const text = await transcribeVoice(
+        { kind: "command", label: "test", argv: [script, "{input}"] },
+        wav(),
+      );
+      expect(text).toBe("\u4f60\u597d world");
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  });
+
+  test("posts multipart audio to an OpenAI-compatible endpoint", async () => {
+    let seen: { url: string; auth: string | null; model: unknown } | undefined;
+    const text = await transcribeVoice(
+      {
+        kind: "openai",
+        label: "openai-compatible",
+        baseUrl: "https://example.test/v1",
+        model: "m",
+        apiKey: "k",
+      },
+      wav(),
+      (async (url: string, init: RequestInit) => {
+        const form = init.body as FormData;
+        seen = {
+          url,
+          auth: new Headers(init.headers).get("authorization"),
+          model: form.get("model"),
+        };
+        return Response.json({ text: " ok " });
+      }) as typeof fetch,
+    );
+    expect(text).toBe("ok");
+    expect(seen).toEqual({
+      url: "https://example.test/v1/audio/transcriptions",
+      auth: "Bearer k",
+      model: "m",
+    });
+  });
+});
+
+describe("voice HTTP handlers", () => {
+  const request = (body: Uint8Array) =>
+    new Request("http://local/api/voice/transcribe", {
+      method: "POST",
+      body: new Uint8Array(body),
+    });
+
+  test("report status without exposing configuration", async () => {
+    const off = createVoiceHandlers({ provider: () => null });
+    expect(await off.status().json()).toEqual({ available: false });
+    const on = createVoiceHandlers({
+      provider: () => ({
+        kind: "elevenlabs",
+        label: "ElevenLabs",
+        apiKey: "k",
+      }),
+    });
+    expect(await on.status().json()).toEqual({
+      available: true,
+      provider: "ElevenLabs",
+    });
+  });
+
+  test("reject unconfigured servers and invalid audio", async () => {
+    const off = createVoiceHandlers({ provider: () => null });
+    expect((await off.transcribe(request(wav()))).status).toBe(503);
+    const on = createVoiceHandlers({
+      provider: () => ({ kind: "command", label: "c", argv: ["x", "{input}"] }),
+      transcribe: async () => "never",
+    });
+    expect((await on.transcribe(request(new Uint8Array(60)))).status).toBe(400);
+  });
+
+  test("bound concurrent recognition and queue overflow", async () => {
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => (release = resolve));
+    const handlers = createVoiceHandlers({
+      provider: () => ({ kind: "command", label: "c", argv: ["x", "{input}"] }),
+      transcribe: async () => {
+        await gate;
+        return "done";
+      },
+      maxConcurrent: 1,
+      maxQueued: 1,
+    });
+    const first = handlers.transcribe(request(wav()));
+    const second = handlers.transcribe(request(wav()));
+    await Bun.sleep(5);
+    const third = await handlers.transcribe(request(wav()));
+    expect(third.status).toBe(429);
+    release();
+    expect(await (await first).json()).toEqual({ text: "done" });
+    expect(await (await second).json()).toEqual({ text: "done" });
+  });
+});

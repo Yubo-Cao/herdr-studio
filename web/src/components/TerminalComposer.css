@@ -81,6 +81,7 @@
   .terminal-composer-close,
   .terminal-composer-shortcuts-toggle,
   .terminal-composer-attach,
+  .terminal-composer-voice,
   .terminal-composer-help {
     width: 30px;
     padding: 0;
@@ -96,6 +97,21 @@
   .terminal-composer-shortcuts-toggle.is-open {
     border-color: var(--accent);
     background: var(--accent-soft);
+  }
+
+  /* The fill rises with the post-noise-suppression input level. */
+  .terminal-composer-voice.is-active {
+    background: linear-gradient(
+      to top,
+      var(--accent-soft) calc(var(--voice-level, 0) * 100%),
+      transparent 0
+    );
+    color: var(--accent);
+  }
+
+  .terminal-composer-voice.is-speaking {
+    color: var(--text-strong);
+    box-shadow: inset 0 -2px 0 var(--accent);
   }
 
   .terminal-composer-actions button:active:not(:disabled) {

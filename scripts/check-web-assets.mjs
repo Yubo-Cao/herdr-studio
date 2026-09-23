@@ -4,7 +4,8 @@ import process from "node:process";
 import { fileURLToPath, URL } from "node:url";
 
 const publicRoot = fileURLToPath(new URL("../server/public/", import.meta.url));
-const maxFileCount = 160;
+// Lazy Monaco and voice-capture chunks (worklet, VAD, transport) add files.
+const maxFileCount = 170;
 // The lazy Monaco file editor (core, grammars, worker, codicons) adds ~3.5 MiB.
 const maxTotalBytes = 16 * 1024 * 1024;
 const maxInitialJsBytes = 660 * 1024;

@@ -10,6 +10,8 @@ import {
   CornerDownRight,
   ImagePlus,
   Keyboard,
+  Mic,
+  MicOff,
   X,
 } from "lucide-react";
 import { type CSSProperties, useEffect, useRef, useState } from "react";
@@ -35,6 +37,7 @@ import {
   writeTerminalComposerDraft,
   writeTerminalComposerSelection,
 } from "../terminalComposer";
+import { useVoiceDictation } from "../voice/useVoiceDictation";
 import { MessageDialog } from "./ModalDialogs";
 import "./TerminalComposer.css";
 
@@ -164,6 +167,18 @@ export function TerminalComposer({
       textarea?.selectionEnd,
     );
   };
+
+  const voice = useVoiceDictation({
+    onText: (spoken, join) => {
+      const textarea =
+        activeDraftKeyRef.current === draftKey ? textareaRef.current : null;
+      const draft = readTerminalComposerDraft(draftKey);
+      const caret = textarea?.selectionStart ?? draft.length;
+      const insertion = join(draft.slice(0, caret), spoken);
+      if (insertion) insertAtCaret(draftKey, insertion);
+    },
+    onError,
+  });
 
   const uploadAndInsert = async (files: File[]) => {
     const images = files.filter(
@@ -400,6 +415,21 @@ export function TerminalComposer({
           </button>
           <button
             type="button"
+            className={`terminal-composer-voice ${voice.active ? "is-active" : ""} ${
+              voice.state.phase === "speaking" ? "is-speaking" : ""
+            }`}
+            style={{ "--voice-level": voice.state.level } as CSSProperties}
+            title={voice.active ? "Stop voice input" : "Start voice input"}
+            aria-label={voice.active ? "Stop voice input" : "Start voice input"}
+            aria-pressed={voice.active}
+            disabled={voice.state.phase === "stopping"}
+            onPointerDown={keepTextareaFocus}
+            onClick={voice.toggle}
+          >
+            {voice.active ? <MicOff size={15} /> : <Mic size={15} />}
+          </button>
+          <button
+            type="button"
             className="terminal-composer-help"
             title="About Input Composer"
             aria-label="About Input Composer"
@@ -415,7 +445,15 @@ export function TerminalComposer({
               ? "Uploading image…"
               : submissionPending
                 ? "Sending…"
-                : ""}
+                : voice.state.phase === "starting"
+                  ? "Starting microphone…"
+                  : voice.state.pending > 0
+                    ? "Transcribing…"
+                    : voice.state.phase === "speaking"
+                      ? "Listening: speech"
+                      : voice.state.phase === "listening"
+                        ? "Listening…"
+                        : ""}
           </span>
           <button
             type="button"
