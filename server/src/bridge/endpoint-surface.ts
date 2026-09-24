@@ -1,6 +1,6 @@
 import { BinReader } from "./bincode";
 import type { EndpointSurface, PaneSurfacePaneMeta } from "./endpoint-client";
-import { type CellData, type FrameData, readCellData } from "./thin-client";
+import { readCellData, type CellData, type FrameData } from "./thin-client";
 
 export const SURFACE_DELTA_KIND = "endpoint.surface-delta.v1";
 export const SURFACE_REUSE_KIND = "endpoint.surface-reuse.v1";

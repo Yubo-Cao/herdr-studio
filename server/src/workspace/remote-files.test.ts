@@ -3,19 +3,19 @@ import {
   chmod,
   mkdir,
   mkdtemp,
-  readdir,
   readFile,
+  readdir,
   rm,
   stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { IMAGE_MIME_TYPES } from "../../../shared/filePreview";
+import { tmpdir } from "node:os";
 import { shQuote } from "../utils/process-utils";
-import { PREVIEW_IMAGE_MAX_BYTES, PREVIEW_MAX_BYTES } from "./file-constants";
 import { runBinaryProcessWithTimeout } from "./process";
+import { IMAGE_MIME_TYPES } from "../../../shared/filePreview";
+import { PREVIEW_IMAGE_MAX_BYTES, PREVIEW_MAX_BYTES } from "./file-constants";
 import {
   deleteRemoteFile,
   downloadRemoteFile,

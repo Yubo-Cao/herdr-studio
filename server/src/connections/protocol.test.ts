@@ -9,9 +9,9 @@ import {
   validateConnectionId,
 } from "./protocol";
 import {
-  type ConnectionRpcRequest,
   isConnectionRpcEnvelope,
   resolveRpcRoute,
+  type ConnectionRpcRequest,
 } from "./rpc-routing";
 
 type FakeRuntime = {

@@ -4,8 +4,8 @@ import {
   existsSync,
   mkdirSync,
   mkdtempSync,
-  readdirSync,
   readFileSync,
+  readdirSync,
   rmSync,
   statSync,
   symlinkSync,
@@ -13,7 +13,6 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { defaultAuthTokenPath, loadOrCreateAuthToken } from "./auth-token";
 import {
   dataRoot,
   defaultDataFile,
@@ -21,6 +20,7 @@ import {
   migrateDataFile,
   publishDataFile,
 } from "./data-paths";
+import { defaultAuthTokenPath, loadOrCreateAuthToken } from "./auth-token";
 
 const roots: string[] = [];
 function home() {

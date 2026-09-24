@@ -1,4 +1,4 @@
-import type { Workspace, WorktreeList } from "./types";
+import type { WorktreeList, Workspace } from "./types";
 import { isWorkspacePinned } from "./workspacePins";
 
 const EMPTY_WORKSPACE_PINS = new Set<string>();

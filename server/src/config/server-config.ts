@@ -1,14 +1,14 @@
-import { createHash } from "node:crypto";
-import { existsSync, readFileSync } from "node:fs";
 import { homedir, networkInterfaces, tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
+import { existsSync, readFileSync } from "node:fs";
 import { createSecureContext } from "node:tls";
 import { parseArgs } from "node:util";
+import { createHash } from "node:crypto";
 import { validateSshDestination } from "../bridge/ssh-command";
 import { assertSshTunnelPlatformSupported } from "../bridge/ssh-tunnel";
-import { type LogLevel, parseLogLevel, serverLogger } from "../utils/logger";
 import { defaultAuthTokenPath, loadOrCreateAuthToken } from "./auth-token";
 import { roamgateEnv } from "./environment";
+import { type LogLevel, parseLogLevel, serverLogger } from "../utils/logger";
 
 type CliArgs = Partial<{
   host: string;

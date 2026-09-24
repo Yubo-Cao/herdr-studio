@@ -1,12 +1,12 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { EventEmitter, once } from "node:events";
-import * as net from "node:net";
-import { tmpdir } from "node:os";
-import * as path from "node:path";
 import type { ServerWebSocket } from "bun";
-import { silentLogger } from "../utils/logger";
+import * as net from "node:net";
+import { EventEmitter, once } from "node:events";
+import * as path from "node:path";
+import { tmpdir } from "node:os";
 import { BinReader, BinWriter, encodeFrame } from "./bincode";
 import { createTerminalBridge } from "./terminal-bridge";
+import { silentLogger } from "../utils/logger";
 import {
   flushCoalescedMessages,
   sendWebSocketMessage,

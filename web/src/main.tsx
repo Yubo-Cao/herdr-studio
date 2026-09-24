@@ -1,7 +1,7 @@
-import React from "react";
-import ReactDOM from "react-dom/client";
 import { initializeLayoutPreferences } from "./layoutPreferences";
 import { initializeShortcutPreferences } from "./shortcutPreferences";
+import React from "react";
+import ReactDOM from "react-dom/client";
 import "./styles/tokens.css";
 import "./styles/base.css";
 import "./styles/vendor.css";

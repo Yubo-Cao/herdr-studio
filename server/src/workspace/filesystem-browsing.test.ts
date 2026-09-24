@@ -8,16 +8,16 @@ import {
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { homedir, tmpdir } from "node:os";
 import { join } from "node:path";
+import { homedir, tmpdir } from "node:os";
 import type { HerdrClient } from "../bridge/herdr-client";
 import { runProcessWithCode, shQuote } from "../utils/process-utils";
+import { createFileHandlers } from "./files";
 import {
   expandHomePath,
   sanitizeFilesystemPath,
   splitFilesystemPath,
 } from "./file-paths";
-import { createFileHandlers } from "./files";
 import { listRemoteFiles } from "./remote-files";
 
 async function fixture(

@@ -1,13 +1,5 @@
 import { expect, test } from "bun:test";
 import {
-  absolutePath,
-  isFilesystemPath,
-  isWorkspaceRelativePath,
-  readExplorerViewMemory,
-  symlinkDescription,
-  writeExplorerViewMemory,
-} from "./components/fileExplorerResources";
-import {
   directoryPreviewName,
   directoryPreviewPath,
   filesystemBaseName,
@@ -15,6 +7,14 @@ import {
   normalizeFilesystemPath,
   parentFilesystemPath,
 } from "./filesystemPaths";
+import {
+  absolutePath,
+  isFilesystemPath,
+  isWorkspaceRelativePath,
+  readExplorerViewMemory,
+  symlinkDescription,
+  writeExplorerViewMemory,
+} from "./components/fileExplorerResources";
 
 test("filesystem breadcrumbs link every ancestor from the root", () => {
   expect(filesystemBreadcrumbs("/home/me/src")).toEqual([

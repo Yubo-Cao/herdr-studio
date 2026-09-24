@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import { sshCommandArgv } from "../bridge/ssh-command";
+import { collectWorktreeFingerprints } from "./git-actions";
 import {
   GIT_DIFF_MAX_BYTES,
   GIT_DIFF_TIMEOUT_MS,
@@ -13,7 +14,6 @@ import type {
   GitDiffMode,
   RunProcessWithCodeTimeout,
 } from "./file-types";
-import { collectWorktreeFingerprints } from "./git-actions";
 
 const GIT_ATTRIBUTE_BATCH_SIZE = 100;
 const LAST_STEP_SNAPSHOT_LIMIT = 64;

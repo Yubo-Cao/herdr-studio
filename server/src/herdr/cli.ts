@@ -7,8 +7,8 @@ import {
   type HerdrSetupState,
   setupHerdr,
 } from "./bootstrap";
-import { VERIFIED_HERDR_VERSION } from "./release";
 import { herdrServiceStatus } from "./service";
+import { VERIFIED_HERDR_VERSION } from "./release";
 
 function herdrHelp(): string {
   return `Install and start the local Herdr server.

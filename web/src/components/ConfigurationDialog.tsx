@@ -1,3 +1,4 @@
+import { Suspense, useEffect, useRef, useState, type MouseEvent } from "react";
 import {
   ALargeSmall,
   Bell,
@@ -16,7 +17,6 @@ import {
   SunMoon,
   Type as TypeIcon,
 } from "lucide-react";
-import { type MouseEvent, Suspense, useEffect, useRef, useState } from "react";
 import type { Theme } from "../App";
 import {
   ACCENT_OPTIONS,
@@ -31,9 +31,9 @@ import {
 } from "../appearance";
 import { lazyWithReload } from "../lazyWithReload";
 import {
+  mobileTerminalShortcutCount,
   type MobileTerminalShortcutRows,
   type MobileTerminalSideShortcuts,
-  mobileTerminalShortcutCount,
 } from "../mobileTerminalShortcuts";
 import { shallowEqual, store, useStoreSelector } from "../store";
 import {
@@ -45,22 +45,22 @@ import {
   connectionClientScopeKey,
   useConnectionClient,
 } from "../useConnectionClient";
+import { AgentIntegrationsSettings } from "./AgentIntegrationsSettings";
+import { AutoSyncRepositoriesDialog } from "./AutoSyncRepositoriesDialog";
+import { CloseButton } from "./CloseButton";
+import { MobileTerminalShortcutsDialog } from "./MobileTerminalShortcutsDialog";
+import { TerminalTransportSettings } from "./TerminalTransportSettings";
+import { ConfigurationLoadingDialog } from "./ConfigurationLoadingDialog";
+import { MobileSheetHandle } from "./MobileSheetHandle";
+import { ThemedSelect } from "./ThemedSelect";
+import "./ConfigMenu.css";
+import "./ConfigurationDialog.css";
 import {
   setVoiceCleanupMode,
   useVoiceCleanupMode,
   VOICE_CLEANUP_OPTIONS,
   type VoiceCleanupMode,
 } from "../voice/voicePreferences";
-import { AgentIntegrationsSettings } from "./AgentIntegrationsSettings";
-import { AutoSyncRepositoriesDialog } from "./AutoSyncRepositoriesDialog";
-import { CloseButton } from "./CloseButton";
-import { ConfigurationLoadingDialog } from "./ConfigurationLoadingDialog";
-import { MobileSheetHandle } from "./MobileSheetHandle";
-import { MobileTerminalShortcutsDialog } from "./MobileTerminalShortcutsDialog";
-import { TerminalTransportSettings } from "./TerminalTransportSettings";
-import { ThemedSelect } from "./ThemedSelect";
-import "./ConfigMenu.css";
-import "./ConfigurationDialog.css";
 
 const ShortcutLookupDialog = lazyWithReload("keyboard-shortcuts", () =>
   import("./ShortcutLookupDialog").then((module) => ({

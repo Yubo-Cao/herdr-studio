@@ -10,9 +10,6 @@ import {
   X,
 } from "lucide-react";
 import {
-  type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
   Suspense,
   useCallback,
   useEffect,
@@ -20,27 +17,30 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
 } from "react";
+import type { ConnectionClient } from "../api";
+import { roamgateLocalStorage } from "../browserStorage";
 import {
   type NewReviewAnnotation,
   type ReviewAnnotation,
 } from "../annotations";
-import type { ConnectionClient } from "../api";
-import { roamgateLocalStorage } from "../browserStorage";
 import { lazyWithReload } from "../lazyWithReload";
 import { shortcutTitle, useShortcutPreferences } from "../shortcutPreferences";
 import type { GitDiffEntry, Pane, Workspace } from "../types";
 import {
   DEFAULT_INSPECTOR_NAVIGATION_RATIO,
-  type InspectorDock,
-  type InspectorSplitView,
-  type InspectorView,
   inspectorNavigationRatioAtPosition,
   readInspectorPreferences,
   resourceOwnerKey,
   resourceStateKey,
-  type WorkspaceInspectorState,
   writeInspectorNavigationRatio,
+  type InspectorDock,
+  type InspectorSplitView,
+  type InspectorView,
+  type WorkspaceInspectorState,
 } from "../workspaceResource";
 import { AgentHistoryDrawer } from "./AgentHistoryDrawer";
 import { paneHasAgentHistory } from "./agentSession";

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
-import { historyWindowEntries } from "./session-history-window";
-import { isConversationStep } from "./session-messages";
 import type { AtifTrajectory, SessionFile } from "./session-types";
+import { isConversationStep } from "./session-messages";
+import { historyWindowEntries } from "./session-history-window";
 
 export type HistoryEntry = {
   id: string;

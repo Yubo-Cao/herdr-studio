@@ -1,10 +1,10 @@
+import { defaultDataFile } from "./data-paths";
+import { dirname } from "node:path";
 import { mkdirSync } from "node:fs";
 import { rename, rm, writeFile } from "node:fs/promises";
-import { dirname } from "node:path";
 import { LEGACY_DEFAULT_CONNECTION_ID } from "../connections/types";
 import { serverLogger } from "../utils/logger";
 import { sourceCheckoutPath as workspaceSourceCheckoutPath } from "../workspace/utils";
-import { defaultDataFile } from "./data-paths";
 
 export type GuiRepoSettings = {
   worktree_hooks_enabled?: boolean;

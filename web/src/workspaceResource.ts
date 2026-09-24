@@ -1,8 +1,8 @@
 import type { TerminalReviewAnnotation } from "./annotations";
-import { connectionStorageKey } from "./connectionStorage";
-import { matchesShortcut, type ShortcutBindings } from "./shortcutBindings";
 import { getShortcutSnapshot } from "./shortcutPreferences";
+import { matchesShortcut, type ShortcutBindings } from "./shortcutBindings";
 import type { Workspace } from "./types";
+import { connectionStorageKey } from "./connectionStorage";
 
 export type InspectorView = "files" | "changes" | "history";
 export type WorkspaceSurface = "terminal" | "annotations" | InspectorView;

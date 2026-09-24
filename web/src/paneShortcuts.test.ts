@@ -1,6 +1,6 @@
+import { defaultShortcutBindings } from "./shortcutBindings";
 import { describe, expect, test } from "bun:test";
 import { paneShortcutAction as resolveShortcut } from "./paneShortcuts";
-import { defaultShortcutBindings } from "./shortcutBindings";
 
 const paneShortcutAction = (event: Parameters<typeof resolveShortcut>[0]) =>
   resolveShortcut(event, defaultShortcutBindings("mac"));

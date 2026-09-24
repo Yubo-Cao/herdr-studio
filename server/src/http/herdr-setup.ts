@@ -1,6 +1,10 @@
 import type { ServerConfig } from "../config/server-config";
 import type { ConnectionProfile } from "../connections/profiles";
 import {
+  resolveHerdrReleaseTarget,
+  VERIFIED_HERDR_VERSION,
+} from "../herdr/release";
+import {
   assertManagedSetupAllowed,
   detectHerdrSetup,
   type HerdrBootstrapDeps,
@@ -9,10 +13,6 @@ import {
   type HerdrSetupState,
   setupHerdr,
 } from "../herdr/bootstrap";
-import {
-  resolveHerdrReleaseTarget,
-  VERIFIED_HERDR_VERSION,
-} from "../herdr/release";
 
 const HERDR_SETUP_CONFIRMATION_HEADER = "x-roamgate-herdr-setup";
 

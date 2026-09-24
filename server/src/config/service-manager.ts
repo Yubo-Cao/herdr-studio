@@ -9,20 +9,6 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import { basename, dirname, join, resolve } from "node:path";
-import { loadOrCreateAuthToken } from "./auth-token";
-import {
-  assertSafeDataPath,
-  migrateDataFile,
-  publishDataFile,
-} from "./data-paths";
-import { roamgateEnv } from "./environment";
-import {
-  browserUrlFor,
-  getLanIPs,
-  isAnyHost,
-  loadServerTls,
-  withLoginToken,
-} from "./server-config";
 import {
   DEFAULT_SERVICE_ENV_FILE,
   escapeSystemdExecPath,
@@ -30,13 +16,27 @@ import {
   renderLaunchdService,
   renderSystemdService,
   renderWindowsTaskDefinition,
-  resolveLegacyServicePaths,
   resolveServicePaths,
+  resolveLegacyServicePaths,
   resolveServicePlatform,
   SERVICE_LABEL,
-  type ServicePaths,
   type ServicePlatform,
+  type ServicePaths,
 } from "./service-definitions";
+import {
+  assertSafeDataPath,
+  migrateDataFile,
+  publishDataFile,
+} from "./data-paths";
+import { roamgateEnv } from "./environment";
+import { loadOrCreateAuthToken } from "./auth-token";
+import {
+  browserUrlFor,
+  getLanIPs,
+  isAnyHost,
+  loadServerTls,
+  withLoginToken,
+} from "./server-config";
 
 type ServiceAction = "install" | "uninstall" | "status" | "restart" | "reload";
 

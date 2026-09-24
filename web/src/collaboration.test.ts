@@ -1,5 +1,4 @@
 import { describe, expect, test } from "bun:test";
-import type { ConnectionClient } from "./api";
 import {
   acceptCollaborationEvent,
   collaborationProfileForSession,
@@ -7,6 +6,7 @@ import {
   shouldTakeOverPaneFromMouse,
   subscribeCollaborationSnapshot,
 } from "./collaboration";
+import type { ConnectionClient } from "./api";
 
 describe("collaboration client sessions", () => {
   test("shares presentation without conflating independent client sessions", () => {

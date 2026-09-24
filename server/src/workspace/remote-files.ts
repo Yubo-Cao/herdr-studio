@@ -26,8 +26,8 @@ import type {
   FileWriteResult,
   RunProcessWithCodeTimeout,
 } from "./file-types";
-import { decodePreviewBuffer, previewLimitForPath } from "./preview";
 import { runProcessWithInputTimeout } from "./process";
+import { decodePreviewBuffer, previewLimitForPath } from "./preview";
 
 export function parseRemoteFileList(
   stdout: string,

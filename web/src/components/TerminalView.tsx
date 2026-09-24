@@ -1,3 +1,26 @@
+import { createPortal } from "react-dom";
+import {
+  createReviewAnnotation,
+  MAX_QUOTE_LENGTH,
+  terminalAnnotationTitle,
+  type TerminalReviewAnnotation,
+} from "../annotations";
+import {
+  WORKSPACE_ANNOTATION_REQUEST_EVENT,
+  type WorkspaceAnnotationRequest,
+} from "../workspaceResource";
+import {
+  AnnotationComposerPopover,
+  type AnnotationComposerDraft,
+} from "./AnnotationComposerPopover";
+import { isMobileLayout, LAYOUT_CHANGE_EVENT } from "../layoutPreferences";
+import { resolveTerminalFontFamily, terminalFontOptions } from "../appearance";
+import { detectShortcutPlatform } from "../shortcutBindings";
+import {
+  getShortcutSnapshot,
+  shortcutMatches,
+  terminalLinkModifierMatches,
+} from "../shortcutPreferences";
 import {
   ClipboardAddon,
   type ClipboardSelectionType,
@@ -10,15 +33,23 @@ import {
   Columns2,
   Eye,
   EyeOff,
-  Grid2X2,
   Keyboard,
+  SquareTerminal,
+  Grid2X2,
   Maximize2,
   Minimize2,
   MousePointer2,
   Rows2,
-  SquareTerminal,
   X,
 } from "lucide-react";
+import { usePaneControl } from "../usePaneControl";
+import { paneDisplayName } from "../paneIdentity";
+import { agentClass } from "../utils";
+import { shouldShowAgentStatusLabel } from "./agentSession";
+import { AgentStatusIcon } from "./AgentStatusIcon";
+import { Button } from "./ui/Button";
+import { IconButton } from "./ui/IconButton";
+import { Token } from "./ui/Token";
 import {
   type CSSProperties,
   useCallback,
@@ -28,40 +59,8 @@ import {
   useRef,
   useState,
 } from "react";
-import { createPortal } from "react-dom";
-import {
-  createReviewAnnotation,
-  MAX_QUOTE_LENGTH,
-  type TerminalReviewAnnotation,
-  terminalAnnotationTitle,
-} from "../annotations";
-import { resolveTerminalFontFamily, terminalFontOptions } from "../appearance";
-import { isMobileLayout, LAYOUT_CHANGE_EVENT } from "../layoutPreferences";
-import { paneDisplayName } from "../paneIdentity";
-import { detectShortcutPlatform } from "../shortcutBindings";
-import {
-  getShortcutSnapshot,
-  shortcutMatches,
-  terminalLinkModifierMatches,
-} from "../shortcutPreferences";
-import { usePaneControl } from "../usePaneControl";
-import { agentClass } from "../utils";
-import {
-  WORKSPACE_ANNOTATION_REQUEST_EVENT,
-  type WorkspaceAnnotationRequest,
-} from "../workspaceResource";
-import { AgentStatusIcon } from "./AgentStatusIcon";
-import {
-  type AnnotationComposerDraft,
-  AnnotationComposerPopover,
-} from "./AnnotationComposerPopover";
-import { shouldShowAgentStatusLabel } from "./agentSession";
-import { Button } from "./ui/Button";
-import { IconButton } from "./ui/IconButton";
-import { Token } from "./ui/Token";
 import "@xterm/xterm/css/xterm.css";
 import { bridge, type ConnectionClient } from "../api";
-import { directoryPreviewName } from "../filesystemPaths";
 import { mobileTerminalShortcutExecution } from "../mobileTerminalShortcutAction";
 import {
   defaultMobileTerminalShortcutRows,
@@ -72,6 +71,7 @@ import {
   mobileTerminalShortcutOption,
 } from "../mobileTerminalShortcuts";
 import { activePaneIdForSnapshot, paneCanClose } from "../paneJump";
+import { HerdrSetupCard } from "./HerdrSetupCard";
 import {
   shallowEqual,
   store,
@@ -97,19 +97,18 @@ import {
   terminalPushMatches,
 } from "../terminalConnection";
 import {
-  TerminalEndpointPresentation,
-  terminalMouseUsesSelection,
-} from "../terminalEndpointPresentation";
-import {
   type ResolvedTerminalFile,
   TerminalFileResolutionCache,
 } from "../terminalFileLinks";
+import {
+  TerminalEndpointPresentation,
+  terminalMouseUsesSelection,
+} from "../terminalEndpointPresentation";
 import {
   terminalFocusBlockedByOverlay,
   terminalPointerShouldBlurInput,
   terminalTouchShouldDismissInput,
 } from "../terminalFocus";
-import { TerminalHistorySelection } from "../terminalHistorySelection";
 import { uploadTerminalImage } from "../terminalImageUpload";
 import {
   isTerminalImeCommittedInputType,
@@ -122,11 +121,22 @@ import {
   terminalImeTextareaDelta,
 } from "../terminalIme";
 import { terminalShortcutSequence } from "../terminalKeys";
+import { TerminalHistorySelection } from "../terminalHistorySelection";
+import {
+  TerminalTouchSelection,
+  terminalSelectedText,
+} from "../terminalTouchSelection";
 import {
   registerTerminalLinkProvider,
   type TerminalResolvedLink,
   type TerminalTouchLink,
 } from "../terminalLinkProvider";
+import {
+  TerminalFileLinkMenu,
+  type TerminalFileLinkMenuState,
+} from "./TerminalFileLinkMenu";
+import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
+import { directoryPreviewName } from "../filesystemPaths";
 import { sanitizeTerminalHttpUrl, terminalFileUriPath } from "../terminalLinks";
 import {
   createTerminalPasteRunner,
@@ -156,19 +166,9 @@ import {
 } from "../terminalScroll";
 import { TerminalSelectionDragGuard } from "../terminalSelectionGuard";
 import { applyTerminalTheme } from "../terminalThemes";
-import {
-  TerminalTouchSelection,
-  terminalSelectedText,
-} from "../terminalTouchSelection";
 import { paneHasAgentHistory } from "./agentSession";
-import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
-import { HerdrSetupCard } from "./HerdrSetupCard";
 import { ConfirmDialog, MessageDialog } from "./ModalDialogs";
 import { TerminalComposer } from "./TerminalComposer";
-import {
-  TerminalFileLinkMenu,
-  type TerminalFileLinkMenuState,
-} from "./TerminalFileLinkMenu";
 import "./TerminalView.css";
 
 function focusTerminalEndpoint(

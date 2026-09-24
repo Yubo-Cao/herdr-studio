@@ -1,3 +1,9 @@
+import { roamgateLocalStorage } from "../browserStorage";
+import {
+  shortcutMatches,
+  shortcutTitle,
+  useShortcutPreferences,
+} from "../shortcutPreferences";
 import {
   CircleHelp,
   CornerDownLeft,
@@ -10,16 +16,10 @@ import {
 } from "lucide-react";
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { roamgateLocalStorage } from "../browserStorage";
 import {
   type MobileTerminalShortcut,
   mobileTerminalShortcutOption,
 } from "../mobileTerminalShortcuts";
-import {
-  shortcutMatches,
-  shortcutTitle,
-  useShortcutPreferences,
-} from "../shortcutPreferences";
 import {
   beginTerminalComposerSubmission,
   beginTerminalComposerUpload,
@@ -38,15 +38,15 @@ import {
   writeTerminalComposerDraft,
   writeTerminalComposerSelection,
 } from "../terminalComposer";
+import { useVoiceDictation } from "../voice/useVoiceDictation";
+import { MessageDialog } from "./ModalDialogs";
+import "./TerminalComposer.css";
 import {
   type DictationSpan,
   dictationCleanupEdit,
   extendDictationSpan,
 } from "../voice/dictationSpan";
-import { useVoiceDictation } from "../voice/useVoiceDictation";
 import { voiceCleanupMode } from "../voice/voicePreferences";
-import { MessageDialog } from "./ModalDialogs";
-import "./TerminalComposer.css";
 
 const TERMINAL_COMPOSER_HELP =
   "Draft multiline text with your phone’s native editor before sending it. Adding an image inserts its uploaded path and may dismiss the keyboard; tap the editor to reopen it.";

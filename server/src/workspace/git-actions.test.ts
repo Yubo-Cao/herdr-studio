@@ -12,17 +12,17 @@ import {
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { RunProcessWithCodeTimeout } from "./file-types";
-import { createFileHandlers } from "./files";
 import {
   collectWorktreeFingerprints,
-  type GitActionContext,
   parseFingerprintListing,
   parseWorkingTreeCounts,
   porcelainAllowsFileAction,
   runGitFileAction,
   runGitRepoAction,
+  type GitActionContext,
 } from "./git-actions";
 import { clearNotARepoCache, collectIgnoredNames } from "./git-ignore";
+import { createFileHandlers } from "./files";
 
 const runProcessWithCodeTimeout: RunProcessWithCodeTimeout = async (argv) => {
   const process = Bun.spawn(argv, { stdout: "pipe", stderr: "pipe" });

@@ -8,8 +8,8 @@ import {
 } from "react";
 import {
   calculateOverlayThumb,
-  type OverlayThumbGeometry,
   overlayScrollbarExcludedElement,
+  type OverlayThumbGeometry,
 } from "./overlayScrollbar";
 import "./OverlayScrollbarLayer.css";
 

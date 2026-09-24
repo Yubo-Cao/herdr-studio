@@ -1,10 +1,10 @@
-import { describe, expect, jest, test } from "bun:test";
+import { describe, expect, test, jest } from "bun:test";
 import { Terminal } from "@xterm/xterm";
-import { TerminalEndpointPresentation } from "./terminalEndpointPresentation";
 import {
-  TERMINAL_LONG_PRESS_MS,
   TerminalTouchSelection,
+  TERMINAL_LONG_PRESS_MS,
 } from "./terminalTouchSelection";
+import { TerminalEndpointPresentation } from "./terminalEndpointPresentation";
 
 describe("TerminalTouchSelection deadlines", () => {
   test("slop, cancel and reset invalidate even a parser-deferred long press", () => {

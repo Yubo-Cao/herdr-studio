@@ -10,9 +10,9 @@ import {
 import {
   createTerminalPasteRunner,
   prepareTerminalPasteText,
-  type TerminalPasteTextareaSnapshot,
   terminalPasteInputText,
   terminalPasteRequest,
+  type TerminalPasteTextareaSnapshot,
 } from "./terminalPaste";
 
 function deferred() {

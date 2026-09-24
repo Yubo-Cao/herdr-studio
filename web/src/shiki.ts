@@ -6,7 +6,6 @@ import {
   stringifyTokenStyle,
 } from "@shikijs/core";
 import type { LanguageRegistration } from "shiki/types";
-
 export { createJavaScriptRegexEngine } from "shiki/engine/javascript";
 export { createOnigurumaEngine } from "shiki/engine/oniguruma";
 

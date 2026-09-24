@@ -1,11 +1,7 @@
 import { homedir } from "node:os";
-import {
-  HTML_PREVIEW_MAX_BYTES,
-  isHtmlPath,
-} from "../../../shared/filePreview";
 import type { HerdrClient } from "../bridge/herdr-client";
 import { sshCommandArgv } from "../bridge/ssh-command";
-import { GIT_DIFF_TIMEOUT_MS } from "./file-constants";
+import { checkoutPath as getCheckoutPath } from "./utils";
 import {
   downloadContentDisposition,
   expandHomePath,
@@ -22,16 +18,6 @@ import type {
   FileResolution,
   RunProcessWithCodeTimeout,
 } from "./file-types";
-import { runGitFileAction, runGitRepoAction } from "./git-actions";
-import {
-  type LastStepBaselineStore,
-  pullGit,
-  readDiffFile,
-  readDiffSummary,
-} from "./git-diff";
-import { collectIgnoredNames } from "./git-ignore";
-import { HTML_PREVIEW_CSP, renderHtmlPreview } from "./html-preview";
-import { HtmlPreviewError, readHtmlPreviewFile } from "./html-preview-files";
 import {
   createLocalEntry,
   deleteLocalFile,
@@ -42,7 +28,6 @@ import {
   uploadLocalFile,
   writeLocalFile,
 } from "./local-files";
-import { inlinePreviewMimeForPath } from "./preview";
 import {
   createRemoteEntry,
   deleteRemoteFile,
@@ -54,7 +39,22 @@ import {
   uploadRemoteFile,
   writeRemoteFile,
 } from "./remote-files";
-import { checkoutPath as getCheckoutPath } from "./utils";
+import {
+  pullGit,
+  readDiffFile,
+  readDiffSummary,
+  type LastStepBaselineStore,
+} from "./git-diff";
+import { runGitFileAction, runGitRepoAction } from "./git-actions";
+import { collectIgnoredNames } from "./git-ignore";
+import { GIT_DIFF_TIMEOUT_MS } from "./file-constants";
+import { inlinePreviewMimeForPath } from "./preview";
+import {
+  HTML_PREVIEW_MAX_BYTES,
+  isHtmlPath,
+} from "../../../shared/filePreview";
+import { HtmlPreviewError, readHtmlPreviewFile } from "./html-preview-files";
+import { HTML_PREVIEW_CSP, renderHtmlPreview } from "./html-preview";
 
 const MAX_FILE_RESOLUTION_CANDIDATES = 32;
 const MAX_FILE_RESOLUTION_PATH_LENGTH = 4096;

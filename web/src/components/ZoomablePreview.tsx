@@ -1,13 +1,13 @@
 import "./ZoomablePreview.css";
-import { Maximize, Minus, Plus } from "lucide-react";
 import {
-  type CSSProperties,
-  type ReactNode,
   useEffect,
   useLayoutEffect,
   useRef,
   useState,
+  type CSSProperties,
+  type ReactNode,
 } from "react";
+import { Maximize, Minus, Plus } from "lucide-react";
 
 export type PreviewDimensions = { width: number; height: number };
 

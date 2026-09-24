@@ -1,22 +1,22 @@
-import { MessageSquareText, PanelRight } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import { shortcutTitle, useShortcutPreferences } from "../shortcutPreferences";
 import {
   shallowEqual,
   store,
-  useEndpointCreationReason,
   useStoreSelector,
+  useEndpointCreationReason,
 } from "../store";
+import { useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { MessageSquareText, PanelRight } from "lucide-react";
+import type { Tab } from "../types";
+import { AgentStatusIcon } from "./AgentStatusIcon";
+import { ConfirmDialog, TextInputDialog } from "./ModalDialogs";
 import {
   clearTerminalComposerDrafts,
   terminalComposerCloseWarning,
   terminalComposerDraftPaneIds,
 } from "../terminalComposer";
-import type { Tab } from "../types";
-import { AgentStatusIcon } from "./AgentStatusIcon";
 import { summarizeTabAgents } from "./agentSession";
-import { ConfirmDialog, TextInputDialog } from "./ModalDialogs";
 import "./TabBar.css";
 
 const LONG_PRESS_MS = 550;

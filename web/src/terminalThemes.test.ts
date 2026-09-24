@@ -1,12 +1,13 @@
 import { describe, expect, test } from "bun:test";
 import { Terminal } from "@xterm/xterm";
 import {
-  applyTerminalTheme,
   CUSTOM_TERMINAL_THEME_SELECTION_ALPHA,
+  MAX_CUSTOM_TERMINAL_THEMES,
+  TERMINAL_THEME_PRESETS,
+  applyTerminalTheme,
   customTerminalThemeToITheme,
   defaultTerminalThemeId,
   hexToRgba,
-  MAX_CUSTOM_TERMINAL_THEMES,
   normalizeCustomTerminalThemes,
   normalizeTerminalColor,
   normalizeTerminalThemeSelection,
@@ -16,7 +17,6 @@ import {
   resolveTerminalThemeDefinition,
   serializeCustomTerminalThemes,
   serializeTerminalThemeSelection,
-  TERMINAL_THEME_PRESETS,
   terminalColorToHex,
   terminalThemeFor,
 } from "./terminalThemes";

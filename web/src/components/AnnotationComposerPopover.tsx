@@ -1,10 +1,10 @@
-import { type FormEvent, useLayoutEffect, useRef, useState } from "react";
-import { createPortal } from "react-dom";
 import {
-  shortcutLabel,
   shortcutMatches,
+  shortcutLabel,
   useShortcutPreferences,
 } from "../shortcutPreferences";
+import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
+import { createPortal } from "react-dom";
 import "./AnnotationComposerPopover.css";
 
 export type AnnotationComposerDraft = {

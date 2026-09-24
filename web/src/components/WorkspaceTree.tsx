@@ -1,3 +1,17 @@
+import { roamgateLocalStorage } from "../browserStorage";
+import { shallowEqual, store, useStoreSelector } from "../store";
+import type { GitStatusSummary, Pane, Workspace } from "../types";
+import { shortId } from "../utils";
+import {
+  clearTerminalComposerDrafts,
+  terminalComposerCloseWarning,
+  terminalComposerDraftPaneIds,
+} from "../terminalComposer";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { ContextMenu, type ContextMenuState } from "./ContextMenu";
+import { ThemedSelect } from "./ThemedSelect";
+import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
+import { buildWorkspaceHierarchy, worktreeCreationSource } from "../worktree";
 import {
   ArrowDownWideNarrow,
   ChevronDown,
@@ -7,49 +21,14 @@ import {
   Layers,
   Pin,
 } from "lucide-react";
-import { useEffect, useMemo, useRef, useState } from "react";
+import { WorktreeLifecycleDialog } from "./WorktreeLifecycleDialog";
 import {
-  AGENT_LIST_PREFERENCES_STORAGE_KEY,
-  AGENT_ORDER_STORAGE_KEY,
-  type AgentGrouping,
-  type AgentSort,
-  groupOrderedAgentPanes,
-  moveAgentPane,
-  parseAgentListPreferences,
-  parseAgentOrder,
-  serializeAgentOrder,
-  sortAgentPanes,
-} from "../agentOrder";
-import { roamgateLocalStorage } from "../browserStorage";
-import { connectionStorageKey } from "../connectionStorage";
-import { groupPanesByTab, shouldShowTabGroups } from "../paneIdentity";
-import { activePaneIdForSnapshot } from "../paneJump";
-import { shallowEqual, store, useStoreSelector } from "../store";
-import {
-  clearTerminalComposerDrafts,
-  terminalComposerCloseWarning,
-  terminalComposerDraftPaneIds,
-} from "../terminalComposer";
-import type { GitStatusSummary, Pane, Workspace } from "../types";
-import { useConnectionClient } from "../useConnectionClient";
-import { shortId } from "../utils";
-import {
-  parseWorkspaceAgentLayout,
-  WORKSPACE_AGENT_LAYOUT_STORAGE_KEY,
-  type WorkspaceAgentLayout,
-} from "../workspaceAgentLayout";
-import {
+  WORKSPACE_PINS_STORAGE_KEY,
   isWorkspacePinned,
   parseWorkspacePins,
   serializeWorkspacePins,
   setWorkspacePinned,
-  WORKSPACE_PINS_STORAGE_KEY,
 } from "../workspacePins";
-import { pruneClosedWorkspacePreferenceKeys } from "../workspacePreferences";
-import {
-  showWorkspaceBranchBadge,
-  workspaceDisplayName,
-} from "../workspaceTreeBadges";
 import {
   COLLAPSED_WORKTREE_GROUPS_STORAGE_KEY,
   isWorktreeGroupCollapsed,
@@ -57,31 +36,52 @@ import {
   serializeCollapsedWorktreeGroups,
   setWorktreeGroupCollapsed,
 } from "../workspaceTreeCollapse";
-import { buildWorkspaceHierarchy, worktreeCreationSource } from "../worktree";
+import {
+  showWorkspaceBranchBadge,
+  workspaceDisplayName,
+} from "../workspaceTreeBadges";
+import { pruneClosedWorkspacePreferenceKeys } from "../workspacePreferences";
+import { connectionStorageKey } from "../connectionStorage";
+import {
+  AGENT_ORDER_STORAGE_KEY,
+  moveAgentPane,
+  sortAgentPanes,
+  groupOrderedAgentPanes,
+  AGENT_LIST_PREFERENCES_STORAGE_KEY,
+  parseAgentListPreferences,
+  type AgentSort,
+  type AgentGrouping,
+  parseAgentOrder,
+  serializeAgentOrder,
+} from "../agentOrder";
+import {
+  WORKSPACE_AGENT_LAYOUT_STORAGE_KEY,
+  type WorkspaceAgentLayout,
+  parseWorkspaceAgentLayout,
+} from "../workspaceAgentLayout";
+import { useConnectionClient } from "../useConnectionClient";
+import { activePaneIdForSnapshot } from "../paneJump";
+import { ConfirmDialog } from "./ModalDialogs";
+import {
+  AgentContextMenu,
+  type AgentMenuState,
+  AgentRow,
+} from "./WorkspaceAgentRows";
 import {
   exportSessionForConnection,
   groupAgentPanesByWorkspace,
   paneHasAgentHistory,
 } from "./agentSession";
-import { ContextMenu, type ContextMenuState } from "./ContextMenu";
-import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
-import { ConfirmDialog } from "./ModalDialogs";
-import { ThemedSelect } from "./ThemedSelect";
-import { TREE_DEPTH_INDENT } from "./treeIndent";
 import {
   focusTreeItem,
   keyboardContextMenuPoint,
   treeKeyboardAction,
   workspaceTreeItemIsTabStop,
 } from "./treeKeyboard";
+import { TREE_DEPTH_INDENT } from "./treeIndent";
+import { groupPanesByTab, shouldShowTabGroups } from "../paneIdentity";
 import { SegmentedControl } from "./ui/SegmentedControl";
 import { Token } from "./ui/Token";
-import {
-  AgentContextMenu,
-  type AgentMenuState,
-  AgentRow,
-} from "./WorkspaceAgentRows";
-import { WorktreeLifecycleDialog } from "./WorktreeLifecycleDialog";
 import "./WorkspaceTree.css";
 
 const LONG_PRESS_MS = 550;

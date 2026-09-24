@@ -2,9 +2,9 @@ import { constants } from "node:fs";
 import { open, realpath } from "node:fs/promises";
 import { isAbsolute, resolve } from "node:path";
 import { sshCommandArgv } from "../bridge/ssh-command";
-import { PREVIEW_TIMEOUT_MS } from "./file-constants";
 import { assertInsideRoot, relativePreviewPath } from "./file-paths";
 import type { RunProcessWithCodeTimeout } from "./file-types";
+import { PREVIEW_TIMEOUT_MS } from "./file-constants";
 
 export class HtmlPreviewError extends Error {
   constructor(

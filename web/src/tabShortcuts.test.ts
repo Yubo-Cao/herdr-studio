@@ -1,5 +1,5 @@
-import { describe, expect, test } from "bun:test";
 import { defaultShortcutBindings } from "./shortcutBindings";
+import { describe, expect, test } from "bun:test";
 import {
   adjacentTabId,
   closeShortcutTarget,

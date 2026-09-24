@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
-import { createHmac } from "node:crypto";
 import { runInNewContext } from "node:vm";
-import { browserUrlFor, withLoginToken } from "../config/server-config";
+import { createHmac } from "node:crypto";
 import { createAuthHandlers, unauthenticatedLoginRedirect } from "./auth";
+import { browserUrlFor, withLoginToken } from "../config/server-config";
 
 function cookieHeader(response: Response): string {
   const cookie = response.headers.get("set-cookie");

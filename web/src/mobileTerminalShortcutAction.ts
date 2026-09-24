@@ -1,7 +1,7 @@
 import {
-  type MobileTerminalShortcutAction,
   mobileTerminalShortcutBytes,
   mobileTerminalShortcutScroll,
+  type MobileTerminalShortcutAction,
 } from "./mobileTerminalShortcuts";
 
 export type MobileTerminalShortcutExecution =

@@ -1,4 +1,3 @@
-import { randomBytes } from "node:crypto";
 import {
   chmod,
   lstat,
@@ -10,6 +9,7 @@ import {
   stat,
   writeFile,
 } from "node:fs/promises";
+import { randomBytes } from "node:crypto";
 import { basename, dirname, isAbsolute, join, resolve } from "node:path";
 import {
   DOWNLOAD_TIMEOUT_MS,
@@ -34,8 +34,8 @@ import type {
   FileWriteOptions,
   FileWriteResult,
 } from "./file-types";
-import { decodePreviewBuffer, previewLimitForPath } from "./preview";
 import { runBinaryProcessWithTimeout } from "./process";
+import { decodePreviewBuffer, previewLimitForPath } from "./preview";
 
 function lexicalTargetInsideRoot(rootReal: string, requestedPath: string) {
   const targetPath = resolve(rootReal, requestedPath);

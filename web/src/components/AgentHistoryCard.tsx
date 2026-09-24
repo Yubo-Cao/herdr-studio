@@ -1,9 +1,9 @@
-import { Copy } from "lucide-react";
 import { memo, useEffect, useRef, useState } from "react";
-import { copyTextWithFeedback } from "../copyText";
-import { formatUiDateTime } from "../uiLocale";
-import { type HistoryEntry, historyEntryLabel } from "./agentHistory";
+import { Copy } from "lucide-react";
+import { historyEntryLabel, type HistoryEntry } from "./agentHistory";
 import { formatBytes } from "./agentSession";
+import { formatUiDateTime } from "../uiLocale";
+import { copyTextWithFeedback } from "../copyText";
 import "./AgentHistoryCard.css";
 
 export const HISTORY_PREVIEW_CHARS = 4000;

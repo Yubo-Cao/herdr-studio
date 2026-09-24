@@ -1,23 +1,23 @@
-import { randomUUID } from "node:crypto";
 import { basename } from "node:path";
+import { randomUUID } from "node:crypto";
 import { enrichAgentActivity } from "./agent-activity";
-import { readAntigravitySessionRecords } from "./antigravity-session";
+import type { HerdrCall, SessionFile } from "./session-types";
 import {
-  type AgentSessionFileAccess,
+  createAgentSessionResolverContext,
+  type AgentSessionResolverContext,
+  resolveAgentSession,
+} from "./session-resolver";
+import {
   localAgentSessionFiles,
+  type AgentSessionFileAccess,
 } from "./session-file-access";
-import { HISTORY_WINDOW_LIMIT, redactHistoryUpdate } from "./session-history";
+import { readAntigravitySessionRecords } from "./antigravity-session";
 import {
   createSessionProjectionCache,
   readSessionProjection,
   type SessionProjectionCache,
 } from "./session-projection-cache";
-import {
-  type AgentSessionResolverContext,
-  createAgentSessionResolverContext,
-  resolveAgentSession,
-} from "./session-resolver";
-import type { HerdrCall, SessionFile } from "./session-types";
+import { HISTORY_WINDOW_LIMIT, redactHistoryUpdate } from "./session-history";
 
 const MAX_MESSAGES_PER_AGENT = 200;
 

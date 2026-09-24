@@ -13,8 +13,8 @@ import { useEffect, useState } from "react";
 import {
   diffReviewLineLabel,
   fileReviewLineLabel,
-  type ReviewAnnotation,
   terminalAnnotationTitle,
+  type ReviewAnnotation,
 } from "../annotations";
 import {
   shortcutLabel,

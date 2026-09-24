@@ -1,10 +1,10 @@
 import { expect, test } from "bun:test";
 import {
-  type AgentHistoryResponse,
-  ALL_HISTORY_FILTERS,
-  type HistoryEntry,
   mergeAgentHistory,
   selectHistoryEntries,
+  ALL_HISTORY_FILTERS,
+  type AgentHistoryResponse,
+  type HistoryEntry,
 } from "./agentHistory";
 
 const entry = (id: string, text = id): HistoryEntry => ({

@@ -1,8 +1,8 @@
 import { afterEach, expect, test } from "bun:test";
-import { randomBytes } from "node:crypto";
 import * as net from "node:net";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { randomBytes } from "node:crypto";
 import { HerdrClient } from "../bridge/herdr-client";
 import {
   agentPaneIdsFromPaneList,

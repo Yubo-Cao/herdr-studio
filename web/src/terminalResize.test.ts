@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import {
+  TerminalAttachFrameWatchdog,
+  TerminalResizeSync,
   clearTerminalRelayViewports,
   forgetTerminalRelayViewportsExcept,
   rememberTerminalRelayViewport,
-  TerminalAttachFrameWatchdog,
-  TerminalResizeSync,
   terminalAttachWatchdogMs,
   terminalEndpointViewportSize,
   terminalRelayViewportForTab,

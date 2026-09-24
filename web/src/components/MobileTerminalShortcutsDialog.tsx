@@ -1,18 +1,18 @@
-import { Check, ChevronsUpDown, Plus, RotateCcw, Trash2 } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
+import { Check, ChevronsUpDown, Plus, RotateCcw, Trash2 } from "lucide-react";
 import {
-  defaultMobileTerminalShortcutRows,
-  defaultMobileTerminalSideShortcuts,
   MAX_MOBILE_TERMINAL_SHORTCUTS_PER_ROW,
   MAX_MOBILE_TERMINAL_SIDE_SHORTCUTS,
   MOBILE_TERMINAL_SHORTCUT_OPTIONS,
+  defaultMobileTerminalShortcutRows,
+  defaultMobileTerminalSideShortcuts,
+  mobileTerminalShortcutOption,
+  normalizeMobileTerminalShortcutRows,
+  normalizeMobileTerminalSideShortcuts,
   type MobileTerminalShortcut,
   type MobileTerminalShortcutAction,
   type MobileTerminalShortcutRows,
   type MobileTerminalSideShortcuts,
-  mobileTerminalShortcutOption,
-  normalizeMobileTerminalShortcutRows,
-  normalizeMobileTerminalSideShortcuts,
 } from "../mobileTerminalShortcuts";
 import { CloseButton } from "./CloseButton";
 import { focusDialogElement } from "./dialogFocus";

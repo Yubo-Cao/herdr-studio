@@ -1,11 +1,11 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ConnectionClient } from "./api";
 import {
-  type CollaborationSnapshot,
   collaborationProfile,
   publishCollaborationSnapshot,
   subscribeCollaborationSnapshot,
   updateCollaborationPresence,
+  type CollaborationSnapshot,
 } from "./collaboration";
 import { paneControlClient, paneControlState } from "./paneControl";
 import { store } from "./store";

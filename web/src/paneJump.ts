@@ -1,6 +1,6 @@
 import { normalizeSearchText } from "./searchText";
-import type { Pane, PaneLayout, Tab, Workspace } from "./types";
 import { shortId } from "./utils";
+import type { Pane, PaneLayout, Tab, Workspace } from "./types";
 
 export type PaneJumpEntry = {
   paneId: string;

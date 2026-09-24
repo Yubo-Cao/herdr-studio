@@ -1,16 +1,16 @@
 import { randomUUID } from "node:crypto";
-import { readAntigravitySessionRecords } from "./antigravity-session";
 import type { AgentSessionFileAccess } from "./session-file-access";
-import {
-  type HistoryEntry,
-  historyEntriesFromTrajectory,
-  historyUpdate,
-} from "./session-history";
+import type { AgentSessionResolved, SessionFile } from "./session-types";
 import { conversationMessagesFromTrajectory } from "./session-messages";
 import { projectAgentTrajectory } from "./session-trajectory";
-import type { AgentSessionResolved, SessionFile } from "./session-types";
+import {
+  historyEntriesFromTrajectory,
+  historyUpdate,
+  type HistoryEntry,
+} from "./session-history";
 import { isRecord } from "./session-utils";
 import { summarizeTokenUsage } from "./token-usage";
+import { readAntigravitySessionRecords } from "./antigravity-session";
 
 function parseJsonl(text: string) {
   const records: Record<string, unknown>[] = [];

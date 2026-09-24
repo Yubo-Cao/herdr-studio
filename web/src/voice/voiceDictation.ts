@@ -1,5 +1,5 @@
-import workletUrl from "./voiceCapture.worklet.ts?worker&url";
 import { encodeVoiceWav } from "./voiceSegmenter";
+import workletUrl from "./voiceCapture.worklet.ts?worker&url";
 
 export type DictationPhase = "starting" | "listening" | "speaking";
 

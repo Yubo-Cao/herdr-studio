@@ -2,9 +2,9 @@ import { expect, spyOn, test } from "bun:test";
 import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import type { LocalConnectionProfile } from "../connections/profiles";
-import { assertManagedSetupAllowed } from "../herdr/bootstrap";
 import { VERIFIED_HERDR_VERSION } from "../herdr/release";
+import { assertManagedSetupAllowed } from "../herdr/bootstrap";
+import type { LocalConnectionProfile } from "../connections/profiles";
 import {
   createHerdrSetupHandlers,
   herdrSetupGuardForProfile,

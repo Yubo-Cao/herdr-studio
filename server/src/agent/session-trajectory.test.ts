@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { projectAgentTrajectory } from "./session-trajectory";
 import type { SessionFile } from "./session-types";
+import { projectAgentTrajectory } from "./session-trajectory";
 
 const sessionFile: SessionFile = {
   path: "/tmp/session.jsonl",

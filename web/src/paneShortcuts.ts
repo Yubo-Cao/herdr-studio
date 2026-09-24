@@ -1,5 +1,5 @@
-import { matchesShortcut, type ShortcutBindings } from "./shortcutBindings";
 import { getShortcutSnapshot } from "./shortcutPreferences";
+import { matchesShortcut, type ShortcutBindings } from "./shortcutBindings";
 export type PaneShortcutDirection = "left" | "right" | "up" | "down";
 
 export type PaneShortcutAction =

@@ -3,8 +3,8 @@ import { createSshTunnelManager } from "../bridge/ssh-tunnel";
 import { runProcess } from "../utils/process-utils";
 import { testConnectionSockets } from "./profile-service";
 import {
-  type SshConnectionProfile,
   validateSshConnectionProfile,
+  type SshConnectionProfile,
 } from "./profiles";
 import { createSshProfileRuntimeConfig } from "./ssh-profile-runtime";
 

@@ -1,4 +1,3 @@
-import { afterEach, describe, expect, test } from "bun:test";
 import { createHash } from "node:crypto";
 import {
   existsSync,
@@ -11,6 +10,7 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   herdrManagedBinaryPath,
   herdrReleaseAssetName,

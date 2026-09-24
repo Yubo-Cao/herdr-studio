@@ -1,6 +1,8 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import * as React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
+import { TerminalView } from "./components/TerminalView";
+import { terminalThemeFor } from "./terminalThemes";
 import {
   browserPaneInDirection,
   emptyBrowserNavigation,
@@ -8,10 +10,8 @@ import {
   projectBrowserNavigation,
   selectBrowserTarget,
 } from "./browserNavigation";
-import { TerminalView } from "./components/TerminalView";
-import type { EndpointAvailability } from "./endpointAvailability";
-import { terminalThemeFor } from "./terminalThemes";
 import type { Pane, PaneLayout, Tab, Workspace } from "./types";
+import type { EndpointAvailability } from "./endpointAvailability";
 
 function navigationTopology() {
   const workspaces: Workspace[] = ["a", "b"].map((id, i) => ({
@@ -173,9 +173,9 @@ import {
   activateConnectionState,
   emptyServerSessionState,
   endpointCreationReason,
-  type State,
-  store,
   terminalNavigationLoading,
+  store,
+  type State,
 } from "./store";
 import { clearTabLayouts } from "./tabLayout";
 

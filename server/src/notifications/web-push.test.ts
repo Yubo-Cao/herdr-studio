@@ -11,14 +11,14 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import webpush from "web-push";
-import { createLegacyConnectionRuntime } from "../connections/runtime";
-import { createAuthHandlers } from "../http/auth";
 import {
   createWebPushService,
-  type PushTask,
   validatePushDevice,
   validatePushEndpoint,
+  type PushTask,
 } from "./web-push";
+import { createAuthHandlers } from "../http/auth";
+import { createLegacyConnectionRuntime } from "../connections/runtime";
 
 function device(id = "device-1") {
   const key = createECDH("prime256v1");

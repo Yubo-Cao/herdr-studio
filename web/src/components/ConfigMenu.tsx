@@ -1,3 +1,6 @@
+import { lazyWithReload } from "../lazyWithReload";
+import type { ReactNode } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -8,18 +11,15 @@ import {
   Palette,
   Plug,
   RefreshCw,
+  SlidersHorizontal,
   Server,
   Settings,
-  SlidersHorizontal,
   Wifi,
 } from "lucide-react";
-import type { ReactNode } from "react";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
 import packageJson from "../../package.json";
 import { logoutBrowserSession } from "../api";
 import { connectionHttpPath } from "../connectionHttp";
 import { useLayoutPreferences } from "../layoutPreferences";
-import { lazyWithReload } from "../lazyWithReload";
 import { shortcutLabel, useShortcutPreferences } from "../shortcutPreferences";
 import { shallowEqual, store, useStoreSelector } from "../store";
 import { useConnectionClient } from "../useConnectionClient";

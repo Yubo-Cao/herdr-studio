@@ -2,11 +2,11 @@ import { describe, expect, test } from "bun:test";
 import {
   isTerminalImeCommittedInputType,
   TerminalImeCommitGuard,
+  terminalImeEventTime,
+  terminalImeFallbackText,
   TerminalImeFallbackTracker,
   TerminalImeKeyEventTracker,
   TerminalImeTextareaFallbackTracker,
-  terminalImeEventTime,
-  terminalImeFallbackText,
   terminalImeTextareaDelta,
 } from "./terminalIme";
 

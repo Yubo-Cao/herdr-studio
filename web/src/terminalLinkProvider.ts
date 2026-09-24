@@ -1,16 +1,16 @@
 import type { IBufferLine, ILink, Terminal } from "@xterm/xterm";
 import { terminalLinkModifierMatches } from "./shortcutPreferences";
 import {
+  findTerminalHttpLinks,
+  sanitizeTerminalHttpUrl,
+  terminalFileUriPath,
+} from "./terminalLinks";
+import {
   findTerminalFileLinkCandidates,
   MAX_CANDIDATES_PER_LINE,
   type TerminalFileLinkCandidate,
   type TextRange,
 } from "./terminalFileLinks";
-import {
-  findTerminalHttpLinks,
-  sanitizeTerminalHttpUrl,
-  terminalFileUriPath,
-} from "./terminalLinks";
 
 const MAX_CONTEXT_CELLS = 16_384;
 const MAX_INFERRED_JOINS = 8;

@@ -1,30 +1,30 @@
-import { describe, expect, test } from "bun:test";
 import {
   annotationDraftStorageKey,
-  type ReviewAnnotation,
   readReviewAnnotations,
   writeReviewAnnotations,
+  type ReviewAnnotation,
 } from "./annotations";
 import { defaultShortcutBindings } from "./shortcutBindings";
+import { describe, expect, test } from "bun:test";
 import type { Workspace } from "./types";
 import {
   checkoutKeyForWorkspace,
-  INSPECTOR_SEPARATOR_SIZE,
   inspectorMaximumSize,
   inspectorNavigationRatioAtPosition,
+  isWorkspaceInspectorShortcut as resolveShortcut,
+  INSPECTOR_SEPARATOR_SIZE,
   readInspectorPreferences,
   readResourceFileSelection,
   relativePathWithinCheckout,
-  isWorkspaceInspectorShortcut as resolveShortcut,
-  resolveWorkspaceForScope,
   resourceOwnerKey,
   resourceScopeForWorkspace,
   resourceStateKey,
+  resolveWorkspaceForScope,
   sameResourceOwner,
-  type WorkspaceInspectorState,
   writeInspectorNavigationRatio,
   writeInspectorPreferences,
   writeResourceFileSelection,
+  type WorkspaceInspectorState,
 } from "./workspaceResource";
 
 const isWorkspaceInspectorShortcut = (

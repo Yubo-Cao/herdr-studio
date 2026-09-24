@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import type { Workspace } from "./types";
-import { workspacePinKey } from "./workspacePins";
 import {
   buildWorkspaceHierarchy,
   canCreateWorktree,
   resolveWorktreeOpenSource,
   worktreeCreationSource,
 } from "./worktree";
+import { workspacePinKey } from "./workspacePins";
 
 function workspace(worktree?: Workspace["worktree"]): Workspace {
   return {

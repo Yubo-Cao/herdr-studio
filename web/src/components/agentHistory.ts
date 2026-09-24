@@ -4,7 +4,6 @@ import type {
   HistoryUpdate,
 } from "../../../server/src/agent/session-history";
 import { historyWindowEntries } from "../../../server/src/agent/session-history-window";
-
 export type { HistoryCursor, HistoryEntry, HistoryUpdate };
 
 export type AgentHistory = {

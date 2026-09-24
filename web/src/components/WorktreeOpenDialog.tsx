@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { store } from "../store";
-import type { ExistingWorktree, WorktreeList } from "../types";
 import { useConnectionClient } from "../useConnectionClient";
+import type { ExistingWorktree, WorktreeList } from "../types";
 import { resolveWorktreeOpenSource } from "../worktree";
 import { CloseButton } from "./CloseButton";
 import { focusDialogElement } from "./dialogFocus";

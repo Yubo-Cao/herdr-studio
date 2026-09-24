@@ -1,3 +1,15 @@
+import { roamgateLocalStorage } from "../browserStorage";
+import {
+  type DragEvent,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  Suspense,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -11,84 +23,73 @@ import {
   Search,
   Upload,
 } from "lucide-react";
-import {
-  type DragEvent,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
-  Suspense,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-} from "react";
-import { roamgateLocalStorage } from "../browserStorage";
+import { FilesystemBrowser } from "./FilesystemBrowser";
+import { createFileSearchMatcher } from "../fileSearch";
 import { connectionHttpPath } from "../connectionHttp";
 import { connectionStorageKey } from "../connectionStorage";
 import { downloadFileFromUrl } from "../downloadFile";
+import { lazyWithReload } from "../lazyWithReload";
+import {
+  refreshGitDiffSummary,
+  useGitDiffSummaryState,
+} from "../gitDiffSummaryStore";
 import {
   fileExplorerRefreshKey,
   readFileExplorerRefresh,
   subscribeFileExplorerRefresh,
 } from "../fileExplorerRefresh";
-import { createFileSearchMatcher } from "../fileSearch";
-import {
-  refreshGitDiffSummary,
-  useGitDiffSummaryState,
-} from "../gitDiffSummaryStore";
-import { lazyWithReload } from "../lazyWithReload";
 import { store, useStoreSelector } from "../store";
 import { copyTextFromUserGesture } from "../terminalClipboard";
+import { useConnectionClient } from "../useConnectionClient";
 import type {
   FileExplorerEntry,
   FileExplorerList,
   FilePreview,
   GitDiffEntry,
 } from "../types";
-import { useConnectionClient } from "../useConnectionClient";
 import { CloseButton } from "./CloseButton";
-import type {
-  ActiveFilePreviewSelection,
-  FilePreviewSelectionMeta,
-} from "./FilePreviewContent";
-import { FilesystemBrowser } from "./FilesystemBrowser";
-import {
-  absolutePath,
-  advanceExplorerCacheRevision,
-  buildGitStatusMaps,
-  createExplorerEntry,
-  deleteExplorerEntry,
-  directoryPaths,
-  displaySize,
-  explorerCacheKey,
-  explorerRuntimeContextKey,
-  FILE_SHOW_HIDDEN_PREFIX,
-  type FileExplorerCache,
-  filePreviewCacheKey,
-  initialWorkspacePath,
-  invalidateFilePreviewCache,
-  isExplorerDirectoryEntry,
-  isFilesystemPath,
-  isWorkspaceRelativePath,
-  parentDirectoryPath,
-  parentDirectoryPaths,
-  readCachedPreview,
-  readExplorerCache,
-  readExplorerViewMemory,
-  requestFilePreview,
-  symlinkDescription,
-  uploadExplorerFile,
-  workspaceName,
-  writeExplorerCache,
-  writeExplorerViewMemory,
-} from "./fileExplorerResources";
 import { ConfirmDialog, TextInputDialog } from "./ModalDialogs";
+import { Button } from "./ui/Button";
 import {
   focusTreeItem,
   keyboardContextMenuPoint,
   treeKeyboardAction,
 } from "./treeKeyboard";
-import { Button } from "./ui/Button";
+import type {
+  ActiveFilePreviewSelection,
+  FilePreviewSelectionMeta,
+} from "./FilePreviewContent";
+
+import {
+  workspaceName,
+  displaySize,
+  absolutePath,
+  initialWorkspacePath,
+  type FileExplorerCache,
+  FILE_SHOW_HIDDEN_PREFIX,
+  explorerRuntimeContextKey,
+  explorerCacheKey,
+  advanceExplorerCacheRevision,
+  readExplorerCache,
+  writeExplorerCache,
+  filePreviewCacheKey,
+  readCachedPreview,
+  invalidateFilePreviewCache,
+  parentDirectoryPaths,
+  parentDirectoryPath,
+  directoryPaths,
+  isWorkspaceRelativePath,
+  buildGitStatusMaps,
+  requestFilePreview,
+  uploadExplorerFile,
+  deleteExplorerEntry,
+  isExplorerDirectoryEntry,
+  createExplorerEntry,
+  isFilesystemPath,
+  readExplorerViewMemory,
+  symlinkDescription,
+  writeExplorerViewMemory,
+} from "./fileExplorerResources";
 import { SegmentedControl } from "./ui/SegmentedControl";
 import "./FileExplorerDialog.css";
 
@@ -102,7 +103,6 @@ const LONG_PRESS_MS = 550;
 const LONG_PRESS_MOVE_PX = 10;
 
 export { isExplorerDirectoryEntry };
-
 const FILE_TREE_INDENT = 10;
 const FILE_TREE_BASE_INDENT = 6;
 

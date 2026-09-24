@@ -1,16 +1,16 @@
 import { describe, expect, test } from "bun:test";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { homedir, tmpdir } from "node:os";
+import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from "node:fs";
+import { runServiceCommand } from "./service-manager";
 import { join } from "node:path";
 import {
-  browserUrlFor,
   herdrConfigDir,
+  nativeSocketPath,
+  browserUrlFor,
   loadServerConfig,
   loadServerTls,
-  nativeSocketPath,
   resolveServerLogLevel,
 } from "./server-config";
-import { runServiceCommand } from "./service-manager";
 
 describe("herdrConfigDir", () => {
   test("uses APPDATA on win32", () => {

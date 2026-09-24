@@ -1,8 +1,8 @@
 import { describe, expect, test } from "bun:test";
 import {
+  MAX_MOBILE_TERMINAL_SHORTCUTS_PER_ROW,
   defaultMobileTerminalShortcutRows,
   defaultMobileTerminalSideShortcuts,
-  MAX_MOBILE_TERMINAL_SHORTCUTS_PER_ROW,
   mobileTerminalShortcutBytes,
   mobileTerminalShortcutCount,
   mobileTerminalShortcutScroll,

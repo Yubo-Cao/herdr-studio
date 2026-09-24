@@ -1,3 +1,6 @@
+import { imageMimeForPath } from "../../../shared/filePreview";
+import { roamgateLocalStorage } from "../browserStorage";
+import { shortcutMatches } from "../shortcutPreferences";
 import {
   DEFAULT_THEMES,
   getSingularPatch,
@@ -6,8 +9,8 @@ import {
 import {
   FileDiff,
   Virtualizer,
-  type WorkerInitializationRenderOptions,
   WorkerPoolContextProvider,
+  type WorkerInitializationRenderOptions,
   type WorkerPoolOptions,
 } from "@pierre/diffs/react";
 import {
@@ -22,28 +25,24 @@ import {
 } from "lucide-react";
 import {
   Component,
-  type ComponentProps,
   memo,
-  type ReactNode,
   useCallback,
   useDeferredValue,
   useEffect,
   useMemo,
   useRef,
   useState,
+  type ComponentProps,
+  type ReactNode,
 } from "react";
-import { imageMimeForPath } from "../../../shared/filePreview";
+import type { ConnectionClient } from "../api";
 import {
-  type DiffReviewAnnotation,
   diffReviewLineLabel,
   findDiffReviewSelection,
+  type DiffReviewAnnotation,
   type NewReviewAnnotation,
   type ReviewAnnotation,
 } from "../annotations";
-import type { ConnectionClient } from "../api";
-import { roamgateLocalStorage } from "../browserStorage";
-import { gitDiffCode, gitDiffCodeLabel } from "../gitDiffStatus";
-import { shortcutMatches } from "../shortcutPreferences";
 import type {
   FilePreview,
   GitDiffEntry,
@@ -51,21 +50,22 @@ import type {
   GitDiffKind,
 } from "../types";
 import { connectionClientScopeKey } from "../useConnectionClient";
+import { gitDiffCode, gitDiffCodeLabel } from "../gitDiffStatus";
+import { requestFilePreview } from "./fileExplorerResources";
 import {
-  type AnnotationComposerDraft,
   AnnotationComposerPopover,
+  type AnnotationComposerDraft,
 } from "./AnnotationComposerPopover";
 import {
-  type DiffAutoCollapseInfo,
   diffAutoCollapseInfo,
+  type DiffAutoCollapseInfo,
 } from "./diffAutoCollapse";
 import {
-  expandDiffEntryOnActivate,
   readDiffCollapseState,
   writeDiffCollapseState,
+  expandDiffEntryOnActivate,
 } from "./diffContentState";
 import { diffSyntaxLanguageForPath } from "./diffSyntaxHighlighting";
-import { requestFilePreview } from "./fileExplorerResources";
 import { Button } from "./ui/Button";
 import { SegmentedControl } from "./ui/SegmentedControl";
 import "./DiffContentView.css";

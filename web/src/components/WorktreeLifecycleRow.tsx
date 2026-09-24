@@ -11,12 +11,12 @@ import {
 import { store } from "../store";
 import type { InspectorView } from "../workspaceResource";
 import {
-  type WorktreeLifecycleRow as LifecycleRow,
   lifecycleAutoSyncLabel,
   lifecycleGitChangeCount,
   lifecycleGitSummary,
   lifecycleWorktreeTitle,
   type WorkspaceAutoSyncInfo,
+  type WorktreeLifecycleRow as LifecycleRow,
 } from "../worktreeLifecycle";
 
 export function WorktreeLifecycleRow({

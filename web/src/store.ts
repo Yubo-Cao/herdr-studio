@@ -1,21 +1,33 @@
 import { roamgateLocalStorage, roamgateSessionStorage } from "./browserStorage";
+import { syncTaskPush, type TaskNotificationPreferences } from "./taskPush";
 import {
   isTaskNotificationTarget,
   prepareTaskNotifications,
   showTaskNotification,
   type TaskNotificationTarget,
 } from "./taskNotifications";
-import { syncTaskPush, type TaskNotificationPreferences } from "./taskPush";
-
 export {
   bindTaskNotificationActivation,
   isTaskNotificationTarget,
   TASK_NOTIFICATION_ACTIVATE_EVENT,
   type TaskNotificationTarget,
 } from "./taskNotifications";
-
-import { useRef, useSyncExternalStore } from "react";
 import { withAgentActivity } from "./agentOrder";
+import {
+  type EndpointAvailability,
+  parseEndpointAdvertisement,
+  parseEndpointAvailability,
+  endpointMethodReason,
+} from "./endpointAvailability";
+import {
+  type BrowserNavigation,
+  emptyBrowserNavigation,
+  selectBrowserTarget,
+  projectBrowserNavigation,
+  projectBrowserLayout,
+  browserPaneInDirection,
+} from "./browserNavigation";
+import { useRef, useSyncExternalStore } from "react";
 import {
   bridge,
   type ConnectionClient,
@@ -26,33 +38,17 @@ import {
   parseConnectionSummary,
 } from "./api";
 import {
-  type BrowserNavigation,
-  browserPaneInDirection,
-  emptyBrowserNavigation,
-  projectBrowserLayout,
-  projectBrowserNavigation,
-  selectBrowserTarget,
-} from "./browserNavigation";
-import {
   LEGACY_DEFAULT_CONNECTION_ID,
   migrateLegacyConnectionStorage,
 } from "./connectionStorage";
-import {
-  type EndpointAvailability,
-  endpointMethodReason,
-  parseEndpointAdvertisement,
-  parseEndpointAvailability,
-} from "./endpointAvailability";
-import {
-  type GitFileAction,
-  type GitRepoAction,
-  type GitWorkingCounts,
-  gitFileActionLabel,
-  gitFileActionSuccessMessage,
-  gitRepoActionSuccessMessage,
-} from "./gitActions";
-import { publishLastStepCompletion } from "./lastStepCompletionStore";
+import { disposeTerminalConnection } from "./terminalConnection";
 import { isReconnectRetryableError } from "./reconnectRetry";
+import { publishLastStepCompletion } from "./lastStepCompletionStore";
+import {
+  clearTerminalRelayViewports,
+  forgetTerminalRelayViewportsExcept,
+  terminalRelayViewportForTab,
+} from "./terminalResize";
 import {
   clearTabLayouts,
   forgetTabLayoutsExcept,
@@ -60,13 +56,15 @@ import {
   rememberTabLayout,
   tabLayoutFor,
 } from "./tabLayout";
-import { disposeTerminalConnection } from "./terminalConnection";
-import {
-  clearTerminalRelayViewports,
-  forgetTerminalRelayViewportsExcept,
-  terminalRelayViewportForTab,
-} from "./terminalResize";
 import type { GitDiffEntry, Pane, PaneLayout, Tab, Workspace } from "./types";
+import {
+  gitFileActionLabel,
+  gitFileActionSuccessMessage,
+  gitRepoActionSuccessMessage,
+  type GitFileAction,
+  type GitRepoAction,
+  type GitWorkingCounts,
+} from "./gitActions";
 
 export interface ServerSessionState {
   /** ConnectionManager generation that owns every server resource below. */

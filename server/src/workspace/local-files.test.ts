@@ -4,15 +4,15 @@ import {
   lstat,
   mkdir,
   mkdtemp,
-  readdir,
   readFile,
+  readdir,
   rm,
   stat,
   symlink,
   writeFile,
 } from "node:fs/promises";
-import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { tmpdir } from "node:os";
 import {
   deleteLocalFile,
   downloadLocalFile,

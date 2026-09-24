@@ -1,7 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { defaultShortcutBindings } from "./shortcutBindings";
 import { terminalShortcutSequence } from "./terminalKeys";
-
+import { defaultShortcutBindings } from "./shortcutBindings";
 type KeyEvent = Parameters<typeof terminalShortcutSequence>[0];
 const modifiedEnterSequence = (event: KeyEvent) =>
   terminalShortcutSequence(event, defaultShortcutBindings("linux"));
