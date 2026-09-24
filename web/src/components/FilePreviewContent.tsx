@@ -1,21 +1,3 @@
-import { shortcutMatches } from "../shortcutPreferences";
-import {
-  FILE_WRITE_CONFLICT_MESSAGE,
-  FILE_WRITE_MAX_BYTES,
-  HTML_PREVIEW_MAX_BYTES,
-  isHtmlPath,
-} from "../../../shared/filePreview";
-import {
-  Suspense,
-  useCallback,
-  useEffect,
-  useMemo,
-  useRef,
-  useState,
-  type MutableRefObject,
-  type ReactNode,
-} from "react";
-import { createPortal } from "react-dom";
 import type { EditorView as CodeMirrorEditorView } from "@codemirror/view";
 import {
   ChevronLeft,
@@ -26,31 +8,59 @@ import {
   Save,
   X,
 } from "lucide-react";
-import { fileReviewLineLabel, MAX_QUOTE_LENGTH } from "../annotations";
 import {
-  FileAnnotationDrag,
-  type FileAnnotationRequest,
-} from "./fileAnnotationDrag";
+  type MutableRefObject,
+  type ReactNode,
+  Suspense,
+  useCallback,
+  useEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
+import {
+  FILE_WRITE_CONFLICT_MESSAGE,
+  FILE_WRITE_MAX_BYTES,
+  HTML_PREVIEW_MAX_BYTES,
+  isHtmlPath,
+} from "../../../shared/filePreview";
 import type {
   FileLineReviewAnnotation,
   NewReviewAnnotation,
   ReviewAnnotation,
 } from "../annotations";
-import type { FileExplorerEntry, FilePreview } from "../types";
+import { fileReviewLineLabel, MAX_QUOTE_LENGTH } from "../annotations";
+import {
+  directoryPreviewName,
+  directoryPreviewPath,
+  normalizeFilesystemPath,
+} from "../filesystemPaths";
+import { lazyWithReload } from "../lazyWithReload";
+import { shortcutMatches } from "../shortcutPreferences";
+import { store, useStoreSelector } from "../store";
 import { copyTextFromUserGesture } from "../terminalClipboard";
+import type { FileExplorerEntry, FilePreview } from "../types";
 import { useConnectionClient } from "../useConnectionClient";
 import {
   resolveWorkspaceMarkdownImageUrl,
-  workspaceMarkdownDocumentPath,
   workspaceFileUrl,
+  workspaceMarkdownDocumentPath,
 } from "../workspaceFileUrl";
-import { MarkdownPreview, type MarkdownSelectionTarget } from "./markdown";
+import { relativePathWithinCheckout } from "../workspaceResource";
 import {
-  AnnotationComposerPopover,
   type AnnotationComposerDraft,
+  AnnotationComposerPopover,
 } from "./AnnotationComposerPopover";
-import { MermaidDiagram } from "./MermaidDiagram";
+import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
+import {
+  FileAnnotationDrag,
+  type FileAnnotationRequest,
+} from "./fileAnnotationDrag";
+import { invalidateFilePreviewCache } from "./fileExplorerResources";
 import { ImagePreview } from "./ImagePreview";
+import { MermaidDiagram } from "./MermaidDiagram";
+import { MarkdownPreview, type MarkdownSelectionTarget } from "./markdown";
 import {
   handlePreviewEditorCopy,
   isEditablePreviewTarget,
@@ -59,19 +69,9 @@ import {
   selectAllInPreviewElement,
 } from "./previewSelection";
 import { highlightCodeTokens } from "./syntaxHighlighting";
-import { store, useStoreSelector } from "../store";
-import { relativePathWithinCheckout } from "../workspaceResource";
-import {
-  directoryPreviewName,
-  directoryPreviewPath,
-  normalizeFilesystemPath,
-} from "../filesystemPaths";
-import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
-import { invalidateFilePreviewCache } from "./fileExplorerResources";
-import { lazyWithReload } from "../lazyWithReload";
 import { Button } from "./ui/Button";
-import { Token } from "./ui/Token";
 import { SegmentedControl } from "./ui/SegmentedControl";
+import { Token } from "./ui/Token";
 import "./FilePreviewContent.css";
 
 const FileEditor = lazyWithReload("file-editor", () =>

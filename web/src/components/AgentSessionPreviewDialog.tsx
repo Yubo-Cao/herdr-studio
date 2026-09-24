@@ -1,5 +1,3 @@
-import { useEffect, useMemo, useRef, useState, memo } from "react";
-import { createPortal } from "react-dom";
 import {
   Brain,
   ChevronRight,
@@ -9,18 +7,19 @@ import {
   Info,
   Wrench,
 } from "lucide-react";
+import { memo, useEffect, useMemo, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { copyTextWithFeedback } from "../copyText";
 import { useStoreSelector } from "../store";
 import type { Pane } from "../types";
 import { UI_LOCALE } from "../uiLocale";
-import { copyTextWithFeedback } from "../copyText";
 import { useConnectionClient } from "../useConnectionClient";
 import { shortId } from "../utils";
 import { AgentIcon } from "./AgentIcon";
-import { CodePreview } from "./CodePreview";
 import {
+  type AgentSessionSummary,
   type AgentSessionTrajectoryStep,
   type AgentSessionTurn,
-  type AgentSessionSummary,
   downloadSession,
   downloadSessionAtif,
   firstLinePreview,
@@ -32,6 +31,7 @@ import {
   toolArgumentsPreview,
 } from "./agentSession";
 import { CloseButton } from "./CloseButton";
+import { CodePreview } from "./CodePreview";
 import { focusDialogElement } from "./dialogFocus";
 import "./AgentSessionPreviewDialog.css";
 

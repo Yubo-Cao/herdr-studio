@@ -1,10 +1,10 @@
 import { EventEmitter } from "node:events";
+import type { Logger } from "../utils/logger";
+import { silentLogger } from "../utils/logger";
 import { EndpointClient, type EndpointSurface } from "./endpoint-client";
 import { EndpointCreationDeadline } from "./endpoint-creation";
 import { frameToAnsi } from "./frame-to-ansi";
 import type { FrameData } from "./thin-client";
-import type { Logger } from "../utils/logger";
-import { silentLogger } from "../utils/logger";
 import { MOUSE_KIND, VtInputClassifier } from "./vt-input-classifier";
 
 const ESC_FLUSH_MS = 25;

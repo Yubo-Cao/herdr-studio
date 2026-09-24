@@ -1,21 +1,21 @@
 import { useEffect, useLayoutEffect, useRef } from "react";
 import {
-  focusTreeItem,
-  keyboardContextMenuPoint,
-  treeKeyboardAction,
-} from "./treeKeyboard";
-import { store, useStoreSelector } from "../store";
-import type { Pane } from "../types";
-import { agentClass, formatMemoryLimit, shortId } from "../utils";
-import {
   customTabLabel,
   paneDisplayName,
   paneLocationName,
 } from "../paneIdentity";
-import { shouldShowAgentStatusLabel } from "./agentSession";
+import { store, useStoreSelector } from "../store";
+import type { Pane } from "../types";
+import { agentClass, formatMemoryLimit, shortId } from "../utils";
 import { AgentStatusIcon } from "./AgentStatusIcon";
+import { shouldShowAgentStatusLabel } from "./agentSession";
 import { observeClampedContextMenu } from "./contextMenuPosition";
 import { TREE_DEPTH_INDENT } from "./treeIndent";
+import {
+  focusTreeItem,
+  keyboardContextMenuPoint,
+  treeKeyboardAction,
+} from "./treeKeyboard";
 import { Token } from "./ui/Token";
 import "./WorkspaceAgentRows.css";
 

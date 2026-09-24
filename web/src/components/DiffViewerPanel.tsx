@@ -1,17 +1,3 @@
-import { roamgateLocalStorage } from "../browserStorage";
-import {
-  forwardRef,
-  useCallback,
-  useEffect,
-  useImperativeHandle,
-  useLayoutEffect,
-  useMemo,
-  useRef,
-  useState,
-  useSyncExternalStore,
-  type ReactNode,
-  type PointerEvent as ReactPointerEvent,
-} from "react";
 import {
   ChevronDown,
   ChevronRight,
@@ -20,43 +6,56 @@ import {
   Folder,
   RefreshCw,
 } from "lucide-react";
+import {
+  forwardRef,
+  type ReactNode,
+  type PointerEvent as ReactPointerEvent,
+  useCallback,
+  useEffect,
+  useImperativeHandle,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
 import type { ConnectionClient } from "../api";
-import type { GitDiffEntry, GitDiffFile, GitDiffSummary } from "../types";
-import { useStoreSelector } from "../store";
-import {
-  connectionClientScopeKey,
-  useConnectionClient,
-} from "../useConnectionClient";
+import { roamgateLocalStorage } from "../browserStorage";
 import { connectionStorageKey } from "../connectionStorage";
-import { gitDiffCode, gitDiffCodeLabel } from "../gitDiffStatus";
+import { bumpFileExplorerRefresh } from "../fileExplorerRefresh";
 import {
-  lastStepCompletionKey,
-  readLastStepCompletion,
-  subscribeLastStepCompletion,
-} from "../lastStepCompletionStore";
+  buildGitFileMenuItems,
+  buildGitRepoMenuItems,
+  countWorkingEntries,
+  type GitFileMenuItem,
+  type GitRepoMenuItem,
+  gitFileConfirmCopy,
+  gitFolderConfirmCopy,
+  gitRepoConfirmCopy,
+} from "../gitActions";
+import { gitDiffCode, gitDiffCodeLabel } from "../gitDiffStatus";
 import {
   refreshGitDiffSummary,
   retireGitDiffSummary,
   retireGitDiffSummaryResource,
   useGitDiffSummaryState,
 } from "../gitDiffSummaryStore";
-import { diffAutoCollapseInfo } from "./diffAutoCollapse";
-import { store } from "../store";
-import { copyTextFromUserGesture } from "../terminalClipboard";
-import { bumpFileExplorerRefresh } from "../fileExplorerRefresh";
 import {
-  buildGitFileMenuItems,
-  buildGitRepoMenuItems,
-  countWorkingEntries,
-  gitFileConfirmCopy,
-  gitFolderConfirmCopy,
-  gitRepoConfirmCopy,
-  type GitFileMenuItem,
-  type GitRepoMenuItem,
-} from "../gitActions";
-import { keyboardContextMenuPoint, treeKeyboardAction } from "./treeKeyboard";
+  lastStepCompletionKey,
+  readLastStepCompletion,
+  subscribeLastStepCompletion,
+} from "../lastStepCompletionStore";
+import { store, useStoreSelector } from "../store";
+import { copyTextFromUserGesture } from "../terminalClipboard";
+import type { GitDiffEntry, GitDiffFile, GitDiffSummary } from "../types";
+import {
+  connectionClientScopeKey,
+  useConnectionClient,
+} from "../useConnectionClient";
 import { ActionsMenu } from "./ActionsMenu";
+import { diffAutoCollapseInfo } from "./diffAutoCollapse";
 import { ConfirmDialog } from "./ModalDialogs";
+import { keyboardContextMenuPoint, treeKeyboardAction } from "./treeKeyboard";
 import { IconButton } from "./ui/IconButton";
 import { SegmentedControl } from "./ui/SegmentedControl";
 import "./DiffViewerPanel.css";

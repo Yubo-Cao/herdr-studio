@@ -1,7 +1,7 @@
 import { expect, test } from "bun:test";
 import {
-  parseAgentIntegrations,
   type AgentIntegration,
+  parseAgentIntegrations,
 } from "./AgentIntegrationsSettings";
 
 const integration: AgentIntegration = {

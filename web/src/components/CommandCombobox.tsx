@@ -1,15 +1,4 @@
 import {
-  shortcutMatches,
-  shortcutTitle,
-  shortcutLabel,
-  useShortcutPreferences,
-  getShortcutSnapshot,
-} from "../shortcutPreferences";
-import { SHORTCUT_NUMBERS, type ShortcutNumber } from "../shortcutBindings";
-import { endpointCreationReason } from "../store";
-import { normalizeSearchText } from "../searchText";
-import { useEffect, useMemo, useState } from "react";
-import {
   ArrowDown,
   ArrowLeft,
   ArrowRight,
@@ -17,10 +6,10 @@ import {
   ChevronsUpDown,
   FileDiff,
   FileText,
-  FolderPlus,
   FolderOpen,
-  GitCommitHorizontal,
+  FolderPlus,
   GitBranch,
+  GitCommitHorizontal,
   Keyboard,
   Maximize2,
   PanelTop,
@@ -28,7 +17,23 @@ import {
   SplitSquareVertical,
   X,
 } from "lucide-react";
-import { shallowEqual, store, useStoreSelector } from "../store";
+import { useEffect, useMemo, useState } from "react";
+import { luckyWorktreeBranchName } from "../luckyName";
+import { normalizeSearchText } from "../searchText";
+import { SHORTCUT_NUMBERS, type ShortcutNumber } from "../shortcutBindings";
+import {
+  getShortcutSnapshot,
+  shortcutLabel,
+  shortcutMatches,
+  shortcutTitle,
+  useShortcutPreferences,
+} from "../shortcutPreferences";
+import {
+  endpointCreationReason,
+  shallowEqual,
+  store,
+  useStoreSelector,
+} from "../store";
 import {
   clearTerminalComposerDrafts,
   terminalComposerCloseWarning,
@@ -36,12 +41,10 @@ import {
 } from "../terminalComposer";
 import type { FileExplorerEntry, Pane, Tab, Workspace } from "../types";
 import { basename, shortId } from "../utils";
-import { luckyWorktreeBranchName } from "../luckyName";
+import { canCreateWorktree, worktreeCreationSource } from "../worktree";
+import { AgentIcon } from "./AgentIcon";
 import { CreateWorkspaceDialog } from "./CreateWorkspaceDialog";
 import { ConfirmDialog, TextInputDialog } from "./ModalDialogs";
-import { WorktreeHooksDialog } from "./WorktreeHooksDialog";
-import { WorktreeOpenDialog } from "./WorktreeOpenDialog";
-import { AgentIcon } from "./AgentIcon";
 import {
   Command,
   CommandEmpty,
@@ -52,8 +55,9 @@ import {
   CommandShortcut,
 } from "./ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
-import { canCreateWorktree, worktreeCreationSource } from "../worktree";
+import { WorktreeHooksDialog } from "./WorktreeHooksDialog";
 import { WorktreeLifecycleDialog } from "./WorktreeLifecycleDialog";
+import { WorktreeOpenDialog } from "./WorktreeOpenDialog";
 
 type TextAction =
   | { type: "rename-workspace"; workspace: Workspace }

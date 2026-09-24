@@ -1,5 +1,5 @@
 import { useEffect, useRef } from "react";
-import { terminalFontOptions, TERMINAL_FONT_FAMILY } from "../appearance";
+import { TERMINAL_FONT_FAMILY, terminalFontOptions } from "../appearance";
 import { monacoLanguageForPath } from "../monacoLanguages";
 import { applyMonacoTheme, monaco } from "../monacoSetup";
 import "./FileEditor.css";

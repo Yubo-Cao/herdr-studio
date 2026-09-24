@@ -1,9 +1,8 @@
-import type { ServerWebSocket } from "bun";
-import { isHtmlPath } from "../../shared/filePreview";
-import { DOWNLOAD_TIMEOUT_MS } from "./workspace/file-constants";
-import { createWebPushService } from "./notifications/web-push";
 import { rmSync } from "node:fs";
+import type { ServerWebSocket } from "bun";
 import packageJson from "../../package.json";
+import { isHtmlPath } from "../../shared/filePreview";
+import { HerdrClient } from "./bridge/herdr-client";
 import type { SshTunnelConfig } from "./bridge/ssh-tunnel";
 import {
   flushCoalescedMessages,
@@ -23,13 +22,6 @@ import {
   runServiceCommand,
   SERVICE_COMMAND_CONTINUE,
 } from "./config/service-manager";
-import { runHerdrCommand } from "./herdr/cli";
-import { enrichIntegrationVersions } from "./herdr/integration-versions";
-import {
-  createHerdrSetupHandlers,
-  herdrSetupGuardForProfile,
-} from "./http/herdr-setup";
-import { HerdrClient } from "./bridge/herdr-client";
 import {
   connectionRoutingErrorResponse,
   type ParsedConnectionHttpRoute,
@@ -54,7 +46,6 @@ import {
   type ConnectionProfile,
   ConnectionProfileStore,
 } from "./connections/profiles";
-import { createSshProfileRuntimeConfig } from "./connections/ssh-profile-runtime";
 import {
   ConnectionRoutingError,
   createConnectionReplyPublisher,
@@ -75,14 +66,22 @@ import {
   type LegacyConnectionRuntime,
 } from "./connections/runtime";
 import { createShutdownController } from "./connections/shutdown";
+import { createSshProfileRuntimeConfig } from "./connections/ssh-profile-runtime";
 import { bindListenerBeforeConnectionStart } from "./connections/startup";
 import { LEGACY_DEFAULT_CONNECTION_ID } from "./connections/types";
+import { runHerdrCommand } from "./herdr/cli";
+import { enrichIntegrationVersions } from "./herdr/integration-versions";
 import { createAuthHandlers, unauthenticatedLoginRedirect } from "./http/auth";
+import {
+  createHerdrSetupHandlers,
+  herdrSetupGuardForProfile,
+} from "./http/herdr-setup";
 import { serveStatic } from "./http/static-files";
 import {
   createUpdateHandlers,
   UPDATE_HTTP_IDLE_TIMEOUT_SECONDS,
 } from "./http/update";
+import { createWebPushService } from "./notifications/web-push";
 import {
   configureServerLogger,
   createRecoveryReporter,
@@ -91,11 +90,13 @@ import {
 } from "./utils/logger";
 import { runProcessWithCodeTimeout, shQuote } from "./utils/process-utils";
 import { rpcLogLevel } from "./utils/rpc-logging";
-import { syncWorktreeBase } from "./worktree/create";
+import { voiceCleanupFromEnv } from "./voice/cleanup";
 import {
   createVoiceHandlers,
-  voiceProviderFromEnv,
+  voiceProvidersFromEnv,
 } from "./voice/transcription";
+import { DOWNLOAD_TIMEOUT_MS } from "./workspace/file-constants";
+import { syncWorktreeBase } from "./worktree/create";
 import {
   removeWorktreeWithRecovery,
   WORKTREE_REMOVE_TIMEOUT_MS,
@@ -118,7 +119,10 @@ if (herdrCommandResult !== null) {
 const config = loadServerConfig(APP_VERSION);
 configureServerLogger(config.logLevel);
 const logger = serverLogger;
-const voice = createVoiceHandlers({ provider: () => voiceProviderFromEnv() });
+const voice = createVoiceHandlers({
+  providers: () => voiceProvidersFromEnv(),
+  cleanup: () => voiceCleanupFromEnv(),
+});
 const webPush = createWebPushService({
   warn: (message) => logger.warn(message),
 });
@@ -1379,6 +1383,10 @@ function main() {
             // ten-second idle timeout for a long segment.
             server.timeout(req, 75);
             return voice.transcribe(req);
+          }
+          if (url.pathname === "/api/voice/cleanup" && req.method === "POST") {
+            server.timeout(req, 60);
+            return voice.cleanup(req);
           }
           if (url.pathname === "/api/health") {
             return Response.json({

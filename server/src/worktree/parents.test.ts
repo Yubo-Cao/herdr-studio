@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { repoSettingsKey, type GuiSettings } from "../config/gui-settings";
+import { type GuiSettings, repoSettingsKey } from "../config/gui-settings";
 import { attachWorktreeParents, createWorktreeParentStore } from "./parents";
 
 function deferred() {

@@ -1,5 +1,5 @@
-import { shortcutMatches } from "../shortcutPreferences";
 import { useEffect, useRef } from "react";
+import { shortcutMatches } from "../shortcutPreferences";
 import {
   handlePreviewEditorCopy,
   isEditablePreviewTarget,

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { ZoomablePreview, type PreviewDimensions } from "./ZoomablePreview";
+import { type PreviewDimensions, ZoomablePreview } from "./ZoomablePreview";
 
 export function ImagePreview({ src, name }: { src: string; name: string }) {
   const [state, setState] = useState<{

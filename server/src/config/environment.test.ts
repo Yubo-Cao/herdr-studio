@@ -1,6 +1,6 @@
 import { describe, expect, test } from "bun:test";
-import { roamgateEnv } from "./environment";
 import { isSupervisorManagedEnvironment } from "../http/update";
+import { roamgateEnv } from "./environment";
 
 describe("Roamgate environment compatibility", () => {
   test("new names override legacy names without mutating the environment", () => {

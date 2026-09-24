@@ -1,21 +1,21 @@
 import { afterEach, describe, expect, jest, spyOn, test } from "bun:test";
 import { EventEmitter, once } from "node:events";
 import * as net from "node:net";
-import * as path from "node:path";
 import { tmpdir } from "node:os";
+import * as path from "node:path";
+import type { ServerWebSocket } from "bun";
+import { silentLogger } from "../utils/logger";
 import { BinReader, BinWriter, encodeFrame } from "./bincode";
+import { EndpointCreationDeadline } from "./endpoint-creation";
+import type { Popup } from "./endpoint-surface";
 import {
-  EndpointTerminalSession,
   cropFrame,
+  EndpointTerminalSession,
   frameHyperlinkAt,
   resolvedFrameLink,
 } from "./endpoint-terminal-session";
-import type { CellData, FrameData } from "./thin-client";
-import type { Popup } from "./endpoint-surface";
-import type { ServerWebSocket } from "bun";
 import { createTerminalBridge } from "./terminal-bridge";
-import { silentLogger } from "../utils/logger";
-import { EndpointCreationDeadline } from "./endpoint-creation";
+import type { CellData, FrameData } from "./thin-client";
 import {
   dropCoalescedMessage,
   flushCoalescedMessages,

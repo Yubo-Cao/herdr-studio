@@ -1,12 +1,12 @@
 import { describe, expect, spyOn, test } from "bun:test";
-import { mkdtemp, mkdir, open, rm, symlink, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, open, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { HTML_PREVIEW_MAX_BYTES } from "../../../shared/filePreview";
 import { shQuote } from "../utils/process-utils";
 import { createFileHandlers } from "./files";
-import { readHtmlPreviewFile, HtmlPreviewError } from "./html-preview-files";
 import { HTML_PREVIEW_CSP, renderHtmlPreview } from "./html-preview";
+import { HtmlPreviewError, readHtmlPreviewFile } from "./html-preview-files";
 import { runBinaryProcessWithTimeout } from "./process";
 
 const png = Buffer.from(

@@ -1,23 +1,23 @@
-import {
-  EndpointCreationDeadline,
-  parseEndpointCreationSource,
-  type EndpointCreationSource,
-} from "./endpoint-creation";
 import type { ServerWebSocket } from "bun";
+import { roamgateEnv } from "../config/environment";
 import {
   CONNECTION_CHANGED_DURING_REQUEST,
   serializeConnectionEnvelope,
 } from "../connections/protocol";
 import { type Logger, silentLogger } from "../utils/logger";
 import { NO_TERMINAL_ATTACHED_MESSAGE } from "../utils/rpc-logging";
-import { ThinClient } from "./thin-client";
-import { roamgateEnv } from "../config/environment";
-import { isTerminalHelloProtocol } from "./protocol-compat";
-import { EndpointTerminalSession } from "./endpoint-terminal-session";
 import { EndpointClient } from "./endpoint-client";
+import {
+  EndpointCreationDeadline,
+  type EndpointCreationSource,
+  parseEndpointCreationSource,
+} from "./endpoint-creation";
 import type { Popup, SurfaceBaseline } from "./endpoint-surface";
+import { EndpointTerminalSession } from "./endpoint-terminal-session";
 import { frameToAnsi } from "./frame-to-ansi";
+import { isTerminalHelloProtocol } from "./protocol-compat";
 import { isTerminalClipboardPayload } from "./terminal-clipboard";
+import { ThinClient } from "./thin-client";
 
 type TerminalSession = {
   terminalId: string | null;

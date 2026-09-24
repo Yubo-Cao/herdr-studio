@@ -1,10 +1,8 @@
-import { useEffect, useRef, useState } from "react";
-import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
+import { type ITheme, Terminal } from "@xterm/xterm";
 import { X } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
 import { bridge } from "../api";
-import { store, useStoreSelector, type PopupInfo } from "../store";
-import { useConnectionClient } from "../useConnectionClient";
 import {
   normalizeUiScale,
   TERMINAL_FONT_FAMILY,
@@ -12,8 +10,10 @@ import {
 } from "../appearance";
 import { roamgateLocalStorage } from "../browserStorage";
 import { isMobileLayout } from "../layoutPreferences";
+import { type PopupInfo, store, useStoreSelector } from "../store";
 import { terminalPushMatches } from "../terminalConnection";
 import { terminalCellAt, terminalWheelScroll } from "../terminalScroll";
+import { useConnectionClient } from "../useConnectionClient";
 
 const RESIZE_DEBOUNCE_MS = 150;
 

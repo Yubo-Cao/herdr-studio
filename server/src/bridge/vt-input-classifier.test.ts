@@ -1,14 +1,14 @@
 import { describe, expect, test } from "bun:test";
 import { BinReader } from "./bincode";
 import {
+  encodePaneInput,
   KEY,
-  MOUSE_KIND,
   MOD_ALT,
   MOD_CONTROL,
   MOD_SHIFT,
+  MOUSE_KIND,
   type PaneInputEvent,
   VtInputClassifier,
-  encodePaneInput,
 } from "./vt-input-classifier";
 
 function feed(input: string | number[]): PaneInputEvent[] {

@@ -1,10 +1,9 @@
-import { roamgateLocalStorage } from "../browserStorage";
 import type { ConnectionClient } from "../api";
+import { roamgateLocalStorage } from "../browserStorage";
 import { connectionHttpPath } from "../connectionHttp";
 import { connectionStorageKey } from "../connectionStorage";
-import { gitDiffCode, type GitDiffCode } from "../gitDiffStatus";
+import { type GitDiffCode, gitDiffCode } from "../gitDiffStatus";
 import { retireGitDiffSummaryResource } from "../gitDiffSummaryStore";
-import { connectionClientScopeKey } from "../useConnectionClient";
 import type {
   FileExplorerEntry,
   FileExplorerList,
@@ -13,6 +12,7 @@ import type {
   GitDiffKind,
   GitDiffSummary,
 } from "../types";
+import { connectionClientScopeKey } from "../useConnectionClient";
 
 export function workspaceName(workspace?: {
   label?: string;

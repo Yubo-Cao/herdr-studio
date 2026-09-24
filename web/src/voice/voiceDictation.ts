@@ -1,5 +1,5 @@
-import { encodeVoiceWav } from "./voiceSegmenter";
 import workletUrl from "./voiceCapture.worklet.ts?worker&url";
+import { encodeVoiceWav } from "./voiceSegmenter";
 
 export type DictationPhase = "starting" | "listening" | "speaking";
 
@@ -16,9 +16,16 @@ export type DictationSession = {
   stop: () => Promise<void>;
   /** Release the mic immediately, discarding untranscribed audio. */
   cancel: () => void;
+  /** Whether the bridge can rewrite the finished dictation with an LLM. */
+  cleanup: boolean;
 };
 
-type VoiceStatus = { available: boolean; provider?: string; error?: string };
+type VoiceStatus = {
+  available: boolean;
+  provider?: string;
+  error?: string;
+  cleanup?: { available: boolean; model?: string };
+};
 
 export async function voiceStatus(): Promise<VoiceStatus> {
   const response = await fetch("/api/voice/status", {
@@ -47,6 +54,26 @@ async function transcribe(wav: Uint8Array, attempt = 0): Promise<string> {
   if (!response.ok)
     throw new Error(body.error ?? `transcription failed (${response.status})`);
   return body.text?.trim() ?? "";
+}
+
+/** Rewrite a finished dictation with the bridge's cleanup model. */
+export async function tidyDictation(
+  text: string,
+  mode: "verbatim" | "typeset" | "polish",
+): Promise<string> {
+  const response = await fetch("/api/voice/cleanup", {
+    method: "POST",
+    credentials: "same-origin",
+    headers: { "content-type": "application/json" },
+    body: JSON.stringify({ text, mode }),
+  });
+  const body = (await response.json().catch(() => ({}))) as {
+    text?: string;
+    error?: string;
+  };
+  if (!response.ok)
+    throw new Error(body.error ?? `cleanup failed (${response.status})`);
+  return body.text ?? "";
 }
 
 /**
@@ -168,5 +195,6 @@ export async function startDictation(
       await queue;
     },
     cancel: release,
+    cleanup: status.cleanup?.available === true,
   };
 }

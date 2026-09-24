@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import * as net from "node:net";
-import * as path from "node:path";
 import { tmpdir } from "node:os";
+import * as path from "node:path";
 import { BinReader, BinWriter, encodeFrame } from "./bincode";
 import {
   assertSupportedHerdrProtocol,

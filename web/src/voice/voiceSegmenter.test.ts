@@ -2,8 +2,8 @@ import { describe, expect, test } from "bun:test";
 import {
   dictationInsertion,
   encodeVoiceWav,
-  VoiceResampler,
   VOICE_SAMPLE_RATE,
+  VoiceResampler,
   VoiceSegmenter,
   type VoiceSegmenterEvent,
 } from "./voiceSegmenter";

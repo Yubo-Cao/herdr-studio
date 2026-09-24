@@ -1,4 +1,3 @@
-import { useEffect, useId, useRef, useState, type ReactNode } from "react";
 import {
   ArrowRight,
   Check,
@@ -8,6 +7,7 @@ import {
   ShieldCheck,
   Terminal,
 } from "lucide-react";
+import { type ReactNode, useEffect, useId, useRef, useState } from "react";
 import "./HerdrSetupCard.css";
 
 type SetupInfo = {

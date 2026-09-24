@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
+  type ConnectionHttpEndpoint,
   connectionRoutingErrorResponse,
   parseConnectionHttpRoute,
   publishConnectionHttpResponse,
   rawRequestPathname,
   resolveConnectionHttpRoute,
   withConnectionResponseHeader,
-  type ConnectionHttpEndpoint,
 } from "./http-routing";
 import { ConnectionRoutingError, createLegacyRoutingLogger } from "./protocol";
 

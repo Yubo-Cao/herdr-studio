@@ -1,22 +1,22 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
-import type { Workspace } from "../types";
+import { luckyWorktreeBranchName } from "../luckyName";
 import { store, useStoreSelector } from "../store";
+import { copyTextFromUserGesture } from "../terminalClipboard";
 import {
   clearTerminalComposerDrafts,
   terminalComposerCloseWarning,
   terminalComposerDraftPaneIds,
 } from "../terminalComposer";
-import { luckyWorktreeBranchName } from "../luckyName";
-import { ConfirmDialog, TextInputDialog } from "./ModalDialogs";
-import { WorktreeHooksDialog } from "./WorktreeHooksDialog";
-import { WorktreeOpenDialog } from "./WorktreeOpenDialog";
-import { WorkspaceAutoSyncDialog } from "./WorkspaceAutoSyncDialog";
-import { worktreeCreationSource } from "../worktree";
-import { WorktreeLifecycleDialog } from "./WorktreeLifecycleDialog";
+import type { Workspace } from "../types";
 import { isWorkspacePinned } from "../workspacePins";
 import { workspaceDisplayName } from "../workspaceTreeBadges";
-import { copyTextFromUserGesture } from "../terminalClipboard";
+import { worktreeCreationSource } from "../worktree";
 import { observeClampedContextMenu } from "./contextMenuPosition";
+import { ConfirmDialog, TextInputDialog } from "./ModalDialogs";
+import { WorkspaceAutoSyncDialog } from "./WorkspaceAutoSyncDialog";
+import { WorktreeHooksDialog } from "./WorktreeHooksDialog";
+import { WorktreeLifecycleDialog } from "./WorktreeLifecycleDialog";
+import { WorktreeOpenDialog } from "./WorktreeOpenDialog";
 import "./ContextMenu.css";
 
 export interface ContextMenuState {

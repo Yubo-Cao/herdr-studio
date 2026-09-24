@@ -4,6 +4,12 @@ import { rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { roamgateEnv } from "../config/environment";
+import {
+  cleanDictation,
+  isVoiceCleanupMode,
+  VOICE_CLEANUP_MAX_CHARS,
+  type VoiceCleanupConfig,
+} from "./cleanup";
 
 /** Browser segments are 16 kHz mono PCM16 WAV; the VAD commits within 12 s. */
 export const VOICE_SAMPLE_RATE = 16_000;
@@ -66,16 +72,19 @@ function parseCommand(value: string): string[] {
 }
 
 /**
- * Resolve the speech-to-text backend from the service environment. Keys stay
- * on the bridge host; the browser only ever sees the provider label.
+ * Resolve the speech-to-text chain from the service environment: the primary
+ * provider first, then every other configured provider as a fallback. Keys
+ * stay on the bridge host; the browser only ever sees provider labels.
+ * `ROAMGATE_VOICE_PROVIDER` picks the primary; `ROAMGATE_VOICE_FALLBACK=off`
+ * disables fallback.
  */
-export function voiceProviderFromEnv(
+export function voiceProvidersFromEnv(
   environment: Environment = process.env,
-): VoiceProvider | null {
+): VoiceProvider[] {
   const requested = roamgateEnv("VOICE_PROVIDER", environment)
     ?.trim()
     .toLowerCase();
-  if (requested === "off") return null;
+  if (requested === "off") return [];
   const language =
     roamgateEnv("VOICE_LANGUAGE", environment)?.trim() || undefined;
   const command = roamgateEnv("VOICE_COMMAND", environment)?.trim();
@@ -83,59 +92,71 @@ export function voiceProviderFromEnv(
   const apiKey = roamgateEnv("VOICE_API_KEY", environment)?.trim();
   const elevenLabsKey = environment.ELEVENLABS_API_KEY?.trim();
 
-  const commandProvider = (): VoiceProvider | null =>
-    command
-      ? { kind: "command", label: "command", argv: parseCommand(command) }
-      : null;
-  const funAsrProvider = (): VoiceProvider | null =>
-    funAsr ? { kind: "command", label: "Fun-ASR", argv: funAsr } : null;
-  const openAiProvider = (): VoiceProvider | null =>
-    apiKey
-      ? {
-          kind: "openai",
-          label: "openai-compatible",
-          baseUrl: (
-            roamgateEnv("VOICE_BASE_URL", environment)?.trim() ||
-            "https://api.openai.com/v1"
-          ).replace(/\/+$/, ""),
-          model:
-            roamgateEnv("VOICE_MODEL", environment)?.trim() ||
-            "gpt-4o-transcribe",
-          apiKey,
-          language,
-        }
-      : null;
-  const elevenLabsProvider = (): VoiceProvider | null =>
-    elevenLabsKey
-      ? {
-          kind: "elevenlabs",
-          label: "ElevenLabs",
-          apiKey: elevenLabsKey,
-          language,
-        }
-      : null;
+  // An explicit command wins; cloud keys outrank the local fallback.
+  const configured: Array<[string, VoiceProvider | null]> = [
+    [
+      "command",
+      command
+        ? { kind: "command", label: "command", argv: parseCommand(command) }
+        : null,
+    ],
+    [
+      "elevenlabs",
+      elevenLabsKey
+        ? {
+            kind: "elevenlabs",
+            label: "ElevenLabs",
+            apiKey: elevenLabsKey,
+            language,
+          }
+        : null,
+    ],
+    [
+      "openai",
+      apiKey
+        ? {
+            kind: "openai",
+            label: "openai-compatible",
+            baseUrl: (
+              roamgateEnv("VOICE_BASE_URL", environment)?.trim() ||
+              "https://api.openai.com/v1"
+            ).replace(/\/+$/, ""),
+            model:
+              roamgateEnv("VOICE_MODEL", environment)?.trim() ||
+              "gpt-4o-transcribe",
+            apiKey,
+            language,
+          }
+        : null,
+    ],
+    [
+      "funasr",
+      funAsr ? { kind: "command", label: "Fun-ASR", argv: funAsr } : null,
+    ],
+  ];
+  if (requested && !configured.some(([name]) => name === requested))
+    throw new Error(`unknown ROAMGATE_VOICE_PROVIDER: ${requested}`);
+  const ordered = requested
+    ? [
+        ...configured.filter(([name]) => name === requested),
+        ...configured.filter(([name]) => name !== requested),
+      ]
+    : configured;
+  const providers = ordered
+    .map(([, provider]) => provider)
+    .filter((provider): provider is VoiceProvider => provider !== null);
+  if (requested && ordered[0]?.[1] === null) return [];
+  const fallback = roamgateEnv("VOICE_FALLBACK", environment)
+    ?.trim()
+    .toLowerCase();
+  return fallback === "off" ? providers.slice(0, 1) : providers;
+}
 
-  switch (requested) {
-    case "command":
-      return commandProvider();
-    case "funasr":
-      return funAsrProvider();
-    case "openai":
-      return openAiProvider();
-    case "elevenlabs":
-      return elevenLabsProvider();
-    case undefined:
-    case "":
-      // An explicit command wins; cloud keys outrank the local fallback.
-      return (
-        commandProvider() ??
-        elevenLabsProvider() ??
-        openAiProvider() ??
-        funAsrProvider()
-      );
-    default:
-      throw new Error(`unknown ROAMGATE_VOICE_PROVIDER: ${requested}`);
-  }
+/** The primary provider alone, for callers that do not fall back. */
+export function voiceProviderFromEnv(
+  environment: Environment = process.env,
+): VoiceProvider | null {
+  return voiceProvidersFromEnv(environment)[0] ?? null;
 }
 
 /** Accept only the canonical 44-byte PCM16 mono 16 kHz WAV the browser emits. */
@@ -270,16 +291,20 @@ export async function transcribeVoice(
 }
 
 /**
- * HTTP surface: GET status and POST one WAV segment. Recognition is serialized
- * beyond a small concurrency cap so one busy browser cannot starve the host.
+ * HTTP surface: GET status, POST one WAV segment, and POST dictated text for
+ * cleanup. Recognition tries each provider in order and is capped at a small
+ * concurrency so one busy browser cannot starve the host.
  */
 export function createVoiceHandlers(options: {
-  provider: () => VoiceProvider | null;
+  providers: () => VoiceProvider[];
+  cleanup?: () => VoiceCleanupConfig | null;
   transcribe?: typeof transcribeVoice;
+  cleanText?: typeof cleanDictation;
   maxConcurrent?: number;
   maxQueued?: number;
 }) {
   const transcribe = options.transcribe ?? transcribeVoice;
+  const cleanText = options.cleanText ?? cleanDictation;
   const maxConcurrent = options.maxConcurrent ?? 2;
   const maxQueued = options.maxQueued ?? 8;
   let active = 0;
@@ -300,27 +325,38 @@ export function createVoiceHandlers(options: {
     waiting.shift()?.();
   };
 
-  const resolveProvider = () => {
+  const resolve = <T>(read: () => T, empty: T) => {
     try {
-      return { provider: options.provider(), error: null };
+      return { value: read(), error: null };
     } catch (error) {
-      return { provider: null, error: (error as Error).message };
+      return { value: empty, error: (error as Error).message };
     }
   };
 
   return {
     status(): Response {
-      const { provider, error } = resolveProvider();
+      const { value: providers, error } = resolve(options.providers, []);
+      const { value: cleanup } = resolve(
+        () => options.cleanup?.() ?? null,
+        null,
+      );
       return Response.json(
-        provider
-          ? { available: true, provider: provider.label }
+        providers.length
+          ? {
+              available: true,
+              provider: providers[0]!.label,
+              fallbacks: providers.slice(1).map((provider) => provider.label),
+              cleanup: cleanup
+                ? { available: true, model: cleanup.model }
+                : { available: false },
+            }
           : { available: false, ...(error ? { error } : {}) },
         { headers: noStore },
       );
     },
     async transcribe(req: Request): Promise<Response> {
-      const { provider, error } = resolveProvider();
-      if (!provider) {
+      const { value: providers, error } = resolve(options.providers, []);
+      if (!providers.length) {
         return Response.json(
           { error: error ?? "voice input is not configured on this server" },
           { status: 503, headers: noStore },
@@ -350,16 +386,71 @@ export function createVoiceHandlers(options: {
           { status: 429, headers: noStore },
         );
       }
+      const failures: string[] = [];
       try {
-        const text = await transcribe(provider, wav);
-        return Response.json({ text }, { headers: noStore });
+        for (const provider of providers) {
+          try {
+            const text = await transcribe(provider, wav);
+            return Response.json(
+              {
+                text,
+                provider: provider.label,
+                ...(failures.length ? { fallback: true } : {}),
+              },
+              { headers: noStore },
+            );
+          } catch (cause) {
+            failures.push(`${provider.label}: ${(cause as Error).message}`);
+          }
+        }
+        return Response.json(
+          { error: failures.join("; ").slice(0, 1000) },
+          { status: 502, headers: noStore },
+        );
+      } finally {
+        release();
+      }
+    },
+    async cleanup(req: Request): Promise<Response> {
+      const { value: config, error } = resolve(
+        () => options.cleanup?.() ?? null,
+        null,
+      );
+      if (!config) {
+        return Response.json(
+          { error: error ?? "voice cleanup is not configured on this server" },
+          { status: 503, headers: noStore },
+        );
+      }
+      const body = (await req.json().catch(() => null)) as {
+        text?: unknown;
+        mode?: unknown;
+      } | null;
+      const text = typeof body?.text === "string" ? body.text : "";
+      const mode = typeof body?.mode === "string" ? body.mode : "";
+      if (!isVoiceCleanupMode(mode) || !text.trim()) {
+        return Response.json(
+          { error: "cleanup needs text and a mode" },
+          { status: 400, headers: noStore },
+        );
+      }
+      if (text.length > VOICE_CLEANUP_MAX_CHARS) {
+        return Response.json(
+          { error: "dictation is too long to clean up" },
+          { status: 413, headers: noStore },
+        );
+      }
+      try {
+        const cleaned = await cleanText(config, mode, text);
+        return Response.json(
+          { text: cleaned, model: config.model },
+          { headers: noStore },
+        );
       } catch (cause) {
         return Response.json(
           { error: (cause as Error).message },
           { status: 502, headers: noStore },
         );
-      } finally {
-        release();
       }
     },
   };

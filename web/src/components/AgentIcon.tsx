@@ -1,4 +1,3 @@
-import { Bot } from "lucide-react";
 import ampIcon from "@lobehub/icons-static-svg/icons/amp-color.svg?raw";
 import antigravityIcon from "@lobehub/icons-static-svg/icons/antigravity-color.svg?raw";
 import claudeCodeIcon from "@lobehub/icons-static-svg/icons/claudecode-color.svg?raw";
@@ -14,6 +13,7 @@ import kimiIcon from "@lobehub/icons-static-svg/icons/kimi-color.svg?raw";
 import kiroIcon from "@lobehub/icons-static-svg/icons/kiro-color.svg?raw";
 import opencodeIcon from "@lobehub/icons-static-svg/icons/opencode.svg?raw";
 import qoderIcon from "@lobehub/icons-static-svg/icons/qoder-color.svg?raw";
+import { Bot } from "lucide-react";
 import piIcon from "../assets/pi-logo.svg?raw";
 import { cn } from "../utils";
 import "./AgentIcon.css";

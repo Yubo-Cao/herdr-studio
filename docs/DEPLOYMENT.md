@@ -370,10 +370,10 @@ terminal output, and may appear on lock screens.
 
 ## Voice input
 
-The composer's microphone button dictates into the draft. The bridge
-transcribes each speech segment with the first configured provider; with none,
-the button reports that voice input is unavailable. Keys stay in the service
-environment (`~/.config/roamgate/roamgate.env`) and never reach the browser.
+The composer's microphone button dictates into the draft.
+The bridge transcribes each speech segment with the first configured provider and falls back to the next configured one when a provider fails, so a cloud outage or exhausted quota degrades to local recognition instead of failing.
+With no provider, the button reports that voice input is unavailable.
+Keys stay in the service environment (`~/.config/roamgate/roamgate.env`) and never reach the browser.
 
 | Variable | Provider |
 | --- | --- |
@@ -382,11 +382,25 @@ environment (`~/.config/roamgate/roamgate.env`) and never reach the browser.
 | `ROAMGATE_VOICE_FUNASR_MODEL_DIR`, optional `ROAMGATE_VOICE_FUNASR_CLI` | Local Fun-ASR-Nano through `llama-funasr-cli` |
 | `ROAMGATE_VOICE_COMMAND` | A local command as a JSON argv array containing `{input}` (the WAV path); stdout is the transcript |
 
-`ROAMGATE_VOICE_PROVIDER` (`elevenlabs`, `openai`, `funasr`, `command`, or
-`off`) selects one explicitly; otherwise the order is command, ElevenLabs,
-OpenAI-compatible, Fun-ASR. `ROAMGATE_VOICE_LANGUAGE` pins the language;
-by default providers detect it. Browsers allow microphone capture only on
-HTTPS or localhost origins.
+The chain order is command, ElevenLabs, OpenAI-compatible, Fun-ASR.
+`ROAMGATE_VOICE_PROVIDER` (`elevenlabs`, `openai`, `funasr`, `command`, or `off`) moves one provider to the front, and `ROAMGATE_VOICE_FALLBACK=off` uses only the first.
+`ROAMGATE_VOICE_LANGUAGE` pins the language; by default providers detect it.
+Browsers allow microphone capture only on HTTPS or localhost origins, so a phone needs the tailnet or native HTTPS address.
+
+### Dictation cleanup
+
+When the microphone stops, the whole dictation is rewritten once by a language model through the OpenAI Responses API and replaces the raw text, unless the user edited that text in the meantime.
+**Configuration > Behavior > Voice cleanup** picks the mode per browser: Off, Clean (fillers and punctuation only), Typeset (default; adds light Markdown), or Polish (rewrites into prose).
+
+| Variable | Meaning |
+| --- | --- |
+| `ROAMGATE_VOICE_LLM_API_KEY`, else `OPENAI_API_KEY` | Enables cleanup |
+| `ROAMGATE_VOICE_LLM_BASE_URL` | Responses API base URL (default `https://api.openai.com/v1`) |
+| `ROAMGATE_VOICE_LLM_MODEL` | Model (default `gpt-5.6-luna`) |
+| `ROAMGATE_VOICE_LLM_REASONING_EFFORT` | Optional `reasoning.effort` |
+| `ROAMGATE_VOICE_LLM=off` | Disables cleanup |
+
+Requests set `store: false`.
 
 ## Logging
 

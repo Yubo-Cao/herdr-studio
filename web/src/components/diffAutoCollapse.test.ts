@@ -1,9 +1,9 @@
 import { describe, expect, test } from "bun:test";
+import type { GitDiffEntry, GitDiffFile } from "../types";
 import {
   diffAutoCollapseInfo,
   LARGE_DIFF_CHANGED_LINES,
 } from "./diffAutoCollapse";
-import type { GitDiffEntry, GitDiffFile } from "../types";
 
 function entry(patch: Partial<GitDiffEntry> = {}): GitDiffEntry {
   return {

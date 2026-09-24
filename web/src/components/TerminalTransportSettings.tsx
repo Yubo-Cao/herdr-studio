@@ -1,5 +1,5 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import { Info, Wifi } from "lucide-react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { bridge } from "../api";
 import { useConnectionClient } from "../useConnectionClient";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";

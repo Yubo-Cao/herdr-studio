@@ -9,9 +9,9 @@ import {
   transitionConnectionResourceSelection,
   writeConnectionResourceSelection,
 } from "./connectionStorage";
+import { connectionClientScopeKey } from "./useConnectionClient";
 import { WORKSPACE_PINS_STORAGE_KEY } from "./workspacePins";
 import { COLLAPSED_WORKTREE_GROUPS_STORAGE_KEY } from "./workspaceTreeCollapse";
-import { connectionClientScopeKey } from "./useConnectionClient";
 
 class MemoryStorage {
   readonly values = new Map<string, string>();

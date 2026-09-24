@@ -1,5 +1,5 @@
-import { getShortcutSnapshot } from "./shortcutPreferences";
 import { matchesShortcut, type ShortcutBindings } from "./shortcutBindings";
+import { getShortcutSnapshot } from "./shortcutPreferences";
 
 export type PluginActionShortcut = {
   pluginId: string;

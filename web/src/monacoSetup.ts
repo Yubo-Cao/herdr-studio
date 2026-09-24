@@ -21,6 +21,7 @@ import "monaco-esm/features/multicursor/register.js";
 import "monaco-esm/features/smartSelect/register.js";
 import "monaco-esm/features/wordHighlighter/register.js";
 import "monaco-esm/features/wordOperations/register.js";
+import EditorWorker from "monaco-esm/editor/editor.worker.js?worker";
 import * as bat from "monaco-esm/languages/definitions/bat/bat.js";
 import * as cpp from "monaco-esm/languages/definitions/cpp/cpp.js";
 import * as csharp from "monaco-esm/languages/definitions/csharp/csharp.js";
@@ -52,7 +53,6 @@ import * as swift from "monaco-esm/languages/definitions/swift/swift.js";
 import * as typescript from "monaco-esm/languages/definitions/typescript/typescript.js";
 import * as xml from "monaco-esm/languages/definitions/xml/xml.js";
 import * as yaml from "monaco-esm/languages/definitions/yaml/yaml.js";
-import EditorWorker from "monaco-esm/editor/editor.worker.js?worker";
 
 type MonarchModule = {
   conf: monaco.languages.LanguageConfiguration;

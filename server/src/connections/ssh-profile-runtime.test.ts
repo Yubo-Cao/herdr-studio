@@ -1,11 +1,11 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { lstatSync, rmSync } from "node:fs";
 import { dirname } from "node:path";
+import type { SshConnectionProfile } from "./profiles";
 import {
   createSshProfileRuntimeConfig as createPlatformSshProfileRuntimeConfig,
   type SshRuntimeConfigDependencies,
 } from "./ssh-profile-runtime";
-import type { SshConnectionProfile } from "./profiles";
 
 const directories: string[] = [];
 

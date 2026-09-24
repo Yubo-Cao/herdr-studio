@@ -5,6 +5,7 @@ import { join } from "node:path";
 import type { RunProcessWithCodeTimeout } from "./file-types";
 import {
   createLastStepBaselineStore,
+  type LastStepBaselineStore,
   parseBranchSummary,
   parseGeneratedAttributes,
   parseStatusSummary,
@@ -12,7 +13,6 @@ import {
   readDiffSummary,
   snapshotWorktreeTree,
   statusLabel,
-  type LastStepBaselineStore,
 } from "./git-diff";
 
 const runProcessWithCodeTimeout: RunProcessWithCodeTimeout = async (argv) => {

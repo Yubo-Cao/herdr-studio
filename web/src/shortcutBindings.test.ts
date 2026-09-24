@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { paneShortcutAction } from "./paneShortcuts";
 import {
   defaultShortcutBindings,
   detectShortcutPlatform,
@@ -6,11 +7,11 @@ import {
   matchesShortcut,
   normalizeShortcut,
   SHORTCUT_IDS,
+  type ShortcutBindings,
+  type ShortcutEvent,
   shortcutConflicts,
   shortcutFromEvent,
   validateShortcutKeys,
-  type ShortcutBindings,
-  type ShortcutEvent,
 } from "./shortcutBindings";
 import { SHORTCUT_CATALOG } from "./shortcutCatalog";
 import {
@@ -21,7 +22,6 @@ import {
   validateShortcutPreset,
 } from "./shortcutPreferences";
 import { tabShortcutAction } from "./tabShortcuts";
-import { paneShortcutAction } from "./paneShortcuts";
 import { terminalShortcutSequence } from "./terminalKeys";
 
 const event = (overrides: Partial<ShortcutEvent> = {}): ShortcutEvent => ({

@@ -1,41 +1,41 @@
+import { Copy, Download, Eye, Info, RefreshCw, X } from "lucide-react";
 import {
+  type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
+  type PointerEvent as ReactPointerEvent,
+  type RefObject,
   useCallback,
   useEffect,
   useMemo,
   useRef,
   useState,
-  type CSSProperties,
-  type KeyboardEvent as ReactKeyboardEvent,
-  type PointerEvent as ReactPointerEvent,
-  type RefObject,
 } from "react";
-import { Copy, Download, Eye, Info, RefreshCw, X } from "lucide-react";
-import { useStoreSelector } from "../store";
 import { copyTextWithFeedback } from "../copyText";
-import { useConnectionClient } from "../useConnectionClient";
+import { useStoreSelector } from "../store";
 import type { Pane } from "../types";
+import { formatUiDateTime, formatUiRelativeTime } from "../uiLocale";
+import { useConnectionClient } from "../useConnectionClient";
+import { shortId } from "../utils";
 import {
   DEFAULT_INSPECTOR_NAVIGATION_RATIO,
   inspectorNavigationRatioAtPosition,
 } from "../workspaceResource";
-import { formatUiDateTime, formatUiRelativeTime } from "../uiLocale";
-import { shortId } from "../utils";
+import { AgentHistoryCard } from "./AgentHistoryCard";
+import { AgentHistoryFilters } from "./AgentHistoryFilters";
 import { AgentIcon } from "./AgentIcon";
 import { AgentMessageContent } from "./AgentMessageContent";
 import { AgentMessageDialog } from "./AgentMessageDialog";
-import { AgentHistoryCard } from "./AgentHistoryCard";
-import { AgentHistoryFilters } from "./AgentHistoryFilters";
+import { AgentSessionPreviewDialog } from "./AgentSessionPreviewDialog";
 import {
+  type AgentHistory,
+  type HistoryEntry as AgentHistoryEntry,
+  type AgentHistoryResponse,
   ALL_HISTORY_FILTERS,
+  type HistoryFilters,
   historyEntryLabel,
   mergeAgentHistory,
   selectHistoryEntries,
-  type HistoryFilters,
-  type AgentHistory,
-  type AgentHistoryResponse,
-  type HistoryEntry as AgentHistoryEntry,
 } from "./agentHistory";
-import { AgentSessionPreviewDialog } from "./AgentSessionPreviewDialog";
 import {
   type AgentSessionSummary,
   downloadSession,

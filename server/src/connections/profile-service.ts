@@ -12,9 +12,9 @@ import {
   type ConnectionRuntimeFactory,
 } from "./manager";
 import {
+  CONNECTION_PROFILE_FILE_VERSION,
   type ConnectionProfile,
   ConnectionProfileStore,
-  CONNECTION_PROFILE_FILE_VERSION,
   type LocalConnectionProfile,
   type PersistedConnectionRegistry,
   type PublicConnectionProfile,

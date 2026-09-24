@@ -1,27 +1,4 @@
-import { createPortal } from "react-dom";
-import { listenForTaskNotificationActivation } from "./taskNotifications";
-import { useReviewAnnotationDraft } from "./useReviewAnnotationDraft";
-import {
-  annotationDraftStorageKey,
-  compileReviewFeedback,
-  createReviewAnnotation,
-  moveReviewAnnotation,
-  parseReviewAnnotation,
-  removeDeliveredReviewAnnotations,
-  reanchorDiffReviewAnnotations,
-  reanchorFileReviewAnnotations,
-  reviewAgentPanes,
-  type NewReviewAnnotation,
-  type ReviewAnnotation,
-} from "./annotations";
-import { roamgateLocalStorage } from "./browserStorage";
-import { LAYOUT_CHANGE_EVENT, useLayoutPreferences } from "./layoutPreferences";
-import {
-  shortcutMatches,
-  shortcutTitle,
-  useShortcutPreferences,
-} from "./shortcutPreferences";
-import { SHORTCUT_NUMBERS } from "./shortcutBindings";
+import type { ITheme } from "@xterm/xterm";
 import {
   CheckCircle2,
   ChevronLeft,
@@ -50,26 +27,40 @@ import {
   useRef,
   useState,
 } from "react";
-import type { ITheme } from "@xterm/xterm";
+import { createPortal } from "react-dom";
 import packageJson from "../package.json";
+import {
+  annotationDraftStorageKey,
+  compileReviewFeedback,
+  createReviewAnnotation,
+  moveReviewAnnotation,
+  type NewReviewAnnotation,
+  parseReviewAnnotation,
+  type ReviewAnnotation,
+  reanchorDiffReviewAnnotations,
+  reanchorFileReviewAnnotations,
+  removeDeliveredReviewAnnotations,
+  reviewAgentPanes,
+} from "./annotations";
 import {
   type AccentColor,
   normalizeAccentColor,
   normalizeThemePreference,
   normalizeUiScale,
   normalizeZenMode,
-  serializeZenMode,
-  UI_SCALE_DEFAULT,
   type ResolvedTheme,
   resolveSystemTheme,
   SYSTEM_THEME_QUERY,
-  type ThemePreference,
+  serializeZenMode,
   TERMINAL_FONT_STORAGE_KEY,
+  type ThemePreference,
+  UI_SCALE_DEFAULT,
 } from "./appearance";
+import { roamgateLocalStorage } from "./browserStorage";
 import { AgentIcon } from "./components/AgentIcon";
+import { AnnotationPanel } from "./components/AnnotationPanel";
 import { paneHasAgentHistory } from "./components/agentSession";
 import { CloseButton } from "./components/CloseButton";
-import { focusIfUnchanged } from "./components/dialogFocus";
 import { CommandCombobox } from "./components/CommandCombobox";
 import { CONFIG_MENU_ID, ConfigMenu } from "./components/ConfigMenu";
 import { ConnectionSwitcher } from "./components/ConnectionSwitcher";
@@ -78,20 +69,21 @@ import {
   clearDiffViewerResourceCache,
   prefetchDiffViewerWorkspace,
 } from "./components/DiffViewerPanel";
+import { focusIfUnchanged } from "./components/dialogFocus";
 import { clearDiffContentResourceState } from "./components/diffContentState";
+import { type ActiveFilePreviewSelection } from "./components/FilePreviewContent";
 import {
   clearFileExplorerResourceCache,
   prefetchFileExplorerWorkspace,
   requestFilePreview,
 } from "./components/fileExplorerResources";
-import { type ActiveFilePreviewSelection } from "./components/FilePreviewContent";
-import { AnnotationPanel } from "./components/AnnotationPanel";
 import { GlobalTooltip } from "./components/GlobalTooltip";
 import { MobileTabSheet } from "./components/MobileTabSheet";
 import { requestClosePane, requestCloseTab, TabBar } from "./components/TabBar";
 import type { TerminalWorkspaceFileRequest } from "./components/TerminalView";
 import { WorkspaceTree } from "./components/WorkspaceTree";
 import { isIosDevice } from "./downloadFile";
+import { LAYOUT_CHANGE_EVENT, useLayoutPreferences } from "./layoutPreferences";
 import { lazyWithReload } from "./lazyWithReload";
 import {
   LEGACY_MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY,
@@ -105,17 +97,6 @@ import {
   serializeMobileTerminalSideShortcuts,
 } from "./mobileTerminalShortcuts";
 import {
-  CUSTOM_TERMINAL_THEMES_STORAGE_KEY,
-  type CustomTerminalTheme,
-  parseCustomTerminalThemes,
-  parseTerminalThemeSelection,
-  resolveTerminalTheme,
-  serializeCustomTerminalThemes,
-  serializeTerminalThemeSelection,
-  TERMINAL_THEME_SELECTION_STORAGE_KEY,
-  type TerminalThemeSelection,
-} from "./terminalThemes";
-import {
   activePaneIdForSnapshot,
   type PaneJumpEntry,
   paneJumpEntries,
@@ -123,6 +104,14 @@ import {
   paneSearchEntries,
 } from "./paneJump";
 import { paneLayoutNeedsSwitcher } from "./paneLayoutSizing";
+import { paneShortcutAction } from "./paneShortcuts";
+import { pluginActionShortcut } from "./pluginActionShortcuts";
+import { SHORTCUT_NUMBERS } from "./shortcutBindings";
+import {
+  shortcutMatches,
+  shortcutTitle,
+  useShortcutPreferences,
+} from "./shortcutPreferences";
 import {
   isTaskNotificationTarget,
   type Notice,
@@ -137,15 +126,13 @@ import {
   WORKTREE_REMOVED_EVENT,
   type WorktreeRemovedTarget,
 } from "./store";
-import { paneShortcutAction } from "./paneShortcuts";
-import { pluginActionShortcut } from "./pluginActionShortcuts";
 import {
   adjacentTabId,
   closeShortcutTarget,
   tabShortcutAction,
 } from "./tabShortcuts";
+import { listenForTaskNotificationActivation } from "./taskNotifications";
 import { copyTextFromUserGesture } from "./terminalClipboard";
-import { terminalPasteRequest } from "./terminalPaste";
 import {
   activateTerminalComposerDraftScope,
   readTerminalComposerDraft,
@@ -153,11 +140,24 @@ import {
   terminalComposerDraftKey,
 } from "./terminalComposer";
 import { terminalMountKey } from "./terminalConnection";
+import { terminalPasteRequest } from "./terminalPaste";
+import {
+  CUSTOM_TERMINAL_THEMES_STORAGE_KEY,
+  type CustomTerminalTheme,
+  parseCustomTerminalThemes,
+  parseTerminalThemeSelection,
+  resolveTerminalTheme,
+  serializeCustomTerminalThemes,
+  serializeTerminalThemeSelection,
+  TERMINAL_THEME_SELECTION_STORAGE_KEY,
+  type TerminalThemeSelection,
+} from "./terminalThemes";
 import type { FileExplorerEntry, GitDiffEntry, Pane } from "./types";
 import {
   connectionClientScopeKey,
   useConnectionClient,
 } from "./useConnectionClient";
+import { useReviewAnnotationDraft } from "./useReviewAnnotationDraft";
 import { agentClass } from "./utils";
 import {
   INSPECTOR_MIN_BOTTOM,
@@ -166,6 +166,7 @@ import {
   type InspectorView,
   inspectorMaximumSize,
   isWorkspaceInspectorShortcut,
+  type ResourceScope,
   readInspectorPreferences,
   readResourceFileSelection,
   relativePathWithinCheckout,
@@ -174,9 +175,8 @@ import {
   resourceScopeForWorkspace,
   resourceStateKey,
   sameResourceOwner,
-  WORKSPACE_INSPECTOR_REQUEST_EVENT,
-  type ResourceScope,
   WORKSPACE_ANNOTATION_REQUEST_EVENT,
+  WORKSPACE_INSPECTOR_REQUEST_EVENT,
   type WorkspaceAnnotationRequest,
   type WorkspaceInspectorRequest,
   type WorkspaceInspectorState,

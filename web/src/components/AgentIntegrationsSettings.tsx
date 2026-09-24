@@ -1,12 +1,12 @@
-import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Info, RefreshCw, Trash2 } from "lucide-react";
-import { AgentIcon } from "./AgentIcon";
-import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
+import { useCallback, useEffect, useRef, useState } from "react";
 import {
   connectionClientScopeKey,
   useConnectionClient,
 } from "../useConnectionClient";
+import { AgentIcon } from "./AgentIcon";
 import { focusIfUnchanged } from "./dialogFocus";
+import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import "./AgentIntegrationsSettings.css";
 
 export type AgentIntegration = {

@@ -243,6 +243,26 @@ export function insertIntoTerminalComposerDraft(
   return next;
 }
 
+/**
+ * Replaces a range of the latest shared draft verbatim, without the path
+ * spacing rules, and leaves the caret after the replacement. Returns null when
+ * the draft belongs to an inactive scope.
+ */
+export function replaceTerminalComposerDraftRange(
+  key: string,
+  start: number,
+  end: number,
+  replacement: string,
+): { text: string; caret: number } | null {
+  if (!terminalComposerDraftKeyIsActive(key)) return null;
+  const current = readTerminalComposerDraft(key);
+  const text = `${current.slice(0, start)}${replacement}${current.slice(end)}`;
+  const caret = start + replacement.length;
+  selections.set(key, { start: caret, end: caret });
+  writeTerminalComposerDraft(key, text);
+  return { text, caret };
+}
+
 /** Test hook: number of retained drafts. */
 export function terminalComposerDraftCount(): number {
   return drafts.size;

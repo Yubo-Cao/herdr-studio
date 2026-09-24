@@ -1,16 +1,16 @@
+import { FolderOpen, GitBranch, RefreshCw, Settings } from "lucide-react";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { FolderOpen, GitBranch, RefreshCw, Settings } from "lucide-react";
 import { luckyWorktreeBranchName } from "../luckyName";
-import { useConnectionClient } from "../useConnectionClient";
 import { store, useStoreSelector } from "../store";
 import type { Workspace, WorktreeList } from "../types";
-import { resolveWorktreeOpenSource, worktreeCreationSource } from "../worktree";
+import { useConnectionClient } from "../useConnectionClient";
 import {
   type InspectorView,
   WORKSPACE_INSPECTOR_REQUEST_EVENT,
   type WorkspaceInspectorRequest,
 } from "../workspaceResource";
+import { resolveWorktreeOpenSource, worktreeCreationSource } from "../worktree";
 import {
   buildWorktreeLifecycleRows,
   lifecycleActionError,
@@ -24,11 +24,11 @@ import {
   type WorktreeLifecycleRow,
 } from "../worktreeLifecycle";
 import { CloseButton } from "./CloseButton";
+import { focusDialogElement } from "./dialogFocus";
 import { ConfirmDialog, TextInputDialog } from "./ModalDialogs";
 import { WorktreeHooksDialog } from "./WorktreeHooksDialog";
-import { WorktreeOpenDialog } from "./WorktreeOpenDialog";
 import { WorktreeLifecycleRow as WorktreeLifecycleRowItem } from "./WorktreeLifecycleRow";
-import { focusDialogElement } from "./dialogFocus";
+import { WorktreeOpenDialog } from "./WorktreeOpenDialog";
 import "./WorktreeLifecycleDialog.css";
 
 type LifecycleOperation = {

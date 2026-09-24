@@ -1,8 +1,12 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import type { DictationPhase, DictationSession } from "./voiceDictation";
+import type {
+  DictationPhase,
+  DictationSession,
+  tidyDictation,
+} from "./voiceDictation";
 
 export type VoiceDictationState = {
-  phase: DictationPhase | "off" | "stopping";
+  phase: DictationPhase | "off" | "stopping" | "tidying";
   pending: number;
   level: number;
 };
@@ -12,13 +16,18 @@ export type VoiceDictationState = {
  * load on first use so the microphone path adds nothing to the initial bundle.
  */
 export function useVoiceDictation({
+  onStart,
   onText,
+  onFinish,
   onError,
 }: {
+  onStart?: () => void;
   onText: (
     text: string,
     join: (before: string, text: string) => string,
   ) => void;
+  /** After a clean stop; `tidy` is null when the bridge has no cleanup model. */
+  onFinish?: (tidy: typeof tidyDictation | null) => Promise<void>;
   onError: (message: string) => void;
 }) {
   const [state, setState] = useState<VoiceDictationState>({
@@ -28,9 +37,13 @@ export function useVoiceDictation({
   });
   const sessionRef = useRef<DictationSession | null>(null);
   const startingRef = useRef(false);
+  const onStartRef = useRef(onStart);
   const onTextRef = useRef(onText);
+  const onFinishRef = useRef(onFinish);
   const onErrorRef = useRef(onError);
+  onStartRef.current = onStart;
   onTextRef.current = onText;
+  onFinishRef.current = onFinish;
   onErrorRef.current = onError;
 
   const stop = useCallback(async () => {
@@ -40,6 +53,16 @@ export function useVoiceDictation({
     setState((current) => ({ ...current, phase: "stopping", level: 0 }));
     try {
       await session.stop();
+      const finish = onFinishRef.current;
+      if (finish) {
+        setState((current) => ({ ...current, phase: "tidying" }));
+        const { tidyDictation } = await import("./voiceDictation");
+        await finish(session.cleanup ? tidyDictation : null);
+      }
+    } catch (error) {
+      onErrorRef.current(
+        error instanceof Error ? error.message : String(error),
+      );
     } finally {
       setState((current) => ({ ...current, phase: "off", level: 0 }));
     }
@@ -52,6 +75,7 @@ export function useVoiceDictation({
     try {
       const voice = await import("./voiceDictation");
       const { dictationInsertion } = await import("./voiceSegmenter");
+      onStartRef.current?.();
       sessionRef.current = await voice.startDictation({
         onPhase: (phase) =>
           setState((current) =>

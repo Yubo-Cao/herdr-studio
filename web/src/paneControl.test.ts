@@ -1,11 +1,11 @@
 import { expect, test } from "bun:test";
-import {
-  paneControlClient,
-  paneControlState,
-  type PaneControlState,
-} from "./paneControl";
 import type { ConnectionClient } from "./api";
 import type { CollaborationSnapshot } from "./collaboration";
+import {
+  type PaneControlState,
+  paneControlClient,
+  paneControlState,
+} from "./paneControl";
 
 const snapshot: CollaborationSnapshot = {
   participants: [

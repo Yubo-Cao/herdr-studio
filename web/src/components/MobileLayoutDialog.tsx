@@ -1,7 +1,4 @@
 import { useEffect, useRef } from "react";
-import { CloseButton } from "./CloseButton";
-import { ThemedSelect } from "./ThemedSelect";
-import { focusDialogElement } from "./dialogFocus";
 import {
   type LayoutMode,
   MOBILE_BREAKPOINT_MAX,
@@ -10,6 +7,9 @@ import {
   updateLayoutPreferences,
   useLayoutPreferences,
 } from "../layoutPreferences";
+import { CloseButton } from "./CloseButton";
+import { focusDialogElement } from "./dialogFocus";
+import { ThemedSelect } from "./ThemedSelect";
 import "./MobileLayoutDialog.css";
 
 export function MobileLayoutDialog({

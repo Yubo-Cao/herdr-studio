@@ -311,16 +311,13 @@ metadata unknown without failing the list. There is no remote-to-local fallback.
 
 ## Voice input
 
-Capture requests the browser's WebRTC audio processing (noise suppression, echo
-cancellation, automatic gain control) and runs voice activity detection in an
-AudioWorklet at 16 kHz. A segment commits after 500 ms of trailing silence,
-needs 320 ms of voiced audio, is forced out at 12 s, and is dropped unless it
-lasts 650 ms and reaches RMS 0.006 or peak 0.025; the speech threshold adapts
-to the background level between utterances. Segments are posted in order as
-canonical 16 kHz mono PCM16 WAV to bridge-global `POST /api/voice/transcribe`,
-which validates the header, bounds size (60 s) and concurrency, and relays to
-the configured provider. Transcripts are inserted at the composer caret. The
-capture code loads on first use; closing the composer releases the microphone.
+Capture requests the browser's WebRTC audio processing (noise suppression, echo cancellation, automatic gain control).
+The AudioContext runs at the device rate, because browsers resample a 48 kHz microphone into a 16 kHz context without adequate filtering and recognition accuracy suffers; the AudioWorklet applies a windowed-sinc low-pass filter, downsamples to 16 kHz, and runs voice activity detection.
+A segment commits after 500 ms of trailing silence, needs 320 ms of voiced audio, is forced out at 12 s, and is dropped unless it lasts 650 ms and reaches RMS 0.006 or peak 0.025; the speech threshold adapts to the background level between utterances.
+Segments are posted in order as canonical 16 kHz mono PCM16 WAV to bridge-global `POST /api/voice/transcribe`, which validates the header, bounds size (60 s) and concurrency, and tries each configured provider in order until one succeeds.
+Transcripts are inserted at the composer caret, and the composer records the contiguous range one session wrote.
+On stop, bridge-global `POST /api/voice/cleanup` rewrites that text once with the selected preset; the result replaces the range only if the draft still holds the raw dictation at the recorded offset, so edits made while tidying are never overwritten.
+The capture code loads on first use; closing the composer releases the microphone.
 
 ## Task notifications
 

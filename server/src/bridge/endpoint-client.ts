@@ -1,20 +1,19 @@
 import { EventEmitter } from "node:events";
 import * as net from "node:net";
 import { BinReader, BinWriter, encodeFrame } from "./bincode";
-import type { FrameData } from "./thin-client";
 import {
-  SurfaceReader,
-  type SurfaceBaseline,
+  readFullSurface,
+  readSurfaceDelta,
+  readSurfacePatch,
+  readSurfaceReuse,
   SURFACE_DELTA_KIND,
   SURFACE_REUSE_KIND,
-  readFullSurface,
-  readSurfacePatch,
-  readSurfaceDelta,
-  readSurfaceReuse,
+  type SurfaceBaseline,
+  SurfaceReader,
 } from "./endpoint-surface";
-
-import { type PaneInputEvent, encodePaneInput } from "./vt-input-classifier";
 import { isTerminalClipboardPayload } from "./terminal-clipboard";
+import type { FrameData } from "./thin-client";
+import { encodePaneInput, type PaneInputEvent } from "./vt-input-classifier";
 
 const HANDSHAKE_TIMEOUT_MS = 8_000;
 

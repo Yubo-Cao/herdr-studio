@@ -15,11 +15,11 @@ import {
   unlinkSync,
   writeFileSync,
 } from "node:fs";
-import { defaultDataFile, publishDataFile } from "../config/data-paths";
 import { dirname, isAbsolute, join, win32 } from "node:path";
 import { validateSshDestination } from "../bridge/ssh-command";
-import { nativeSocketPath } from "../config/server-config";
+import { defaultDataFile, publishDataFile } from "../config/data-paths";
 import { roamgateEnv } from "../config/environment";
+import { nativeSocketPath } from "../config/server-config";
 import { validateConnectionId } from "./protocol";
 import { LEGACY_DEFAULT_CONNECTION_ID } from "./types";
 

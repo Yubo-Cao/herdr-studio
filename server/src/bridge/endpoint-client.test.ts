@@ -1,19 +1,19 @@
 import { afterEach, describe, expect, jest, test } from "bun:test";
 import { once } from "node:events";
 import * as net from "node:net";
-import * as path from "node:path";
 import { tmpdir } from "node:os";
+import * as path from "node:path";
 import { BinReader, BinWriter, encodeFrame } from "./bincode";
 import { EndpointClient, type EndpointSurface } from "./endpoint-client";
-import type { CellData, FrameData } from "./thin-client";
 import {
-  SurfaceReader,
   readFullSurface,
   readSurfaceDelta,
   readSurfaceReuse,
   SURFACE_DELTA_KIND,
   SURFACE_REUSE_KIND,
+  SurfaceReader,
 } from "./endpoint-surface";
+import type { CellData, FrameData } from "./thin-client";
 
 const servers: net.Server[] = [];
 const sockets = new Set<net.Socket>();

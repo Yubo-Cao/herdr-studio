@@ -5,9 +5,9 @@ import { AgentHistoryFilters } from "./AgentHistoryFilters";
 import {
   ALL_HISTORY_FILTERS,
   HISTORY_CATEGORIES,
+  type HistoryEntry,
   historyEntryCategory,
   selectHistoryEntries,
-  type HistoryEntry,
 } from "./agentHistory";
 
 const entries: HistoryEntry[] = [

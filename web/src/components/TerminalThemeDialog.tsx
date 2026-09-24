@@ -1,7 +1,7 @@
-import { useEffect, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { ITheme } from "@xterm/xterm";
 import { Check, Copy, Moon, Pencil, Plus, Sun, Trash2 } from "lucide-react";
+import type { KeyboardEvent as ReactKeyboardEvent } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { ResolvedTheme } from "../appearance";
 import {
   type CustomTerminalTheme,
@@ -12,9 +12,9 @@ import {
   resolveTerminalThemeDefinition,
   TERMINAL_ANSI_COLOR_KEYS,
   TERMINAL_BASE_COLOR_KEYS,
+  TERMINAL_THEME_PRESETS,
   type TerminalThemeColorKey,
   type TerminalThemeDefinition,
-  TERMINAL_THEME_PRESETS,
   type TerminalThemeSelection,
   terminalColorToHex,
 } from "../terminalThemes";

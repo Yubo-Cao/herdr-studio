@@ -1,3 +1,4 @@
+import { afterEach, describe, expect, test } from "bun:test";
 import {
   mkdirSync,
   mkdtempSync,
@@ -7,7 +8,6 @@ import {
 } from "node:fs";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
-import { afterEach, describe, expect, test } from "bun:test";
 import {
   HERDR_SERVICE_LABEL,
   HERDR_SERVICE_MARKER,

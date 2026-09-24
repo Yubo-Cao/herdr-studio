@@ -8,6 +8,7 @@ import {
   createVoiceHandlers,
   transcribeVoice,
   voiceProviderFromEnv,
+  voiceProvidersFromEnv,
 } from "./transcription";
 
 function wav(samples = 1600) {
@@ -87,6 +88,36 @@ describe("voice provider configuration", () => {
         ROAMGATE_VOICE_PROVIDER: "funasr",
       }),
     ).toMatchObject({ kind: "command", label: "Fun-ASR" });
+  });
+
+  test("orders the fallback chain behind the primary provider", () => {
+    const env = {
+      ELEVENLABS_API_KEY: "k",
+      ROAMGATE_VOICE_API_KEY: "o",
+      ROAMGATE_VOICE_FUNASR_MODEL_DIR: "/models/nano",
+    };
+    expect(voiceProvidersFromEnv(env).map((p) => p.label)).toEqual([
+      "ElevenLabs",
+      "openai-compatible",
+      "Fun-ASR",
+    ]);
+    expect(
+      voiceProvidersFromEnv({ ...env, ROAMGATE_VOICE_PROVIDER: "funasr" }).map(
+        (p) => p.label,
+      ),
+    ).toEqual(["Fun-ASR", "ElevenLabs", "openai-compatible"]);
+    expect(
+      voiceProvidersFromEnv({ ...env, ROAMGATE_VOICE_FALLBACK: "off" }),
+    ).toHaveLength(1);
+    expect(
+      voiceProvidersFromEnv({
+        ELEVENLABS_API_KEY: "k",
+        ROAMGATE_VOICE_PROVIDER: "funasr",
+      }),
+    ).toEqual([]);
+    expect(() =>
+      voiceProvidersFromEnv({ ROAMGATE_VOICE_PROVIDER: "whisper" }),
+    ).toThrow("unknown");
   });
 
   test("configures an OpenAI-compatible endpoint", () => {
@@ -179,26 +210,32 @@ describe("voice HTTP handlers", () => {
     });
 
   test("report status without exposing configuration", async () => {
-    const off = createVoiceHandlers({ provider: () => null });
+    const off = createVoiceHandlers({ providers: () => [] });
     expect(await off.status().json()).toEqual({ available: false });
     const on = createVoiceHandlers({
-      provider: () => ({
-        kind: "elevenlabs",
-        label: "ElevenLabs",
-        apiKey: "k",
-      }),
+      providers: () => [
+        { kind: "elevenlabs", label: "ElevenLabs", apiKey: "k" },
+        { kind: "command", label: "Fun-ASR", argv: ["x", "{input}"] },
+      ],
+      cleanup: () => ({ baseUrl: "u", model: "m", apiKey: "secret" }),
     });
-    expect(await on.status().json()).toEqual({
+    const status = await on.status().json();
+    expect(status).toEqual({
       available: true,
       provider: "ElevenLabs",
+      fallbacks: ["Fun-ASR"],
+      cleanup: { available: true, model: "m" },
     });
+    expect(JSON.stringify(status)).not.toContain("secret");
   });
 
   test("reject unconfigured servers and invalid audio", async () => {
-    const off = createVoiceHandlers({ provider: () => null });
+    const off = createVoiceHandlers({ providers: () => [] });
     expect((await off.transcribe(request(wav()))).status).toBe(503);
     const on = createVoiceHandlers({
-      provider: () => ({ kind: "command", label: "c", argv: ["x", "{input}"] }),
+      providers: () => [
+        { kind: "command", label: "c", argv: ["x", "{input}"] },
+      ],
       transcribe: async () => "never",
     });
     expect((await on.transcribe(request(new Uint8Array(60)))).status).toBe(400);
@@ -208,7 +245,9 @@ describe("voice HTTP handlers", () => {
     let release!: () => void;
     const gate = new Promise<void>((resolve) => (release = resolve));
     const handlers = createVoiceHandlers({
-      provider: () => ({ kind: "command", label: "c", argv: ["x", "{input}"] }),
+      providers: () => [
+        { kind: "command", label: "c", argv: ["x", "{input}"] },
+      ],
       transcribe: async () => {
         await gate;
         return "done";
@@ -222,7 +261,82 @@ describe("voice HTTP handlers", () => {
     const third = await handlers.transcribe(request(wav()));
     expect(third.status).toBe(429);
     release();
-    expect(await (await first).json()).toEqual({ text: "done" });
-    expect(await (await second).json()).toEqual({ text: "done" });
+    expect(await (await first).json()).toEqual({
+      text: "done",
+      provider: "c",
+    });
+    expect(await (await second).json()).toEqual({
+      text: "done",
+      provider: "c",
+    });
+  });
+
+  test("fall back to the next provider when one fails", async () => {
+    const seen: string[] = [];
+    const handlers = createVoiceHandlers({
+      providers: () => [
+        { kind: "elevenlabs", label: "ElevenLabs", apiKey: "k" },
+        { kind: "command", label: "Fun-ASR", argv: ["x", "{input}"] },
+      ],
+      transcribe: async (provider) => {
+        seen.push(provider.label);
+        if (provider.kind === "elevenlabs") throw new Error("quota");
+        return "local";
+      },
+    });
+    const response = await handlers.transcribe(request(wav()));
+    expect(await response.json()).toEqual({
+      text: "local",
+      provider: "Fun-ASR",
+      fallback: true,
+    });
+    expect(seen).toEqual(["ElevenLabs", "Fun-ASR"]);
+  });
+
+  test("report every failure when the whole chain fails", async () => {
+    const handlers = createVoiceHandlers({
+      providers: () => [
+        { kind: "elevenlabs", label: "ElevenLabs", apiKey: "k" },
+        { kind: "command", label: "Fun-ASR", argv: ["x", "{input}"] },
+      ],
+      transcribe: async (provider) => {
+        throw new Error(`${provider.kind} down`);
+      },
+    });
+    const response = await handlers.transcribe(request(wav()));
+    expect(response.status).toBe(502);
+    expect((await response.json()).error).toBe(
+      "ElevenLabs: elevenlabs down; Fun-ASR: command down",
+    );
+  });
+
+  test("clean up dictation through the configured model", async () => {
+    const cleanupRequest = (body: unknown) =>
+      new Request("http://local/api/voice/cleanup", {
+        method: "POST",
+        body: JSON.stringify(body),
+      });
+    const off = createVoiceHandlers({ providers: () => [] });
+    expect((await off.cleanup(cleanupRequest({}))).status).toBe(503);
+    const handlers = createVoiceHandlers({
+      providers: () => [],
+      cleanup: () => ({ baseUrl: "u", model: "m", apiKey: "k" }),
+      cleanText: async (_config, mode, text) => `${mode}:${text}`,
+    });
+    expect(
+      (await handlers.cleanup(cleanupRequest({ text: "x", mode: "loud" })))
+        .status,
+    ).toBe(400);
+    expect(
+      (await handlers.cleanup(cleanupRequest({ text: " ", mode: "typeset" })))
+        .status,
+    ).toBe(400);
+    const response = await handlers.cleanup(
+      cleanupRequest({ text: "um hello", mode: "typeset" }),
+    );
+    expect(await response.json()).toEqual({
+      text: "typeset:um hello",
+      model: "m",
+    });
   });
 });

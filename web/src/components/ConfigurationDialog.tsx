@@ -1,4 +1,3 @@
-import { Suspense, useEffect, useRef, useState, type MouseEvent } from "react";
 import {
   ALargeSmall,
   Bell,
@@ -7,6 +6,7 @@ import {
   GitBranch,
   Keyboard,
   LayoutDashboard,
+  Mic,
   Minus,
   Moon,
   Palette,
@@ -16,6 +16,7 @@ import {
   SunMoon,
   Type as TypeIcon,
 } from "lucide-react";
+import { type MouseEvent, Suspense, useEffect, useRef, useState } from "react";
 import type { Theme } from "../App";
 import {
   ACCENT_OPTIONS,
@@ -30,9 +31,9 @@ import {
 } from "../appearance";
 import { lazyWithReload } from "../lazyWithReload";
 import {
-  mobileTerminalShortcutCount,
   type MobileTerminalShortcutRows,
   type MobileTerminalSideShortcuts,
+  mobileTerminalShortcutCount,
 } from "../mobileTerminalShortcuts";
 import { shallowEqual, store, useStoreSelector } from "../store";
 import {
@@ -44,13 +45,19 @@ import {
   connectionClientScopeKey,
   useConnectionClient,
 } from "../useConnectionClient";
+import {
+  setVoiceCleanupMode,
+  useVoiceCleanupMode,
+  VOICE_CLEANUP_OPTIONS,
+  type VoiceCleanupMode,
+} from "../voice/voicePreferences";
 import { AgentIntegrationsSettings } from "./AgentIntegrationsSettings";
 import { AutoSyncRepositoriesDialog } from "./AutoSyncRepositoriesDialog";
 import { CloseButton } from "./CloseButton";
-import { MobileTerminalShortcutsDialog } from "./MobileTerminalShortcutsDialog";
-import { TerminalTransportSettings } from "./TerminalTransportSettings";
 import { ConfigurationLoadingDialog } from "./ConfigurationLoadingDialog";
 import { MobileSheetHandle } from "./MobileSheetHandle";
+import { MobileTerminalShortcutsDialog } from "./MobileTerminalShortcutsDialog";
+import { TerminalTransportSettings } from "./TerminalTransportSettings";
 import { ThemedSelect } from "./ThemedSelect";
 import "./ConfigMenu.css";
 import "./ConfigurationDialog.css";
@@ -123,6 +130,7 @@ export function ConfigurationDialog({
   );
   const connectionClient = useConnectionClient();
   const [tab, setTab] = useState<ConfigurationTab>(initialTab);
+  const voiceCleanup = useVoiceCleanupMode();
   const [detail, setDetail] = useState<Detail | null>(null);
   const dialogRef = useRef<HTMLDivElement>(null);
   const detailTrigger = useRef<HTMLButtonElement | null>(null);
@@ -498,6 +506,28 @@ export function ConfigurationDialog({
                 >
                   <span />
                 </button>
+              </div>
+              <div className="config-preference-row config-font-row">
+                <span className="config-item-icon">
+                  <Mic size={15} />
+                </span>
+                <div className="config-item-copy">
+                  <strong>Voice cleanup</strong>
+                  <span>
+                    Rewrites a finished dictation with the server model
+                  </span>
+                </div>
+                <div className="config-font-control">
+                  <ThemedSelect
+                    aria-label="Voice cleanup"
+                    align="end"
+                    value={voiceCleanup}
+                    options={VOICE_CLEANUP_OPTIONS}
+                    onChange={(value) =>
+                      setVoiceCleanupMode(value as VoiceCleanupMode)
+                    }
+                  />
+                </div>
               </div>
               <div className="config-preference-row">
                 <span className="config-item-icon">

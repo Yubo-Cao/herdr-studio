@@ -1,15 +1,15 @@
 import { describe, expect, test } from "bun:test";
-import type { GitDiffEntry, GitDiffFile } from "../types";
 import { IMAGE_MIME_TYPES } from "../../../shared/filePreview";
-import { expandDiffEntryOnActivate } from "./diffContentState";
+import type { GitDiffEntry, GitDiffFile } from "../types";
 import {
   diffContentEntries,
   diffHunkTargets,
   diffSearchGroups,
-  nextDiffHunkIndex,
-  isImageDiff,
   highlightedPatch,
+  isImageDiff,
+  nextDiffHunkIndex,
 } from "./DiffContentView";
+import { expandDiffEntryOnActivate } from "./diffContentState";
 
 const entries: GitDiffEntry[] = [
   { path: "src/one.ts", kind: "unstaged", status: "M" },

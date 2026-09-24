@@ -29,9 +29,9 @@ Use an independently authenticated proxy if that boundary is insufficient.
   VPN; restrict access with a firewall/reverse proxy.
 - Treat worktree hooks as executable code.
 
-[Voice input](docs/DEPLOYMENT.md#voice-input) sends recorded speech segments to
-the configured provider; a cloud provider receives that audio. Its credentials
-stay in the service environment, and any authenticated client can use them.
+[Voice input](docs/DEPLOYMENT.md#voice-input) sends recorded speech segments to the configured providers; a cloud provider receives that audio, and a fallback provider receives it when the primary fails.
+Dictation cleanup sends the transcript text to the configured language model.
+Their credentials stay in the service environment, and any authenticated client can use them.
 
 The bridge checks neither browser Origin nor request Host. Any request reaching
 it and passing required authentication has full authority. Secure the outer

@@ -1,13 +1,13 @@
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import {
   annotationDraftStorageKey,
+  type ReviewAnnotation,
   readReviewAnnotations,
   writeReviewAnnotations,
-  type ReviewAnnotation,
 } from "./annotations";
 import { roamgateLocalStorage } from "./browserStorage";
 import { store } from "./store";
-import { sameResourceOwner, type ResourceScope } from "./workspaceResource";
+import { type ResourceScope, sameResourceOwner } from "./workspaceResource";
 
 const EMPTY_ANNOTATIONS: ReviewAnnotation[] = [];
 

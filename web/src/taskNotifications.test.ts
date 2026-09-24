@@ -1,14 +1,14 @@
 import { describe, expect, jest, mock, test } from "bun:test";
 import { readFile } from "node:fs/promises";
 import { runInNewContext } from "node:vm";
+import { bridge, type ConnectionClient } from "./api";
+import { __storeTesting, emptyServerSessionState, store } from "./store";
 import {
   listenForTaskNotificationActivation,
   prepareTaskNotifications,
   showTaskNotification,
   TASK_NOTIFICATION_ACTIVATE_EVENT,
 } from "./taskNotifications";
-import { __storeTesting, emptyServerSessionState, store } from "./store";
-import { bridge, type ConnectionClient } from "./api";
 
 const origin = "https://roamgate.example";
 const target = {

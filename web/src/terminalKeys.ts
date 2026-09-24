@@ -1,4 +1,5 @@
 import { matchesShortcut, type ShortcutBindings } from "./shortcutBindings";
+
 type TerminalKeyEvent = Pick<
   KeyboardEvent,
   | "type"

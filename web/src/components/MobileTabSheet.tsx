@@ -4,8 +4,8 @@ import { createPortal } from "react-dom";
 import {
   shallowEqual,
   store,
-  useStoreSelector,
   useEndpointCreationReason,
+  useStoreSelector,
 } from "../store";
 import { AgentStatusIcon } from "./AgentStatusIcon";
 import { summarizeTabAgents } from "./agentSession";

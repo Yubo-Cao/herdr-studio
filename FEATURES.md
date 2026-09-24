@@ -248,7 +248,8 @@ separate for desktop/mobile. Jump from a diff to its file preview.
 - Customize the floating `2×8` grid and up to four side buttons under
   **Configuration > Behavior > Mobile terminal shortcuts**. The Tabs sheet and
   pane controls work when the tab strip is hidden.
-- The composer supports IME, dictation, voice input, multiline text, and images. **Insert**
+- The composer supports IME, dictation, voice input, multiline text, and images.
+  Voice input falls back from cloud to local recognition, and a finished dictation is tidied by a language model (**Configuration > Behavior > Voice cleanup**). **Insert**
   does not execute; **Send** adds one Enter. Drafts are in-memory per
   connection/pane; closing their pane/tab/workspace asks before discarding.
 - Install as a PWA for an app window; a bundled Nerd Font supplies terminal

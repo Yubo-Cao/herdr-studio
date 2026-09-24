@@ -1,3 +1,4 @@
+import { randomBytes } from "node:crypto";
 import {
   closeSync,
   constants,
@@ -8,11 +9,10 @@ import {
 } from "node:fs";
 import { homedir } from "node:os";
 import {
+  assertSafeDataPath,
   defaultDataFile,
   publishDataFile,
-  assertSafeDataPath,
 } from "./data-paths";
-import { randomBytes } from "node:crypto";
 
 const AUTH_TOKEN_PATTERN = /^[a-f0-9]{64}$/;
 

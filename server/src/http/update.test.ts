@@ -1,4 +1,5 @@
 import { describe, expect, test } from "bun:test";
+import { shQuote } from "../utils/process-utils";
 import {
   compareVersion,
   createUpdateHandlers,
@@ -8,7 +9,6 @@ import {
   resolveUpdateTarget,
   UPDATE_HTTP_IDLE_TIMEOUT_SECONDS,
 } from "./update";
-import { shQuote } from "../utils/process-utils";
 
 const darwinRuntime = {
   platform: "darwin",

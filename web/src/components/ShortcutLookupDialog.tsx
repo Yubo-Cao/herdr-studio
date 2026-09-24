@@ -1,18 +1,15 @@
 import { useEffect, useRef, useState } from "react";
-import { CloseButton } from "./CloseButton";
-import { ThemedSelect } from "./ThemedSelect";
-import { focusDialogElement } from "./dialogFocus";
-import { SHORTCUT_CATALOG } from "../shortcutCatalog";
 import {
   defaultShortcutBindings,
   formatShortcut,
   SHORTCUT_PLATFORMS,
+  type ShortcutId,
   shortcutConflicts,
   shortcutFromEvent,
   shortcutWarning,
   validateShortcutKeys,
-  type ShortcutId,
 } from "../shortcutBindings";
+import { SHORTCUT_CATALOG } from "../shortcutCatalog";
 import {
   deleteShortcutPreset,
   exportShortcutPreset,
@@ -22,6 +19,9 @@ import {
   updateShortcut,
   useShortcutPreferences,
 } from "../shortcutPreferences";
+import { CloseButton } from "./CloseButton";
+import { focusDialogElement } from "./dialogFocus";
+import { ThemedSelect } from "./ThemedSelect";
 import "./ShortcutLookupDialog.css";
 
 export function ShortcutLookupDialog({

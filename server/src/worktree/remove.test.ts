@@ -4,12 +4,12 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { runProcessWithCodeTimeout, shQuote } from "../utils/process-utils";
 import {
+  type CheckoutState,
   createWorktreeRemovalCoordinator,
   createWorktreeRemovalRuntime,
   isNotWorkingTreeRemoveError,
   parseCheckoutProcessIds,
   removeWorktreeWithRecovery,
-  type CheckoutState,
   type WorktreeRemovalRuntime,
 } from "./remove";
 

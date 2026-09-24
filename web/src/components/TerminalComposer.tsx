@@ -1,9 +1,3 @@
-import { roamgateLocalStorage } from "../browserStorage";
-import {
-  shortcutMatches,
-  shortcutTitle,
-  useShortcutPreferences,
-} from "../shortcutPreferences";
 import {
   CircleHelp,
   CornerDownLeft,
@@ -16,10 +10,16 @@ import {
 } from "lucide-react";
 import { type CSSProperties, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { roamgateLocalStorage } from "../browserStorage";
 import {
   type MobileTerminalShortcut,
   mobileTerminalShortcutOption,
 } from "../mobileTerminalShortcuts";
+import {
+  shortcutMatches,
+  shortcutTitle,
+  useShortcutPreferences,
+} from "../shortcutPreferences";
 import {
   beginTerminalComposerSubmission,
   beginTerminalComposerUpload,
@@ -29,6 +29,7 @@ import {
   insertIntoTerminalComposerDraft,
   readTerminalComposerDraft,
   readTerminalComposerSelection,
+  replaceTerminalComposerDraftRange,
   subscribeTerminalComposerDraft,
   subscribeTerminalComposerSubmission,
   subscribeTerminalComposerUpload,
@@ -37,7 +38,13 @@ import {
   writeTerminalComposerDraft,
   writeTerminalComposerSelection,
 } from "../terminalComposer";
+import {
+  type DictationSpan,
+  dictationCleanupEdit,
+  extendDictationSpan,
+} from "../voice/dictationSpan";
 import { useVoiceDictation } from "../voice/useVoiceDictation";
+import { voiceCleanupMode } from "../voice/voicePreferences";
 import { MessageDialog } from "./ModalDialogs";
 import "./TerminalComposer.css";
 
@@ -168,14 +175,58 @@ export function TerminalComposer({
     );
   };
 
+  // Dictation lands verbatim as each segment is recognized; on stop the whole
+  // session is rewritten once by the cleanup model, unless the user has since
+  // edited that text.
+  const dictationRef = useRef<{ key: string; span: DictationSpan | null }>({
+    key: draftKey,
+    span: null,
+  });
   const voice = useVoiceDictation({
+    onStart: () => {
+      dictationRef.current = { key: draftKey, span: null };
+    },
     onText: (spoken, join) => {
+      const key = dictationRef.current.key;
       const textarea =
-        activeDraftKeyRef.current === draftKey ? textareaRef.current : null;
-      const draft = readTerminalComposerDraft(draftKey);
-      const caret = textarea?.selectionStart ?? draft.length;
-      const insertion = join(draft.slice(0, caret), spoken);
-      if (insertion) insertAtCaret(draftKey, insertion);
+        activeDraftKeyRef.current === key ? textareaRef.current : null;
+      const draft = readTerminalComposerDraft(key);
+      const stored = readTerminalComposerSelection(key);
+      const start = Math.min(
+        textarea?.selectionStart ?? stored?.start ?? draft.length,
+        draft.length,
+      );
+      const end = Math.max(
+        start,
+        Math.min(textarea?.selectionEnd ?? stored?.end ?? start, draft.length),
+      );
+      const insertion = join(draft.slice(0, start), spoken);
+      if (!insertion) return;
+      // No focus: summoning the phone keyboard mid-dictation hides the dock.
+      if (!replaceTerminalComposerDraftRange(key, start, end, insertion))
+        return;
+      dictationRef.current.span = extendDictationSpan(
+        dictationRef.current.span,
+        start,
+        insertion,
+      );
+    },
+    onFinish: async (tidy) => {
+      const { key, span } = dictationRef.current;
+      dictationRef.current.span = null;
+      const mode = voiceCleanupMode();
+      if (!span || span.broken || mode === "off" || !tidy) return;
+      const spoken = span.text.trim();
+      if (!spoken) return;
+      const cleaned = await tidy(spoken, mode);
+      const edit = dictationCleanupEdit(
+        readTerminalComposerDraft(key),
+        span,
+        cleaned,
+      );
+      if (edit)
+        replaceTerminalComposerDraftRange(key, edit.start, edit.end, edit.text);
+      else onError("The draft changed while tidying; kept the raw dictation.");
     },
     onError,
   });
@@ -422,7 +473,10 @@ export function TerminalComposer({
             title={voice.active ? "Stop voice input" : "Start voice input"}
             aria-label={voice.active ? "Stop voice input" : "Start voice input"}
             aria-pressed={voice.active}
-            disabled={voice.state.phase === "stopping"}
+            disabled={
+              voice.state.phase === "stopping" ||
+              voice.state.phase === "tidying"
+            }
             onPointerDown={keepTextareaFocus}
             onClick={voice.toggle}
           >
@@ -445,15 +499,17 @@ export function TerminalComposer({
               ? "Uploading image…"
               : submissionPending
                 ? "Sending…"
-                : voice.state.phase === "starting"
-                  ? "Starting microphone…"
-                  : voice.state.pending > 0
-                    ? "Transcribing…"
-                    : voice.state.phase === "speaking"
-                      ? "Listening: speech"
-                      : voice.state.phase === "listening"
-                        ? "Listening…"
-                        : ""}
+                : voice.state.phase === "tidying"
+                  ? "Tidying…"
+                  : voice.state.phase === "starting"
+                    ? "Starting microphone…"
+                    : voice.state.pending > 0
+                      ? "Transcribing…"
+                      : voice.state.phase === "speaking"
+                        ? "Listening: speech"
+                        : voice.state.phase === "listening"
+                          ? "Listening…"
+                          : ""}
           </span>
           <button
             type="button"

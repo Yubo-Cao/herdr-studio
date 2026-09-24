@@ -1,6 +1,6 @@
 import { connectionStorageKey } from "./connectionStorage";
 import type { GitDiffKind, Pane } from "./types";
-import { resourceOwnerKey, type ResourceScope } from "./workspaceResource";
+import { type ResourceScope, resourceOwnerKey } from "./workspaceResource";
 
 export type ReviewAnnotationSide = "old" | "new";
 

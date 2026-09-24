@@ -1,31 +1,31 @@
-import {
-  createTaskEventTracker,
-  type TaskEvent,
-} from "../notifications/task-events";
+import type { ServerWebSocket } from "bun";
+import { createAgentSessionHandlers } from "../agent/agent-sessions";
+import { createAgentSessionFileAccess } from "../agent/session-file-access";
+import { createCollaborationService } from "../bridge/collaboration";
 import {
   assertEndpointCreationSource,
   createEmptyWorkspaceCreator,
 } from "../bridge/endpoint-creation";
-import type { ServerWebSocket } from "bun";
-import { createAgentSessionHandlers } from "../agent/agent-sessions";
-import { createAgentSessionFileAccess } from "../agent/session-file-access";
 import { HerdrClient } from "../bridge/herdr-client";
-import { createCollaborationService } from "../bridge/collaboration";
 import { assertSupportedHerdrProtocol } from "../bridge/protocol-compat";
 import { createSettingsRpcHandler } from "../bridge/settings-rpc";
-import {
-  readGuiSettings,
-  terminalSurfaceCodecsEnabled,
-} from "../config/gui-settings";
 import {
   createSshTunnelManager,
   type SshTunnelConfig,
   type SshTunnelError,
 } from "../bridge/ssh-tunnel";
-import { dropCoalescedMessage } from "../bridge/websocket-send";
 import { createTerminalBridge } from "../bridge/terminal-bridge";
+import { dropCoalescedMessage } from "../bridge/websocket-send";
+import {
+  readGuiSettings,
+  terminalSurfaceCodecsEnabled,
+} from "../config/gui-settings";
 import { createHerdrInfoHandler } from "../http/herdr-info";
 import { createImageUploadHandler } from "../http/image-upload";
+import {
+  createTaskEventTracker,
+  type TaskEvent,
+} from "../notifications/task-events";
 import {
   createRecoveryReporter,
   type Logger,
@@ -46,12 +46,12 @@ import {
 import { createLastStepTurnTracker } from "../workspace/last-step-turns";
 import { runBinaryProcessWithTimeout } from "../workspace/process";
 import { createStatusEnricher } from "../workspace/status";
-import { createWorktreeHookRunner } from "../worktree/worktree-hooks";
 import { createWorktreeParentStore } from "../worktree/parents";
 import {
   createWorktreeRemovalCoordinator,
   createWorktreeRemovalRuntime,
 } from "../worktree/remove";
+import { createWorktreeHookRunner } from "../worktree/worktree-hooks";
 import { createAgentStatusSubscriptionLoop } from "./agent-status-subscription";
 import { sanitizeConnectionError } from "./manager";
 import { createEventSubscriptionLoop } from "./subscription-loop";

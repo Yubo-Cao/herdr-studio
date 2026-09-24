@@ -1,12 +1,12 @@
 import { describe, expect, spyOn, test } from "bun:test";
 import { createAgentSessionHandlers } from "./agent-sessions";
 import type { AgentSessionFileAccess } from "./session-file-access";
+import type { HistoryUpdate } from "./session-history";
 import {
   createSessionProjectionCache,
   estimateRetainedBytes,
 } from "./session-projection-cache";
 import type { AgentSessionResolved, SessionFile } from "./session-types";
-import type { HistoryUpdate } from "./session-history";
 
 function fixture(agent = "pi") {
   const path = "/tmp/history-test.jsonl";

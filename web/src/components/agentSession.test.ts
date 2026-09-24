@@ -1,12 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import {
+  type AgentSessionSummary,
+  type AgentSessionTrajectoryStep,
   agentStateKind,
   firstLinePreview,
   formatTokenTotal,
-  type AgentSessionSummary,
   groupAgentPanesByWorkspace,
   groupTrajectoryTurns,
-  type AgentSessionTrajectoryStep,
   paneHasAgentHistory,
   shouldShowAgentStatusLabel,
   summarizeTabAgents,

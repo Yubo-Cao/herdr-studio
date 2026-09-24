@@ -1,4 +1,3 @@
-import { useEffect, useMemo, useRef, useState } from "react";
 import {
   ArrowLeft,
   ArrowRight,
@@ -14,8 +13,8 @@ import {
   Search,
   Upload,
 } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { ConnectionClient } from "../api";
-import type { FileExplorerEntry, FileExplorerList } from "../types";
 import { createFileSearchMatcher } from "../fileSearch";
 import {
   filesystemBaseName,
@@ -24,9 +23,7 @@ import {
   parentFilesystemPath,
 } from "../filesystemPaths";
 import { store, useStoreSelector } from "../store";
-import { Button } from "./ui/Button";
-import { Token } from "./ui/Token";
-import { TextInputDialog } from "./ModalDialogs";
+import type { FileExplorerEntry, FileExplorerList } from "../types";
 import {
   createExplorerEntry,
   displaySize,
@@ -36,6 +33,9 @@ import {
   uploadExplorerFile,
   writeExplorerViewMemory,
 } from "./fileExplorerResources";
+import { TextInputDialog } from "./ModalDialogs";
+import { Button } from "./ui/Button";
+import { Token } from "./ui/Token";
 import "./FilesystemBrowser.css";
 
 type Place = { key: string; label: string; path: string; title: string };

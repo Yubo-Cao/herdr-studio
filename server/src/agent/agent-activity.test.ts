@@ -3,12 +3,12 @@ import { mkdtemp, rm, utimes, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { enrichAgentActivity } from "./agent-activity";
-import { createAgentSessionResolverContext } from "./session-resolver";
 import { createAgentSessionHandlers } from "./agent-sessions";
 import {
   type AgentSessionFileAccess,
   localAgentSessionFiles,
 } from "./session-file-access";
+import { createAgentSessionResolverContext } from "./session-resolver";
 
 function agent(pane_id: string, path: string, state_change_seq = 1) {
   return {

@@ -1,8 +1,8 @@
 import * as AvatarPrimitive from "@radix-ui/react-avatar";
 import {
-  forwardRef,
   type ComponentPropsWithoutRef,
   type ElementRef,
+  forwardRef,
 } from "react";
 
 // Radix composition used by shadcn/ui, styled with Studio's shared tokens.

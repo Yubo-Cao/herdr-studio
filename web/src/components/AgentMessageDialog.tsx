@@ -1,11 +1,11 @@
 import { useEffect, useRef } from "react";
 import { createPortal } from "react-dom";
-import { focusDialogElement } from "./dialogFocus";
 import {
+  type AgentMessage,
   AgentMessageContent,
   agentMessageRoleLabel,
-  type AgentMessage,
 } from "./AgentMessageContent";
+import { focusDialogElement } from "./dialogFocus";
 import "./AgentMessageDialog.css";
 
 export function AgentMessageDialog({

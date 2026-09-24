@@ -1,11 +1,11 @@
 import { describe, expect, test } from "bun:test";
 import type { ILink, ILinkProvider, Terminal } from "@xterm/xterm";
-import { registerTerminalLinkProvider } from "./terminalLinkProvider";
-import { TerminalFileResolutionCache } from "./terminalFileLinks";
 import {
   getShortcutSnapshot,
   selectShortcutPreset,
 } from "./shortcutPreferences";
+import { TerminalFileResolutionCache } from "./terminalFileLinks";
+import { registerTerminalLinkProvider } from "./terminalLinkProvider";
 
 function fixture(rows: string[], cols: number, wrapped: number[] = []) {
   let provider!: ILinkProvider;

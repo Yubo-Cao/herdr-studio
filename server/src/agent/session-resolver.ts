@@ -2,6 +2,21 @@ import { existsSync, statSync } from "node:fs";
 import { readdir } from "node:fs/promises";
 import { homedir } from "node:os";
 import { basename, join, resolve } from "node:path";
+import {
+  describeAntigravitySessionPath,
+  findAntigravitySessionById,
+  findAntigravitySessionForCwd,
+} from "./antigravity-session";
+import {
+  describeGrokSessionPath,
+  findGrokSessionById,
+  findGrokSessionForCwd,
+} from "./grok-session";
+import { findMuseSession, type MuseMetadataCache } from "./muse-session";
+import {
+  type AgentSessionFileAccess,
+  localAgentSessionFiles,
+} from "./session-file-access";
 import type {
   AgentHistoryParams,
   AgentSessionInfo,
@@ -9,21 +24,6 @@ import type {
   HerdrCall,
   SessionFile,
 } from "./session-types";
-import {
-  localAgentSessionFiles,
-  type AgentSessionFileAccess,
-} from "./session-file-access";
-import {
-  describeGrokSessionPath,
-  findGrokSessionById,
-  findGrokSessionForCwd,
-} from "./grok-session";
-import {
-  describeAntigravitySessionPath,
-  findAntigravitySessionById,
-  findAntigravitySessionForCwd,
-} from "./antigravity-session";
-import { findMuseSession, type MuseMetadataCache } from "./muse-session";
 import {
   integrationInstallCommand,
   isRecord,

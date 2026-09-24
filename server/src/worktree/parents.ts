@@ -1,8 +1,8 @@
 import {
+  type GuiSettings,
   readGuiSettings,
   repoSettingsKey,
   updateGuiSettings,
-  type GuiSettings,
 } from "../config/gui-settings";
 
 const CUSTOM_SETTINGS_KEY = "worktree_parent_by_checkout";

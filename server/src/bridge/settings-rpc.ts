@@ -1,11 +1,5 @@
 import type { ServerWebSocket } from "bun";
 import {
-  CONNECTION_CHANGED_DURING_REQUEST,
-  serializeConnectionEnvelope,
-} from "../connections/protocol";
-import type { HerdrClient } from "./herdr-client";
-import { LEGACY_DEFAULT_CONNECTION_ID } from "../connections/types";
-import {
   connectionSettingsPrefix,
   DEFAULT_WORKSPACE_AUTO_SYNC_INTERVAL_MINUTES,
   type GuiRepoSettings,
@@ -18,9 +12,15 @@ import {
   workspaceRepoSettingsKey,
 } from "../config/gui-settings";
 import {
+  CONNECTION_CHANGED_DURING_REQUEST,
+  serializeConnectionEnvelope,
+} from "../connections/protocol";
+import { LEGACY_DEFAULT_CONNECTION_ID } from "../connections/types";
+import {
   checkoutPath as workspaceCheckoutPath,
   sourceCheckoutPath as workspaceSourceCheckoutPath,
 } from "../workspace/utils";
+import type { HerdrClient } from "./herdr-client";
 
 type ReadPaseoWorktreeHooks = (
   checkoutPath: string,

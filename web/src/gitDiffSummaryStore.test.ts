@@ -1,6 +1,5 @@
 import { describe, expect, test } from "bun:test";
 import type { ConnectionClient } from "./api";
-import type { GitDiffSummary } from "./types";
 import {
   gitDiffSummaryKey,
   readGitDiffSummary,
@@ -9,6 +8,7 @@ import {
   retireGitDiffSummaryResource,
   subscribeGitDiffSummary,
 } from "./gitDiffSummaryStore";
+import type { GitDiffSummary } from "./types";
 
 function summary(workspaceId: string): GitDiffSummary {
   return {

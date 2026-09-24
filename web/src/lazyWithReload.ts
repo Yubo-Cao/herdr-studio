@@ -1,5 +1,5 @@
-import { roamgateSessionStorage } from "./browserStorage";
 import { type ComponentType, lazy } from "react";
+import { roamgateSessionStorage } from "./browserStorage";
 
 // After an in-app update, the restarted server only embeds the new build's
 // hashed chunks, so a lazy import from an older open tab 404s and crashes the

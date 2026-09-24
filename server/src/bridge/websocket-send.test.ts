@@ -4,11 +4,11 @@ import {
   dropCoalescedMessage,
   flushCoalescedMessages,
   sendWebSocketMessage,
+  WebSocketCleanupTracker,
   WS_BACKPRESSURE_LIMIT_BYTES,
   WS_COALESCE_LIMIT_BYTES,
   WS_COMPRESSION_MIN_BYTES,
   WS_PER_MESSAGE_DEFLATE,
-  WebSocketCleanupTracker,
 } from "./websocket-send";
 
 function createWebSocket({

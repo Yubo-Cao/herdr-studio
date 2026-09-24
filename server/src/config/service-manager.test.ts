@@ -2,30 +2,30 @@ import { afterEach, describe, expect, test } from "bun:test";
 import {
   chmodSync,
   existsSync,
-  mkdtempSync,
   mkdirSync,
+  mkdtempSync,
   readFileSync,
   rmSync,
   statSync,
   symlinkSync,
   writeFileSync,
 } from "node:fs";
-import { dirname, join, resolve } from "node:path";
-import legacyDefinitions from "./service-legacy-definitions.test.json";
 import { tmpdir } from "node:os";
+import { dirname, join, resolve } from "node:path";
 import {
-  runServiceCommand as runServiceCommandWithLegacyCheck,
-  queryWindowsTask,
-  SERVICE_COMMAND_CONTINUE,
-} from "./service-manager";
-import {
+  escapeSystemdExecPath,
   renderLaunchdService,
   renderSystemdService,
   renderWindowsTaskDefinition,
-  resolveServicePaths,
   resolveLegacyServicePaths,
-  escapeSystemdExecPath,
+  resolveServicePaths,
 } from "./service-definitions";
+import legacyDefinitions from "./service-legacy-definitions.test.json";
+import {
+  queryWindowsTask,
+  runServiceCommand as runServiceCommandWithLegacyCheck,
+  SERVICE_COMMAND_CONTINUE,
+} from "./service-manager";
 
 // Existing lifecycle cases model a host without legacy services. Dedicated
 // migration cases below exercise the real preflight command/error paths.

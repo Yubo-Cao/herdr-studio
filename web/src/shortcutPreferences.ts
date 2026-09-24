@@ -6,12 +6,12 @@ import {
   matchesShortcut,
   SHORTCUT_IDS,
   SHORTCUT_PLATFORMS,
-  shortcutConflicts,
-  validateShortcutKeys,
   type ShortcutBindings,
   type ShortcutEvent,
   type ShortcutId,
   type ShortcutPlatform,
+  shortcutConflicts,
+  validateShortcutKeys,
 } from "./shortcutBindings";
 
 export const SHORTCUT_STORAGE_KEY = "keyboardShortcuts.v1";

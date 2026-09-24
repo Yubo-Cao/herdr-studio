@@ -10,13 +10,13 @@ import {
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import { createAgentSessionHandlers } from "./agent-sessions";
-import { localAgentSessionFiles } from "./session-file-access";
 import { findMuseSession } from "./muse-session";
+import { localAgentSessionFiles } from "./session-file-access";
+import { readSessionProjection } from "./session-projection-cache";
 import {
   createAgentSessionResolverContext,
   resolveAgentSession,
 } from "./session-resolver";
-import { readSessionProjection } from "./session-projection-cache";
 import { projectAgentTrajectory } from "./session-trajectory";
 import { normalizeAgentName } from "./session-utils";
 import { summarizeTokenUsage } from "./token-usage";

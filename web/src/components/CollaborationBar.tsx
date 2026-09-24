@@ -1,15 +1,14 @@
 import "./CollaborationBar.css";
-import { Check, Pencil, Users, X } from "lucide-react";
 import * as Popover from "@radix-ui/react-popover";
-import { Avatar, AvatarFallback } from "./ui/Avatar";
-import { Button } from "./ui/Button";
+import { Check, Pencil, Users, X } from "lucide-react";
 import {
+  type CSSProperties,
+  type FormEvent,
   useEffect,
   useRef,
   useState,
-  type CSSProperties,
-  type FormEvent,
 } from "react";
+import { bridge } from "../api";
 import {
   acceptCollaborationEvent,
   type CollaborationParticipant,
@@ -20,9 +19,10 @@ import {
   subscribeCollaborationSnapshot,
   updateCollaborationPresence,
 } from "../collaboration";
-import { bridge } from "../api";
 import { shallowEqual, store, useStoreSelector } from "../store";
 import { useConnectionClient } from "../useConnectionClient";
+import { Avatar, AvatarFallback } from "./ui/Avatar";
+import { Button } from "./ui/Button";
 
 const HEARTBEAT_MS = 12_000;
 
