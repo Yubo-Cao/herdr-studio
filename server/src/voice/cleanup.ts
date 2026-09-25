@@ -145,11 +145,18 @@ export type VoiceCleanupConfig = {
   model: string;
   apiKey: string;
   reasoningEffort?: string;
+  /** `/chat/completions` instead of the Responses API (DeepSeek, vLLM, ...). */
+  api?: "chat";
 };
 
 type Environment = Record<string, string | undefined>;
 
-/** Cleanup uses the OpenAI Responses API; off unless a key is configured. */
+/**
+ * Cleanup is off unless a key is configured. OpenAI itself gets the Responses
+ * API; any other base URL is treated as a Chat Completions endpoint, the one
+ * API every OpenAI-compatible provider implements. `ROAMGATE_VOICE_LLM_API`
+ * (`responses` or `chat`) overrides the choice.
+ */
 export function voiceCleanupFromEnv(
   environment: Environment = process.env,
 ): VoiceCleanupConfig | null {
@@ -161,16 +168,30 @@ export function voiceCleanupFromEnv(
   if (!apiKey) return null;
   const reasoningEffort =
     roamgateEnv("VOICE_LLM_REASONING_EFFORT", environment)?.trim() || undefined;
+  const baseUrl = (
+    roamgateEnv("VOICE_LLM_BASE_URL", environment)?.trim() ||
+    "https://api.openai.com/v1"
+  ).replace(/\/+$/, "");
+  const api = roamgateEnv("VOICE_LLM_API", environment)?.trim().toLowerCase();
+  if (api && api !== "chat" && api !== "responses")
+    throw new Error(`unknown ROAMGATE_VOICE_LLM_API: ${api}`);
+  const chat = api ? api === "chat" : hostOf(baseUrl) !== "api.openai.com";
   return {
-    baseUrl: (
-      roamgateEnv("VOICE_LLM_BASE_URL", environment)?.trim() ||
-      "https://api.openai.com/v1"
-    ).replace(/\/+$/, ""),
+    baseUrl,
     model:
       roamgateEnv("VOICE_LLM_MODEL", environment)?.trim() || "gpt-5.6-luna",
     apiKey,
     ...(reasoningEffort ? { reasoningEffort } : {}),
+    ...(chat ? { api: "chat" as const } : {}),
   };
+}
+
+function hostOf(url: string) {
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "";
+  }
 }
 
 /** Text of a Responses API result, from `output_text` or message parts. */
@@ -272,12 +293,64 @@ export async function cleanDictation(
   return original;
 }
 
+/**
+ * Chat Completions body. Reasoning is kept off for speed: `reasoning_effort`
+ * when configured, else DeepSeek's `thinking` switch (Aoide's first think-off
+ * level), since a hybrid model thinks by default.
+ */
+export function chatCleanupBody(
+  config: VoiceCleanupConfig,
+  instructions: string,
+  text: string,
+) {
+  return {
+    model: config.model,
+    messages: [
+      { role: "system", content: instructions },
+      { role: "user", content: text },
+    ],
+    stream: false,
+    ...(config.reasoningEffort
+      ? { reasoning_effort: config.reasoningEffort }
+      : hostOf(config.baseUrl) === "api.deepseek.com"
+        ? { thinking: { type: "disabled" }, temperature: 0.1 }
+        : { temperature: 0.1 }),
+  };
+}
+
 async function requestCleanup(
   config: VoiceCleanupConfig,
   instructions: string,
   text: string,
   fetchImpl: typeof fetch,
 ): Promise<string> {
+  if (config.api === "chat") {
+    const response = await fetchImpl(`${config.baseUrl}/chat/completions`, {
+      method: "POST",
+      headers: {
+        authorization: `Bearer ${config.apiKey}`,
+        "content-type": "application/json",
+      },
+      body: JSON.stringify(chatCleanupBody(config, instructions, text)),
+      signal: AbortSignal.timeout(CLEANUP_TIMEOUT_MS),
+    });
+    if (!response.ok) {
+      const detail = (await response.text().catch(() => "")).slice(0, 300);
+      throw new Error(`cleanup failed (${response.status}) ${detail}`);
+    }
+    const body = (await response.json()) as {
+      choices?: Array<{
+        finish_reason?: string;
+        message?: { content?: unknown };
+      }>;
+    };
+    const choice = body.choices?.[0];
+    // A truncated rewrite would silently drop the end of the dictation.
+    if (choice?.finish_reason && choice.finish_reason !== "stop")
+      throw new Error(`cleanup stopped early (${choice.finish_reason})`);
+    const content = choice?.message?.content;
+    return typeof content === "string" ? content.trim() : "";
+  }
   const response = await fetchImpl(`${config.baseUrl}/responses`, {
     method: "POST",
     headers: {

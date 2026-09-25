@@ -405,19 +405,21 @@ Browsers allow microphone capture only on HTTPS or localhost origins, so a phone
 
 ### Dictation cleanup
 
-When the microphone stops, the whole dictation is rewritten once by a language model through the OpenAI Responses API and replaces the raw text, unless the user edited that text in the meantime.
+When the microphone stops, the whole dictation is rewritten once by a language model and replaces the raw text, unless the user edited that text in the meantime.
+OpenAI (`api.openai.com`) is called through the Responses API; any other base URL through Chat Completions, which OpenAI-compatible providers such as DeepSeek implement.
 **Configuration > Behavior > Voice cleanup** picks the mode per browser: Off, Tidy (default; Aoide's cleanup prompt: removes fillers and false starts, tightens phrasing, and uses Markdown lists only for real enumerations), Clean (fillers and punctuation only), Typeset (adds light Markdown), or Polish (rewrites into prose).
 If a rewrite loses too much text, English words, numbers, or a dictionary term, the recognized text is used instead.
 
 | Variable | Meaning |
 | --- | --- |
 | `ROAMGATE_VOICE_LLM_API_KEY`, else `OPENAI_API_KEY` | Enables cleanup |
-| `ROAMGATE_VOICE_LLM_BASE_URL` | Responses API base URL (default `https://api.openai.com/v1`) |
+| `ROAMGATE_VOICE_LLM_BASE_URL` | API base URL (default `https://api.openai.com/v1`; for DeepSeek, `https://api.deepseek.com`) |
+| `ROAMGATE_VOICE_LLM_API` | `responses` or `chat`, overriding the choice made from the base URL |
 | `ROAMGATE_VOICE_LLM_MODEL` | Model (default `gpt-5.6-luna`) |
-| `ROAMGATE_VOICE_LLM_REASONING_EFFORT` | Optional `reasoning.effort` |
+| `ROAMGATE_VOICE_LLM_REASONING_EFFORT` | Optional reasoning effort; without it, DeepSeek's thinking mode is turned off |
 | `ROAMGATE_VOICE_LLM=off` | Disables cleanup |
 
-Requests set `store: false`.
+Responses API requests set `store: false`.
 
 ## Logging
 

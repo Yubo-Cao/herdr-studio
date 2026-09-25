@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import {
+  chatCleanupBody,
   cleanDictation,
   cleanupProblem,
   responseText,
@@ -34,6 +35,41 @@ describe("voice cleanup configuration", () => {
       model: "m",
       apiKey: "k",
       reasoningEffort: "low",
+      api: "chat",
+    });
+  });
+
+  test("uses Chat Completions for OpenAI-compatible providers", () => {
+    const deepseek = {
+      ROAMGATE_VOICE_LLM_API_KEY: "k",
+      ROAMGATE_VOICE_LLM_BASE_URL: "https://api.deepseek.com",
+    };
+    expect(voiceCleanupFromEnv(deepseek)).toMatchObject({ api: "chat" });
+    expect(
+      voiceCleanupFromEnv({ ...deepseek, ROAMGATE_VOICE_LLM_API: "responses" }),
+    ).not.toHaveProperty("api");
+    expect(() =>
+      voiceCleanupFromEnv({ ...deepseek, ROAMGATE_VOICE_LLM_API: "soap" }),
+    ).toThrow("unknown");
+    expect(
+      chatCleanupBody(
+        {
+          baseUrl: "https://api.deepseek.com",
+          model: "deepseek-flash",
+          apiKey: "k",
+        },
+        "sys",
+        "hi",
+      ),
+    ).toEqual({
+      model: "deepseek-flash",
+      messages: [
+        { role: "system", content: "sys" },
+        { role: "user", content: "hi" },
+      ],
+      stream: false,
+      thinking: { type: "disabled" },
+      temperature: 0.1,
     });
   });
 });
@@ -102,6 +138,58 @@ describe("voice cleanup request", () => {
         [],
       ),
     ).rejects.toThrow("cleanup failed (401) nope");
+  });
+});
+
+describe("chat cleanup request", () => {
+  const config = {
+    baseUrl: "https://api.deepseek.com",
+    model: "deepseek-flash",
+    apiKey: "k",
+    api: "chat" as const,
+  };
+  const reply = (body: unknown, seen: { url?: string } = {}) =>
+    (async (url: string) => {
+      seen.url = url;
+      return Response.json(body);
+    }) as unknown as typeof fetch;
+
+  test("reads the first choice", async () => {
+    const seen: { url?: string } = {};
+    expect(
+      await cleanDictation(
+        config,
+        "tidy",
+        "嗯 run the tests",
+        reply(
+          {
+            choices: [
+              {
+                finish_reason: "stop",
+                message: { content: " Run the tests. " },
+              },
+            ],
+          },
+          seen,
+        ),
+        [],
+      ),
+    ).toBe("Run the tests.");
+    expect(seen.url).toBe("https://api.deepseek.com/chat/completions");
+  });
+
+  test("rejects a truncated rewrite", async () => {
+    await expect(
+      cleanDictation(
+        config,
+        "tidy",
+        "x",
+        reply({
+          choices: [{ finish_reason: "length", message: { content: "x" } }],
+        }),
+        [],
+      ),
+    ).rejects.toThrow("stopped early (length)");
   });
 });
 
