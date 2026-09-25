@@ -1,0 +1,193 @@
+/* The fill rises with the post-noise-suppression input level. */
+.terminal-voice-button.is-active {
+  background: linear-gradient(
+    to top,
+    var(--accent-soft) calc(var(--voice-level, 0) * 100%),
+    transparent 0
+  );
+  color: var(--accent);
+}
+
+.terminal-voice-button.is-speaking {
+  color: var(--text-strong);
+  box-shadow: inset 0 -2px 0 var(--accent);
+}
+
+.terminal-mobile-input-actions .terminal-voice-button.is-active {
+  background: linear-gradient(
+    to top,
+    var(--accent-soft) calc(var(--voice-level, 0) * 100%),
+    var(--panel) 0
+  );
+}
+
+.terminal-mobile-input-actions .terminal-voice-button.is-speaking {
+  box-shadow:
+    inset 0 -3px 0 var(--accent),
+    var(--shadow-lg);
+}
+
+.terminal-voice-spin {
+  animation: terminal-voice-spin 900ms linear infinite;
+}
+
+@keyframes terminal-voice-spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+/* Touch devices use the floating button beside the keyboard toggle. */
+@media (any-pointer: coarse) {
+  .terminal-pane-toolbar .terminal-voice-button {
+    display: none;
+  }
+}
+
+/* Above the mobile layout's floating workspace controls while dictating. */
+.terminal-voice-panel {
+  position: absolute;
+  z-index: 80;
+  left: 50%;
+  bottom: calc(10px + env(safe-area-inset-bottom, 0px));
+  transform: translateX(-50%);
+  width: min(560px, calc(100% - 16px));
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  padding: 8px;
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  color: var(--text-strong);
+  box-shadow: var(--shadow-lg);
+  -webkit-backdrop-filter: blur(14px);
+  backdrop-filter: blur(14px);
+}
+
+/* Clear the floating keyboard and microphone buttons on touch layouts. */
+:where(html[data-layout="mobile"]) .terminal-voice-panel {
+  bottom: calc(62px + env(safe-area-inset-bottom, 0px));
+}
+
+@media (any-pointer: coarse) {
+  .terminal-voice-panel {
+    bottom: calc(62px + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+.terminal-voice-panel-head {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 28px;
+}
+
+.terminal-voice-meter {
+  flex: 0 0 auto;
+  width: 10px;
+  height: 10px;
+  background: var(--accent);
+  opacity: calc(0.35 + var(--voice-level, 0) * 0.65);
+  transform: scale(calc(0.7 + var(--voice-level, 0) * 0.6));
+  transition:
+    opacity 80ms linear,
+    transform 80ms linear;
+}
+
+.terminal-voice-meter.is-speaking {
+  box-shadow: 0 0 0 3px var(--accent-soft);
+}
+
+.terminal-voice-status {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.terminal-voice-transcript {
+  max-height: min(30dvh, 9.5em);
+  overflow-y: auto;
+  overscroll-behavior: contain;
+  padding: 6px 8px;
+  background: var(--panel-2);
+  font-size: 14px;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+  -webkit-user-select: text;
+}
+
+.terminal-voice-transcript.is-empty {
+  color: var(--muted);
+}
+
+.terminal-voice-actions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 6px;
+}
+
+.terminal-voice-panel button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  min-height: 32px;
+  padding: 0 12px;
+  border: 0;
+  background: color-mix(in srgb, var(--panel-2) 76%, transparent);
+  color: var(--text-strong);
+  font-size: 12px;
+  font-weight: 600;
+  touch-action: manipulation;
+  user-select: none;
+  -webkit-user-select: none;
+  -webkit-touch-callout: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+.terminal-voice-panel button.terminal-voice-cancel {
+  width: 32px;
+  padding: 0;
+  background: transparent;
+  color: var(--muted);
+}
+
+.terminal-voice-panel button.is-primary {
+  background: var(--accent-soft);
+  color: var(--accent);
+}
+
+.terminal-voice-panel button:disabled {
+  opacity: 0.45;
+}
+
+.terminal-voice-panel button:active:not(:disabled) {
+  background: var(--accent-soft);
+}
+
+@media (any-pointer: coarse) {
+  .terminal-voice-panel button {
+    min-height: 40px;
+    min-width: 40px;
+    font-size: 13px;
+  }
+
+  .terminal-voice-actions button:not(.terminal-voice-cancel) {
+    flex: 1 1 0;
+  }
+
+  .terminal-voice-transcript {
+    font-size: 16px;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .terminal-voice-spin {
+    animation: none;
+  }
+}

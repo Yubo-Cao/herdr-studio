@@ -311,13 +311,20 @@ metadata unknown without failing the list. There is no remote-to-local fallback.
 
 ## Voice input
 
+The AudioContext is created and resumed synchronously in the tap handler, before any `await`, because iOS Safari only starts audio during a user gesture; an interrupted context (calls, app switches) resumes when the page is visible again.
 Capture requests the browser's WebRTC audio processing (noise suppression, echo cancellation, automatic gain control).
 The AudioContext runs at the device rate, because browsers resample a 48 kHz microphone into a 16 kHz context without adequate filtering and recognition accuracy suffers; the AudioWorklet applies a windowed-sinc low-pass filter, downsamples to 16 kHz, and runs voice activity detection.
 A segment commits after 500 ms of trailing silence, needs 320 ms of voiced audio, is forced out at 12 s, and is dropped unless it lasts 650 ms and reaches RMS 0.006 or peak 0.025; the speech threshold adapts to the background level between utterances.
 Segments are posted in order as canonical 16 kHz mono PCM16 WAV to bridge-global `POST /api/voice/transcribe`, which validates the header, bounds size (60 s) and concurrency, and tries each configured provider in order until one succeeds.
-Transcripts are inserted at the composer caret, and the composer records the contiguous range one session wrote.
-On stop, bridge-global `POST /api/voice/cleanup` rewrites that text once with the selected preset; the result replaces the range only if the draft still holds the raw dictation at the recorded offset, so edits made while tidying are never overwritten.
-The capture code loads on first use; closing the composer releases the microphone.
+The personal dictionary (Aoide's `dictionary.yaml` format) is re-read when its file changes; its terms go to OpenAI as the transcription prompt, optionally to ElevenLabs as keyterms, and to cleanup as hints, and confirmed aliases are replaced in every transcript and cleanup result.
+
+Pane voice typing follows Aoide's speak-then-commit flow: transcripts collect in a preview, and stopping cleans the whole dictation once through `POST /api/voice/cleanup` and sends it with `pane.send_input` like a composer Insert (Send adds Enter).
+If the send fails, the text is kept in that pane's composer draft.
+In the composer, transcripts are inserted at the caret, and the composer records the contiguous range one session wrote.
+On stop, the cleanup result replaces that range only if the draft still holds the raw dictation at the recorded offset, so edits made while tidying are never overwritten.
+
+Cleanup keeps the recognized text instead of the model's rewrite when the rewrite keeps under 45% of the word characters (for inputs of at least 25), under half of the English words (for at least five), changes the digits (ignoring added list markers), or drops a dictionary term that was spoken; the bridge logs which check fired.
+The capture code loads on first use; unmounting the pane or closing the composer releases the microphone.
 
 ## Task notifications
 

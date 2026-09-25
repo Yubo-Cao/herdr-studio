@@ -12,6 +12,22 @@ export type VoiceDictationState = {
 };
 
 /**
+ * Create and unlock a capture context. Must run synchronously inside the tap
+ * handler: iOS Safari starts audio only during a user gesture, and the lazy
+ * module import below would end it.
+ */
+function unlockAudio(): AudioContext | null {
+  if (typeof AudioContext === "undefined") return null;
+  try {
+    const context = new AudioContext({ latencyHint: "interactive" });
+    void context.resume().catch(() => undefined);
+    return context;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Dictation state for one input surface. The capture, VAD, and transport code
  * load on first use so the microphone path adds nothing to the initial bundle.
  */
@@ -37,6 +53,7 @@ export function useVoiceDictation({
   });
   const sessionRef = useRef<DictationSession | null>(null);
   const startingRef = useRef(false);
+  const cancelledRef = useRef(false);
   const onStartRef = useRef(onStart);
   const onTextRef = useRef(onText);
   const onFinishRef = useRef(onFinish);
@@ -68,30 +85,51 @@ export function useVoiceDictation({
     }
   }, []);
 
+  /** Release the microphone and drop untranscribed audio; no `onFinish`. */
+  const cancel = useCallback(() => {
+    cancelledRef.current = startingRef.current;
+    const session = sessionRef.current;
+    sessionRef.current = null;
+    session?.cancel();
+    setState({ phase: "off", pending: 0, level: 0 });
+  }, []);
+
   const start = useCallback(async () => {
     if (sessionRef.current || startingRef.current) return;
     startingRef.current = true;
+    cancelledRef.current = false;
+    const unlocked = unlockAudio();
     setState({ phase: "starting", pending: 0, level: 0 });
     try {
       const voice = await import("./voiceDictation");
       const { dictationInsertion } = await import("./voiceSegmenter");
       onStartRef.current?.();
-      sessionRef.current = await voice.startDictation({
-        onPhase: (phase) =>
-          setState((current) =>
-            current.phase === "stopping" ? current : { ...current, phase },
-          ),
-        onPending: (pending) =>
-          setState((current) => ({ ...current, pending })),
-        onLevel: (level) => setState((current) => ({ ...current, level })),
-        onText: (text) => onTextRef.current(text, dictationInsertion),
-        onError: (message, fatal) => {
-          onErrorRef.current(message);
-          if (fatal) void stop();
+      const session = await voice.startDictation(
+        {
+          onPhase: (phase) =>
+            setState((current) =>
+              current.phase === "stopping" ? current : { ...current, phase },
+            ),
+          onPending: (pending) =>
+            setState((current) => ({ ...current, pending })),
+          onLevel: (level) => setState((current) => ({ ...current, level })),
+          onText: (text) => onTextRef.current(text, dictationInsertion),
+          onError: (message, fatal) => {
+            onErrorRef.current(message);
+            if (fatal) void stop();
+          },
         },
-      });
+        unlocked,
+      );
+      if (cancelledRef.current) {
+        session.cancel();
+        setState({ phase: "off", pending: 0, level: 0 });
+      } else sessionRef.current = session;
     } catch (error) {
+      if (unlocked?.state !== "closed")
+        void unlocked?.close().catch(() => undefined);
       setState({ phase: "off", pending: 0, level: 0 });
+      if (cancelledRef.current) return;
       const message =
         error instanceof DOMException && error.name === "NotAllowedError"
           ? "Microphone permission was denied."
@@ -112,11 +150,12 @@ export function useVoiceDictation({
   // Unmounting (closing the composer or switching panes) releases the mic.
   useEffect(
     () => () => {
+      cancelledRef.current = startingRef.current;
       sessionRef.current?.cancel();
       sessionRef.current = null;
     },
     [],
   );
 
-  return { state, toggle, stop, active: state.phase !== "off" };
+  return { state, toggle, stop, cancel, active: state.phase !== "off" };
 }

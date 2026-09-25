@@ -1,4 +1,5 @@
 import { encodeVoiceWav } from "./voiceSegmenter";
+import type { VoiceCleanupMode } from "./voicePreferences";
 import workletUrl from "./voiceCapture.worklet.ts?worker&url";
 
 export type DictationPhase = "starting" | "listening" | "speaking";
@@ -59,7 +60,7 @@ async function transcribe(wav: Uint8Array, attempt = 0): Promise<string> {
 /** Rewrite a finished dictation with the bridge's cleanup model. */
 export async function tidyDictation(
   text: string,
-  mode: "verbatim" | "typeset" | "polish",
+  mode: Exclude<VoiceCleanupMode, "off">,
 ): Promise<string> {
   const response = await fetch("/api/voice/cleanup", {
     method: "POST",
@@ -80,40 +81,56 @@ export async function tidyDictation(
  * Start dictation. The browser's WebRTC audio processing performs noise
  * suppression, echo cancellation, and gain control before the worklet VAD
  * segments speech; segments are transcribed in order by the bridge.
+ *
+ * `unlocked` is a context created during the user's tap (iOS Safari only
+ * starts audio inside a gesture). Capture runs at the device rate: browsers
+ * resample a 48 kHz microphone into a 16 kHz context without adequate
+ * filtering, so the worklet low-pass filters and downsamples instead.
  */
 export async function startDictation(
   callbacks: DictationCallbacks,
+  unlocked: AudioContext | null = null,
 ): Promise<DictationSession> {
-  if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
-    throw new Error(
-      "Voice input needs a secure origin (HTTPS or localhost) with microphone access.",
-    );
-  const status = await voiceStatus();
-  if (!status.available)
-    throw new Error(
-      status.error ?? "Voice input is not configured on this Roamgate server.",
-    );
-
-  callbacks.onPhase("starting");
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: {
-      channelCount: 1,
-      echoCancellation: true,
-      noiseSuppression: true,
-      autoGainControl: true,
-    },
-  });
-  let context: AudioContext;
+  let stream: MediaStream | null = null;
+  let context: AudioContext | null = unlocked;
   try {
-    // Capture at the device rate: browsers resample a 48 kHz microphone into a
-    // 16 kHz context without adequate filtering. The worklet low-pass filters
-    // and downsamples instead.
-    context = new AudioContext({ latencyHint: "interactive" });
+    if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
+      throw new Error(
+        "Voice input needs a secure origin (HTTPS or localhost) with microphone access.",
+      );
+    const status = await voiceStatus();
+    if (!status.available)
+      throw new Error(
+        status.error ??
+          "Voice input is not configured on this Roamgate server.",
+      );
+
+    callbacks.onPhase("starting");
+    stream = await navigator.mediaDevices.getUserMedia({
+      audio: {
+        channelCount: 1,
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      },
+    });
+    context ??= new AudioContext({ latencyHint: "interactive" });
     await context.audioWorklet.addModule(workletUrl);
+    if (context.state !== "running") await context.resume();
+    return capture(callbacks, stream, context, status);
   } catch (error) {
-    for (const track of stream.getTracks()) track.stop();
+    for (const track of stream?.getTracks() ?? []) track.stop();
+    void context?.close().catch(() => undefined);
     throw error;
   }
+}
+
+function capture(
+  callbacks: DictationCallbacks,
+  stream: MediaStream,
+  context: AudioContext,
+  status: VoiceStatus,
+): DictationSession {
   const source = context.createMediaStreamSource(stream);
   const node = new AudioWorkletNode(context, "roamgate-voice-capture", {
     numberOfInputs: 1,
@@ -131,9 +148,20 @@ export async function startDictation(
   let released = false;
   let flushed: (() => void) | null = null;
 
+  // iOS suspends ("interrupted") the context for calls, Siri, or app
+  // switches; resume when it becomes possible again.
+  const resume = () => {
+    if (!released && context.state !== "running" && !document.hidden)
+      void context.resume().catch(() => undefined);
+  };
+  context.addEventListener("statechange", resume);
+  document.addEventListener("visibilitychange", resume);
+
   const release = () => {
     if (released) return;
     released = true;
+    context.removeEventListener("statechange", resume);
+    document.removeEventListener("visibilitychange", resume);
     node.port.onmessage = null;
     source.disconnect();
     node.disconnect();

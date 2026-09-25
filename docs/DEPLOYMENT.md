@@ -370,27 +370,44 @@ terminal output, and may appear on lock screens.
 
 ## Voice input
 
-The composer's microphone button dictates into the draft.
+The microphone in each pane header (the floating microphone on touch devices) types dictation into the terminal, and the composer's microphone dictates into its draft.
 The bridge transcribes each speech segment with the first configured provider and falls back to the next configured one when a provider fails, so a cloud outage or exhausted quota degrades to local recognition instead of failing.
 With no provider, the button reports that voice input is unavailable.
 Keys stay in the service environment (`~/.config/roamgate/roamgate.env`) and never reach the browser.
 
 | Variable | Provider |
 | --- | --- |
-| `ELEVENLABS_API_KEY` | ElevenLabs Scribe (`scribe_v1`) |
-| `ROAMGATE_VOICE_API_KEY` with optional `ROAMGATE_VOICE_BASE_URL` (default OpenAI) and `ROAMGATE_VOICE_MODEL` (default `gpt-4o-transcribe`) | Any OpenAI-compatible `/audio/transcriptions` endpoint |
+| `ELEVENLABS_API_KEY` with optional `ROAMGATE_VOICE_ELEVENLABS_MODEL` (default `scribe_v2`) | ElevenLabs Scribe |
+| `ROAMGATE_VOICE_API_KEY` with optional `ROAMGATE_VOICE_BASE_URL` (default OpenAI) and `ROAMGATE_VOICE_MODEL` (default `gpt-transcribe`) | Any OpenAI-compatible `/audio/transcriptions` endpoint |
 | `ROAMGATE_VOICE_FUNASR_MODEL_DIR`, optional `ROAMGATE_VOICE_FUNASR_CLI` | Local Fun-ASR-Nano through `llama-funasr-cli` |
 | `ROAMGATE_VOICE_COMMAND` | A local command as a JSON argv array containing `{input}` (the WAV path); stdout is the transcript |
 
 The chain order is command, ElevenLabs, OpenAI-compatible, Fun-ASR.
 `ROAMGATE_VOICE_PROVIDER` (`elevenlabs`, `openai`, `funasr`, `command`, or `off`) moves one provider to the front, and `ROAMGATE_VOICE_FALLBACK=off` uses only the first.
-`ROAMGATE_VOICE_LANGUAGE` pins the language; by default providers detect it.
+`ROAMGATE_VOICE_LANGUAGE` pins the language; by default providers detect it, and `gpt-transcribe` receives the `ROAMGATE_VOICE_LANGUAGES` hint (default `zh,en`).
+`ROAMGATE_VOICE_ELEVENLABS_ZERO_RETENTION=on` sends `enable_logging=false`, which ElevenLabs honors only for enterprise accounts.
+
+### Personal dictionary
+
+`ROAMGATE_VOICE_DICTIONARY` names a YAML file in Aoide's format, so both can share `~/.config/aoide/dictionary.yaml`:
+
+```yaml
+terms:
+  - Claude Code
+  - { term: Codex, aliases: [code x] }
+```
+
+`term` is the canonical spelling and `aliases` are confirmed misrecognitions that are always replaced with it.
+Terms become the OpenAI transcription prompt and cleanup hints; `ROAMGATE_VOICE_DICTIONARY_KEYTERMS=on` also sends them to ElevenLabs as keyterms.
+Edits apply to the next request; an invalid edit keeps the last valid version.
+The file is limited to 64 KiB, 200 terms, and 20 aliases per term.
 Browsers allow microphone capture only on HTTPS or localhost origins, so a phone needs the tailnet or native HTTPS address.
 
 ### Dictation cleanup
 
 When the microphone stops, the whole dictation is rewritten once by a language model through the OpenAI Responses API and replaces the raw text, unless the user edited that text in the meantime.
-**Configuration > Behavior > Voice cleanup** picks the mode per browser: Off, Clean (fillers and punctuation only), Typeset (default; adds light Markdown), or Polish (rewrites into prose).
+**Configuration > Behavior > Voice cleanup** picks the mode per browser: Off, Tidy (default; Aoide's cleanup prompt: removes fillers and false starts, tightens phrasing, and uses Markdown lists only for real enumerations), Clean (fillers and punctuation only), Typeset (adds light Markdown), or Polish (rewrites into prose).
+If a rewrite loses too much text, English words, numbers, or a dictionary term, the recognized text is used instead.
 
 | Variable | Meaning |
 | --- | --- |

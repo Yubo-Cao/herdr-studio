@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   cleanDictation,
+  cleanupProblem,
   responseText,
   VOICE_CLEANUP_PROMPTS,
   voiceCleanupFromEnv,
@@ -73,6 +74,7 @@ describe("voice cleanup request", () => {
       "verbatim",
       "um hello",
       fetchImpl,
+      [],
     );
     expect(text).toBe("Hello.");
     expect(sent!.url).toBe("https://api/responses");
@@ -97,7 +99,55 @@ describe("voice cleanup request", () => {
         "typeset",
         "x",
         fetchImpl,
+        [],
       ),
     ).rejects.toThrow("cleanup failed (401) nope");
+  });
+});
+
+describe("voice cleanup guard", () => {
+  const config = { baseUrl: "https://api", model: "m", apiKey: "k" };
+  const reply = (text: string, seen?: { instructions?: string }) =>
+    (async (_url: string, init: RequestInit) => {
+      if (seen) seen.instructions = JSON.parse(String(init.body)).instructions;
+      return Response.json({ output_text: text });
+    }) as unknown as typeof fetch;
+
+  test("flags lost text, lost English, and changed numbers", () => {
+    const long = "我们今天要讨论的是这个项目的整体架构以及后续的部署计划安排";
+    expect(cleanupProblem(long, "讨论架构")).toMatch(/shrank/);
+    expect(
+      cleanupProblem("run build test deploy now", "运行构建测试部署"),
+    ).toMatch(/English/);
+    expect(cleanupProblem("端口 8787", "端口 8080")).toBe("numbers changed");
+    expect(
+      cleanupProblem("first 3 then 4", "1. first 3\n2. then 4"),
+    ).toBeNull();
+    expect(cleanupProblem("嗯那个 run tests", "Run tests.")).toBeNull();
+  });
+
+  test("keeps the transcript when the rewrite is destructive", async () => {
+    const dictionary = [{ term: "Codex", aliases: ["code x"] }];
+    expect(
+      await cleanDictation(
+        config,
+        "tidy",
+        "ask code x to fix it",
+        reply("Ask it to fix it."),
+        dictionary,
+      ),
+    ).toBe("ask Codex to fix it");
+    const seen: { instructions?: string } = {};
+    expect(
+      await cleanDictation(
+        config,
+        "tidy",
+        "嗯 ask code x to fix it",
+        reply("Ask code x to fix it.", seen),
+        dictionary,
+      ),
+    ).toBe("Ask Codex to fix it.");
+    expect(seen.instructions).toStartWith(VOICE_CLEANUP_PROMPTS.tidy);
+    expect(seen.instructions).toContain('"term":"Codex"');
   });
 });

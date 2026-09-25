@@ -31,6 +31,7 @@ Use an independently authenticated proxy if that boundary is insufficient.
 
 [Voice input](docs/DEPLOYMENT.md#voice-input) sends recorded speech segments to the configured providers; a cloud provider receives that audio, and a fallback provider receives it when the primary fails.
 Dictation cleanup sends the transcript text to the configured language model.
+Personal dictionary terms accompany recognition and cleanup requests.
 Their credentials stay in the service environment, and any authenticated client can use them.
 
 The bridge checks neither browser Origin nor request Host. Any request reaching

@@ -10,6 +10,13 @@ import {
   VOICE_CLEANUP_MAX_CHARS,
   type VoiceCleanupConfig,
 } from "./cleanup";
+import {
+  applyAliases,
+  type DictionaryEntry,
+  dictionaryHints,
+  dictionaryKeyterms,
+  voiceDictionary,
+} from "./dictionary";
 
 /** Browser segments are 16 kHz mono PCM16 WAV; the VAD commits within 12 s. */
 export const VOICE_SAMPLE_RATE = 16_000;
@@ -26,8 +33,20 @@ export type VoiceProvider =
       model: string;
       apiKey: string;
       language?: string;
+      /** Multi-language hint for GPT-Transcribe when no language is pinned. */
+      languages?: string[];
     }
-  | { kind: "elevenlabs"; label: string; apiKey: string; language?: string };
+  | {
+      kind: "elevenlabs";
+      label: string;
+      apiKey: string;
+      model: string;
+      language?: string;
+      /** Send dictionary terms as hard keyword bias (`keyterms`). */
+      keyterms?: boolean;
+      /** `enable_logging=false`; zero retention needs an enterprise plan. */
+      zeroRetention?: boolean;
+    };
 
 type Environment = Record<string, string | undefined>;
 
@@ -91,6 +110,14 @@ export function voiceProvidersFromEnv(
   const funAsr = funAsrCommand(environment);
   const apiKey = roamgateEnv("VOICE_API_KEY", environment)?.trim();
   const elevenLabsKey = environment.ELEVENLABS_API_KEY?.trim();
+  const enabled = (name: string) =>
+    /^(1|true|on|yes)$/i.test(roamgateEnv(name, environment)?.trim() ?? "");
+  const openAiModel =
+    roamgateEnv("VOICE_MODEL", environment)?.trim() || "gpt-transcribe";
+  const languages = (roamgateEnv("VOICE_LANGUAGES", environment) ?? "zh,en")
+    .split(",")
+    .map((code) => code.trim())
+    .filter(Boolean);
 
   // An explicit command wins; cloud keys outrank the local fallback.
   const configured: Array<[string, VoiceProvider | null]> = [
@@ -107,7 +134,14 @@ export function voiceProvidersFromEnv(
             kind: "elevenlabs",
             label: "ElevenLabs",
             apiKey: elevenLabsKey,
+            model:
+              roamgateEnv("VOICE_ELEVENLABS_MODEL", environment)?.trim() ||
+              "scribe_v2",
             language,
+            ...(enabled("VOICE_DICTIONARY_KEYTERMS") ? { keyterms: true } : {}),
+            ...(enabled("VOICE_ELEVENLABS_ZERO_RETENTION")
+              ? { zeroRetention: true }
+              : {}),
           }
         : null,
     ],
@@ -121,11 +155,14 @@ export function voiceProvidersFromEnv(
               roamgateEnv("VOICE_BASE_URL", environment)?.trim() ||
               "https://api.openai.com/v1"
             ).replace(/\/+$/, ""),
-            model:
-              roamgateEnv("VOICE_MODEL", environment)?.trim() ||
-              "gpt-4o-transcribe",
+            model: openAiModel,
             apiKey,
             language,
+            ...(openAiModel === "gpt-transcribe" &&
+            !language &&
+            languages.length
+              ? { languages }
+              : {}),
           }
         : null,
     ],
@@ -240,10 +277,28 @@ async function readProviderText(response: Response, label: string) {
   return typeof body.text === "string" ? body.text.trim() : "";
 }
 
+/**
+ * Recognize one segment. Dictionary terms go to OpenAI as a free-text prompt
+ * and optionally to ElevenLabs as keyterms; confirmed aliases are then
+ * replaced in every provider's transcript.
+ */
 export async function transcribeVoice(
   provider: VoiceProvider,
   wav: Uint8Array,
   fetchImpl: typeof fetch = fetch,
+  dictionary: DictionaryEntry[] = voiceDictionary(),
+): Promise<string> {
+  return applyAliases(
+    await recognize(provider, wav, fetchImpl, dictionary),
+    dictionary,
+  );
+}
+
+async function recognize(
+  provider: VoiceProvider,
+  wav: Uint8Array,
+  fetchImpl: typeof fetch,
+  dictionary: DictionaryEntry[],
 ): Promise<string> {
   assertVoiceWav(wav);
   const signal = AbortSignal.timeout(TRANSCRIBE_TIMEOUT_MS);
@@ -264,7 +319,12 @@ export async function transcribeVoice(
   form.append("file", file, "segment.wav");
   if (provider.kind === "openai") {
     form.append("model", provider.model);
+    form.append("response_format", "json");
     if (provider.language) form.append("language", provider.language);
+    for (const code of provider.languages ?? [])
+      form.append("languages[]", code);
+    const prompt = dictionaryHints(dictionary);
+    if (prompt) form.append("prompt", prompt);
     const response = await fetchImpl(
       `${provider.baseUrl}/audio/transcriptions`,
       {
@@ -276,8 +336,13 @@ export async function transcribeVoice(
     );
     return readProviderText(response, provider.label);
   }
-  form.append("model_id", "scribe_v1");
+  form.append("model_id", provider.model);
+  form.append("tag_audio_events", "false");
   if (provider.language) form.append("language_code", provider.language);
+  if (provider.keyterms)
+    for (const term of dictionaryKeyterms(dictionary))
+      form.append("keyterms", term);
+  if (provider.zeroRetention) form.append("enable_logging", "false");
   const response = await fetchImpl(
     "https://api.elevenlabs.io/v1/speech-to-text",
     {

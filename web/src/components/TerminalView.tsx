@@ -85,6 +85,7 @@ import {
 } from "../terminalClipboard";
 import {
   clearTerminalComposerDrafts,
+  insertIntoTerminalComposerDraft,
   terminalComposerCloseWarning,
   terminalComposerDraftKey,
   terminalComposerDraftPaneIds,
@@ -169,6 +170,11 @@ import { applyTerminalTheme } from "../terminalThemes";
 import { paneHasAgentHistory } from "./agentSession";
 import { ConfirmDialog, MessageDialog } from "./ModalDialogs";
 import { TerminalComposer } from "./TerminalComposer";
+import {
+  TerminalVoiceButton,
+  TerminalVoicePanel,
+  useTerminalVoiceTyping,
+} from "./TerminalVoiceTyping";
 import "./TerminalView.css";
 
 function focusTerminalEndpoint(
@@ -524,6 +530,36 @@ export function TerminalView({
   const composerOpen = controlledComposerOpen ?? localComposerOpen;
   const composerOpenRef = useRef(composerOpen);
   composerOpenRef.current = composerOpen;
+  // Voice typing goes straight into the pane; the composer keeps its own mic.
+  const voiceTyping = useTerminalVoiceTyping({
+    onInsert: async (text, submit) => {
+      try {
+        assertInputAllowed();
+        await submitTerminalComposer(text, submit);
+      } catch (error) {
+        const paneId = paneIdRef.current;
+        if (!paneId) throw error;
+        insertIntoTerminalComposerDraft(
+          terminalComposerDraftKey(
+            s.activeConnectionId,
+            s.connectionGeneration,
+            paneId,
+          ),
+          text,
+        );
+        throw new Error(
+          `${error instanceof Error ? error.message : String(error)}. The dictation was kept in the composer draft.`,
+          { cause: error },
+        );
+      }
+    },
+    onError: (message) =>
+      store.notify({
+        kind: "error",
+        message: "Voice typing",
+        detail: message,
+      }),
+  });
   const viewOnlyRef = useRef(control.access.viewOnly);
   const closeTerminalInput = useCallback((blurInput = true) => {
     inputActiveRef.current = false;
@@ -3000,6 +3036,11 @@ export function TerminalView({
       detail: message,
     });
   };
+  const voiceTypingDisabledReason = control.access.viewOnly
+    ? "This pane is view only"
+    : s.status !== "connected" || s.connectionPaused || terminalAttachError
+      ? "The terminal is not connected"
+      : null;
   const mobileShortcutReason = (shortcut: MobileTerminalShortcut) =>
     control.access.viewOnly &&
     mobileTerminalShortcutExecution(shortcut.action)?.type !== "scroll"
@@ -3459,6 +3500,12 @@ export function TerminalView({
             </Button>
           </div>
           <div className="terminal-pane-toolbar" aria-label="Pane actions">
+            <TerminalVoiceButton
+              voice={voiceTyping}
+              className="terminal-pane-action"
+              iconSize={14}
+              disabledReason={voiceTypingDisabledReason}
+            />
             {!paneZoomed ? (
               <>
                 <IconButton
@@ -3511,42 +3558,51 @@ export function TerminalView({
         ) : null}
         <div className="terminal-main">
           <div ref={containerRef} className="terminal-view" />
-          {touchHandles.length === 0 && !composerOpen && isActivePane ? (
+          {touchHandles.length === 0 &&
+          ((!composerOpen && isActivePane) || voiceTyping.active) ? (
             <div
               className="terminal-mobile-input-actions"
               aria-label="Terminal input"
             >
-              <button
-                type="button"
-                aria-label="Open device keyboard"
-                title="Open device keyboard"
-                aria-pressed={inputActive}
-                disabled={
-                  s.status !== "connected" ||
-                  s.connectionPaused ||
-                  !!terminalAttachError ||
-                  control.access.viewOnly
-                }
-                onPointerDown={(event) => event.preventDefault()}
-                onClick={() => {
-                  const term = termRef.current;
-                  if (
-                    !term ||
-                    !connectionClient.isCurrent() ||
-                    desiredTerminalRef.current !== pane.terminal_id
-                  )
-                    return;
-                  inputActiveRef.current = true;
-                  setInputActive(true);
-                  term.options.disableStdin = false;
-                  if (term.textarea) term.textarea.readOnly = false;
-                  term.focus();
-                }}
-              >
-                <Keyboard size={20} />
-              </button>
+              <TerminalVoiceButton
+                voice={voiceTyping}
+                iconSize={20}
+                disabledReason={voiceTypingDisabledReason}
+              />
+              {!composerOpen && isActivePane ? (
+                <button
+                  type="button"
+                  aria-label="Open device keyboard"
+                  title="Open device keyboard"
+                  aria-pressed={inputActive}
+                  disabled={
+                    s.status !== "connected" ||
+                    s.connectionPaused ||
+                    !!terminalAttachError ||
+                    control.access.viewOnly
+                  }
+                  onPointerDown={(event) => event.preventDefault()}
+                  onClick={() => {
+                    const term = termRef.current;
+                    if (
+                      !term ||
+                      !connectionClient.isCurrent() ||
+                      desiredTerminalRef.current !== pane.terminal_id
+                    )
+                      return;
+                    inputActiveRef.current = true;
+                    setInputActive(true);
+                    term.options.disableStdin = false;
+                    if (term.textarea) term.textarea.readOnly = false;
+                    term.focus();
+                  }}
+                >
+                  <Keyboard size={20} />
+                </button>
+              ) : null}
             </div>
           ) : null}
+          <TerminalVoicePanel voice={voiceTyping} />
           {touchHandles.length === 0 &&
           showMobileKeys &&
           hasMobileSideShortcuts ? (

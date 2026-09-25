@@ -248,8 +248,16 @@ separate for desktop/mobile. Jump from a diff to its file preview.
 - Customize the floating `2×8` grid and up to four side buttons under
   **Configuration > Behavior > Mobile terminal shortcuts**. The Tabs sheet and
   pane controls work when the tab strip is hidden.
+- **Voice typing** is always one tap away: the microphone in the pane header
+  (desktop) or the floating microphone beside **Open device keyboard** (phones
+  and tablets) dictates without opening the composer. Recognized text collects
+  in a preview; **Insert** tidies it and types it into the pane, **Send** also
+  presses Enter, and tapping the microphone again equals **Insert**.
+  Recognition falls back from cloud to local, a personal dictionary fixes
+  names and terms, and the finished dictation is tidied by a language model
+  (**Configuration > Behavior > Voice cleanup**).
 - The composer supports IME, dictation, voice input, multiline text, and images.
-  Voice input falls back from cloud to local recognition, and a finished dictation is tidied by a language model (**Configuration > Behavior > Voice cleanup**). **Insert**
+  Its microphone dictates into the draft instead of the terminal. **Insert**
   does not execute; **Send** adds one Enter. Drafts are in-memory per
   connection/pane; closing their pane/tab/workspace asks before discarding.
 - Install as a PWA for an app window; a bundled Nerd Font supplies terminal

@@ -139,6 +139,86 @@ describe("voice provider configuration", () => {
   });
 });
 
+describe("Aoide recognizer settings", () => {
+  test("defaults to Scribe v2 and GPT-Transcribe with language hints", () => {
+    const [eleven, openai] = voiceProvidersFromEnv({
+      ELEVENLABS_API_KEY: "k",
+      ROAMGATE_VOICE_API_KEY: "o",
+    });
+    expect(eleven).toEqual({
+      kind: "elevenlabs",
+      label: "ElevenLabs",
+      apiKey: "k",
+      model: "scribe_v2",
+      language: undefined,
+    });
+    expect(openai).toMatchObject({
+      model: "gpt-transcribe",
+      languages: ["zh", "en"],
+    });
+    expect(
+      voiceProvidersFromEnv({
+        ELEVENLABS_API_KEY: "k",
+        ROAMGATE_VOICE_ELEVENLABS_MODEL: "scribe_v2_medical",
+        ROAMGATE_VOICE_DICTIONARY_KEYTERMS: "on",
+        ROAMGATE_VOICE_ELEVENLABS_ZERO_RETENTION: "true",
+      })[0],
+    ).toMatchObject({
+      model: "scribe_v2_medical",
+      keyterms: true,
+      zeroRetention: true,
+    });
+    expect(
+      voiceProviderFromEnv({
+        ROAMGATE_VOICE_API_KEY: "o",
+        ROAMGATE_VOICE_LANGUAGE: "zh",
+      }),
+    ).not.toHaveProperty("languages");
+  });
+
+  test("sends dictionary terms and applies aliases", async () => {
+    const dictionary = [{ term: "Codex", aliases: ["code x"] }];
+    const forms: FormData[] = [];
+    const fetchImpl = (async (_url: string, init: RequestInit) => {
+      forms.push(init.body as FormData);
+      return Response.json({ text: "ask code x" });
+    }) as typeof fetch;
+    const openai = await transcribeVoice(
+      {
+        kind: "openai",
+        label: "openai-compatible",
+        baseUrl: "https://api.test/v1",
+        model: "gpt-transcribe",
+        apiKey: "k",
+        languages: ["zh", "en"],
+      },
+      wav(),
+      fetchImpl,
+      dictionary,
+    );
+    const eleven = await transcribeVoice(
+      {
+        kind: "elevenlabs",
+        label: "ElevenLabs",
+        apiKey: "k",
+        model: "scribe_v2",
+        keyterms: true,
+        zeroRetention: true,
+      },
+      wav(),
+      fetchImpl,
+      dictionary,
+    );
+    expect([openai, eleven]).toEqual(["ask Codex", "ask Codex"]);
+    expect(forms[0]!.getAll("languages[]")).toEqual(["zh", "en"]);
+    expect(String(forms[0]!.get("prompt"))).toContain('"term":"Codex"');
+    expect(forms[1]!.get("model_id")).toBe("scribe_v2");
+    expect(forms[1]!.get("tag_audio_events")).toBe("false");
+    expect(forms[1]!.getAll("keyterms")).toEqual(["Codex"]);
+    expect(forms[1]!.get("enable_logging")).toBe("false");
+  });
+});
+
 describe("voice audio", () => {
   test("accepts only canonical 16 kHz mono PCM16 WAV", () => {
     expect(() => assertVoiceWav(wav())).not.toThrow();
@@ -214,7 +294,12 @@ describe("voice HTTP handlers", () => {
     expect(await off.status().json()).toEqual({ available: false });
     const on = createVoiceHandlers({
       providers: () => [
-        { kind: "elevenlabs", label: "ElevenLabs", apiKey: "k" },
+        {
+          kind: "elevenlabs",
+          label: "ElevenLabs",
+          apiKey: "k",
+          model: "scribe_v2",
+        },
         { kind: "command", label: "Fun-ASR", argv: ["x", "{input}"] },
       ],
       cleanup: () => ({ baseUrl: "u", model: "m", apiKey: "secret" }),
@@ -275,7 +360,12 @@ describe("voice HTTP handlers", () => {
     const seen: string[] = [];
     const handlers = createVoiceHandlers({
       providers: () => [
-        { kind: "elevenlabs", label: "ElevenLabs", apiKey: "k" },
+        {
+          kind: "elevenlabs",
+          label: "ElevenLabs",
+          apiKey: "k",
+          model: "scribe_v2",
+        },
         { kind: "command", label: "Fun-ASR", argv: ["x", "{input}"] },
       ],
       transcribe: async (provider) => {
@@ -296,7 +386,12 @@ describe("voice HTTP handlers", () => {
   test("report every failure when the whole chain fails", async () => {
     const handlers = createVoiceHandlers({
       providers: () => [
-        { kind: "elevenlabs", label: "ElevenLabs", apiKey: "k" },
+        {
+          kind: "elevenlabs",
+          label: "ElevenLabs",
+          apiKey: "k",
+          model: "scribe_v2",
+        },
         { kind: "command", label: "Fun-ASR", argv: ["x", "{input}"] },
       ],
       transcribe: async (provider) => {
