@@ -1,3 +1,5 @@
+import { msg } from "./i18n";
+
 export const MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY =
   "mobileTerminalShortcuts.v2";
 export const LEGACY_MOBILE_TERMINAL_SHORTCUTS_STORAGE_KEY =
@@ -26,21 +28,21 @@ type MobileTerminalShortcutOptionDefinition = {
 export const MOBILE_TERMINAL_SHORTCUT_OPTIONS = [
   {
     id: "mod-ctrl",
-    label: "Ctrl (next key)",
+    label: msg("Ctrl (next key)"),
     defaultButtonLabel: "Ctrl",
     group: "Modifier",
     modifier: "ctrl",
   },
   {
     id: "mod-alt",
-    label: "Alt (next key)",
+    label: msg("Alt (next key)"),
     defaultButtonLabel: "Alt",
     group: "Modifier",
     modifier: "alt",
   },
   {
     id: "mod-shift",
-    label: "Shift (next key)",
+    label: msg("Shift (next key)"),
     defaultButtonLabel: "Shift",
     group: "Modifier",
     modifier: "shift",
@@ -145,7 +147,7 @@ export const MOBILE_TERMINAL_SHORTCUT_OPTIONS = [
   },
   {
     id: "escape",
-    label: "Escape",
+    label: msg("Escape"),
     defaultButtonLabel: "Esc",
     group: "Basic",
     bytes: [0x1b],
@@ -166,7 +168,7 @@ export const MOBILE_TERMINAL_SHORTCUT_OPTIONS = [
   },
   {
     id: "backspace",
-    label: "Backspace",
+    label: msg("Backspace"),
     defaultButtonLabel: "Bksp",
     group: "Basic",
     bytes: [0x7f],
@@ -180,28 +182,28 @@ export const MOBILE_TERMINAL_SHORTCUT_OPTIONS = [
   },
   {
     id: "arrow-up",
-    label: "Arrow Up",
+    label: msg("Arrow Up"),
     defaultButtonLabel: "▲",
     group: "Navigation",
     bytes: [0x1b, 0x5b, 0x41],
   },
   {
     id: "arrow-down",
-    label: "Arrow Down",
+    label: msg("Arrow Down"),
     defaultButtonLabel: "▼",
     group: "Navigation",
     bytes: [0x1b, 0x5b, 0x42],
   },
   {
     id: "arrow-right",
-    label: "Arrow Right",
+    label: msg("Arrow Right"),
     defaultButtonLabel: "▶",
     group: "Navigation",
     bytes: [0x1b, 0x5b, 0x43],
   },
   {
     id: "arrow-left",
-    label: "Arrow Left",
+    label: msg("Arrow Left"),
     defaultButtonLabel: "◀",
     group: "Navigation",
     bytes: [0x1b, 0x5b, 0x44],
@@ -222,14 +224,14 @@ export const MOBILE_TERMINAL_SHORTCUT_OPTIONS = [
   },
   {
     id: "page-up",
-    label: "Page Up (application or shell history)",
+    label: msg("Page Up (application or shell history)"),
     defaultButtonLabel: "PgUp",
     group: "Navigation",
     scroll: { direction: "up", amount: "full" },
   },
   {
     id: "page-down",
-    label: "Page Down (application or shell history)",
+    label: msg("Page Down (application or shell history)"),
     defaultButtonLabel: "PgDn",
     group: "Navigation",
     scroll: { direction: "down", amount: "full" },
@@ -264,14 +266,14 @@ export const MOBILE_TERMINAL_SHORTCUT_OPTIONS = [
   },
   {
     id: "alt-page-up",
-    label: "Alt+Page Up (half scrollback)",
+    label: msg("Alt+Page Up (half scrollback)"),
     defaultButtonLabel: "A-PgUp",
     group: "Modified",
     scroll: { direction: "up", amount: "half" },
   },
   {
     id: "alt-page-down",
-    label: "Alt+Page Down (half scrollback)",
+    label: msg("Alt+Page Down (half scrollback)"),
     defaultButtonLabel: "A-PgDn",
     group: "Modified",
     scroll: { direction: "down", amount: "half" },

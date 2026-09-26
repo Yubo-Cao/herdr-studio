@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { store } from "./store";
 import { copyTextFromUserGesture } from "./terminalClipboard";
 
@@ -10,14 +11,14 @@ export async function copyTextWithFeedback(text: string) {
     if (sequence !== copySequence) return;
     store.notify({
       kind: "success",
-      message: "Copied to clipboard",
+      message: t("Copied to clipboard"),
       autoDismissMs: 3000,
     });
   } catch (error) {
     if (sequence !== copySequence) return;
     store.notify({
       kind: "error",
-      message: "Failed to copy to clipboard",
+      message: t("Failed to copy to clipboard"),
       detail: error instanceof Error ? error.message : String(error),
     });
   }

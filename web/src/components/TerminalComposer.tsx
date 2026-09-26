@@ -38,6 +38,7 @@ import {
   writeTerminalComposerDraft,
   writeTerminalComposerSelection,
 } from "../terminalComposer";
+import { msg, t } from "../i18n";
 import { useVoiceDictation } from "../voice/useVoiceDictation";
 import { MessageDialog } from "./ModalDialogs";
 import "./TerminalComposer.css";
@@ -48,8 +49,9 @@ import {
 } from "../voice/dictationSpan";
 import { voiceCleanupMode } from "../voice/voicePreferences";
 
-const TERMINAL_COMPOSER_HELP =
-  "Draft multiline text with your phone’s native editor before sending it. Adding an image inserts its uploaded path and may dismiss the keyboard; tap the editor to reopen it.";
+const TERMINAL_COMPOSER_HELP = msg(
+  "Draft multiline text with your phone’s native editor before sending it. Adding an image inserts its uploaded path and may dismiss the keyboard; tap the editor to reopen it.",
+);
 const TERMINAL_COMPOSER_SHORTCUTS_OPEN_STORAGE_KEY =
   "terminalComposerShortcutsOpen";
 
@@ -239,9 +241,9 @@ export function TerminalComposer({
           replacement = await tidy(spoken, mode);
         } catch (error) {
           onError(
-            `Cleanup failed; kept the dictation. ${
-              error instanceof Error ? error.message : String(error)
-            }`,
+            t("Cleanup failed; kept the dictation. {error}", {
+              error: error instanceof Error ? error.message : String(error),
+            }),
           );
         }
       }
@@ -253,7 +255,8 @@ export function TerminalComposer({
       );
       if (edit)
         replaceTerminalComposerDraftRange(key, edit.start, edit.end, edit.text);
-      else onError("The draft changed while tidying; kept the raw dictation.");
+      else
+        onError(t("The draft changed while tidying; kept the raw dictation."));
     },
     onError,
   });
@@ -271,7 +274,9 @@ export function TerminalComposer({
         insertAtCaret(uploadDraftKey, path);
       }
     } catch (error) {
-      onError(error instanceof Error ? error.message : "Image upload failed");
+      onError(
+        error instanceof Error ? error.message : t("Image upload failed"),
+      );
     } finally {
       finishTerminalComposerUpload(uploadDraftKey);
     }
@@ -308,7 +313,9 @@ export function TerminalComposer({
     } catch (error) {
       const pendingText = readTerminalComposerDraft(submittedDraftKey);
       writeTerminalComposerDraft(submittedDraftKey, `${draft}${pendingText}`);
-      onError(error instanceof Error ? error.message : "Failed to send input");
+      onError(
+        error instanceof Error ? error.message : t("Failed to send input"),
+      );
     } finally {
       finishTerminalComposerSubmission(submittedDraftKey);
       textareaRef.current?.focus({ preventScroll: true });
@@ -332,7 +339,7 @@ export function TerminalComposer({
       <div
         className="terminal-composer"
         role="dialog"
-        aria-label="Terminal composer"
+        aria-label={t("Terminal composer")}
       >
         {hasShortcuts && shortcutsOpen ? (
           <div
@@ -342,7 +349,7 @@ export function TerminalComposer({
                 "--mobile-shortcut-columns": shortcutColumns,
               } as CSSProperties
             }
-            aria-label="Terminal shortcuts"
+            aria-label={t("Terminal shortcuts")}
           >
             {shortcutRows.map((row, rowIndex) => (
               <div
@@ -363,13 +370,14 @@ export function TerminalComposer({
                   return (
                     <button
                       type="button"
-                      aria-label={`Send ${option?.label ?? shortcut.label}`}
+                      aria-label={t("Send {key}", {
+                        key: option ? t(option.label) : shortcut.label,
+                      })}
                       onPointerDown={keepTextareaFocus}
                       disabled={!!shortcutDisabledReason?.(shortcut)}
                       title={
                         shortcutDisabledReason?.(shortcut) ??
-                        option?.label ??
-                        shortcut.label
+                        (option ? t(option.label) : shortcut.label)
                       }
                       onClick={() => onRunShortcut(shortcut)}
                       key={shortcut.id}
@@ -387,9 +395,9 @@ export function TerminalComposer({
           className="terminal-composer-input"
           value={text}
           rows={1}
-          placeholder="Compose input for the terminal…"
+          placeholder={t("Compose input for the terminal…")}
           autoComplete="off"
-          aria-label="Terminal input draft"
+          aria-label={t("Terminal input draft")}
           onChange={(e) => updateText(e.currentTarget)}
           onSelect={(e) =>
             writeTerminalComposerSelection(
@@ -447,8 +455,8 @@ export function TerminalComposer({
           <button
             type="button"
             className="terminal-composer-close"
-            title="Close composer"
-            aria-label="Close composer"
+            title={t("Close composer")}
+            aria-label={t("Close composer")}
             onPointerDown={keepTextareaFocus}
             onClick={onClose}
           >
@@ -460,11 +468,11 @@ export function TerminalComposer({
               className={`terminal-composer-shortcuts-toggle ${
                 shortcutsOpen ? "is-open" : ""
               }`}
-              title={shortcutsOpen ? "Hide shortcuts" : "Show shortcuts"}
+              title={shortcutsOpen ? t("Hide shortcuts") : t("Show shortcuts")}
               aria-label={
                 shortcutsOpen
-                  ? "Hide terminal shortcuts"
-                  : "Show terminal shortcuts"
+                  ? t("Hide terminal shortcuts")
+                  : t("Show terminal shortcuts")
               }
               aria-expanded={shortcutsOpen}
               onPointerDown={keepTextareaFocus}
@@ -483,8 +491,8 @@ export function TerminalComposer({
           <button
             type="button"
             className="terminal-composer-attach"
-            title="Add an image"
-            aria-label="Add an image"
+            title={t("Add an image")}
+            aria-label={t("Add an image")}
             disabled={busy}
             onPointerDown={keepTextareaFocus}
             onClick={() => fileInputRef.current?.click()}
@@ -497,8 +505,12 @@ export function TerminalComposer({
               voice.state.phase === "speaking" ? "is-speaking" : ""
             }`}
             style={{ "--voice-level": voice.state.level } as CSSProperties}
-            title={voice.active ? "Stop voice input" : "Start voice input"}
-            aria-label={voice.active ? "Stop voice input" : "Start voice input"}
+            title={
+              voice.active ? t("Stop voice input") : t("Start voice input")
+            }
+            aria-label={
+              voice.active ? t("Stop voice input") : t("Start voice input")
+            }
             aria-pressed={voice.active}
             disabled={
               voice.state.phase === "stopping" ||
@@ -512,8 +524,8 @@ export function TerminalComposer({
           <button
             type="button"
             className="terminal-composer-help"
-            title="About Input Composer"
-            aria-label="About Input Composer"
+            title={t("About Input Composer")}
+            aria-label={t("About Input Composer")}
             aria-haspopup="dialog"
             aria-expanded={helpOpen}
             onPointerDown={keepTextareaFocus}
@@ -523,47 +535,47 @@ export function TerminalComposer({
           </button>
           <span className="terminal-composer-hint">
             {uploadCount > 0
-              ? "Uploading image…"
+              ? t("Uploading image…")
               : submissionPending
-                ? "Sending…"
+                ? t("Sending…")
                 : voice.state.phase === "tidying"
-                  ? "Tidying…"
+                  ? t("Tidying…")
                   : voice.state.phase === "starting"
-                    ? "Starting microphone…"
+                    ? t("Starting microphone…")
                     : voice.state.pending > 0
-                      ? "Transcribing…"
+                      ? t("Transcribing…")
                       : voice.state.phase === "speaking"
-                        ? "Listening: speech"
+                        ? t("Listening: speech")
                         : voice.state.phase === "listening"
-                          ? "Listening…"
+                          ? t("Listening…")
                           : ""}
           </span>
           <button
             type="button"
             className="terminal-composer-submit"
-            title="Insert into the terminal without executing"
-            aria-label="Insert draft into the terminal"
+            title={t("Insert into the terminal without executing")}
+            aria-label={t("Insert draft into the terminal")}
             disabled={submitDisabled}
             onPointerDown={keepTextareaFocus}
             onClick={() => void submit(false)}
           >
             <CornerDownRight size={14} />
-            Insert
+            {t("Insert")}
           </button>
           <button
             type="button"
             className="terminal-composer-submit is-primary"
             title={shortcutTitle(
-              "Insert into the terminal and send Enter",
+              t("Insert into the terminal and send Enter"),
               "composer.send",
             )}
-            aria-label="Send draft to the terminal"
+            aria-label={t("Send draft to the terminal")}
             disabled={submitDisabled}
             onPointerDown={keepTextareaFocus}
             onClick={() => void submit(true)}
           >
             <CornerDownLeft size={14} />
-            Send
+            {t("Send")}
           </button>
         </div>
       </div>
@@ -571,8 +583,8 @@ export function TerminalComposer({
         ? createPortal(
             <MessageDialog
               open
-              title="About Input Composer"
-              message={TERMINAL_COMPOSER_HELP}
+              title={t("About Input Composer")}
+              message={t(TERMINAL_COMPOSER_HELP)}
               onClose={() => setHelpOpen(false)}
             />,
             document.body,

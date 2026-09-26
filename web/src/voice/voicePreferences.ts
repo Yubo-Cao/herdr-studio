@@ -1,5 +1,6 @@
 import { useSyncExternalStore } from "react";
 import { roamgateLocalStorage } from "../browserStorage";
+import { msg } from "../i18n";
 
 /** How a finished dictation is rewritten by the bridge's language model. */
 export type VoiceCleanupMode =
@@ -13,11 +14,11 @@ export const VOICE_CLEANUP_OPTIONS: {
   value: VoiceCleanupMode;
   label: string;
 }[] = [
-  { value: "off", label: "Off" },
-  { value: "tidy", label: "Tidy" },
-  { value: "verbatim", label: "Clean" },
-  { value: "typeset", label: "Typeset" },
-  { value: "polish", label: "Polish" },
+  { value: "off", label: msg("Off") },
+  { value: "tidy", label: msg("Tidy") },
+  { value: "verbatim", label: msg("Clean") },
+  { value: "typeset", label: msg("Typeset") },
+  { value: "polish", label: msg("Polish") },
 ];
 
 const STORAGE_KEY = "voiceCleanupMode";
