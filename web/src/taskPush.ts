@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { prepareTaskNotifications } from "./taskNotifications";
 
 export interface TaskNotificationPreferences {
@@ -15,7 +16,9 @@ async function pushRequest(method: "GET" | "POST" | "DELETE", body?: unknown) {
   });
   if (!response.ok)
     throw new Error(
-      "Unable to update background notifications. Check the server connection and try again.",
+      t(
+        "Unable to update background notifications. Check the server connection and try again.",
+      ),
     );
   return response.json() as Promise<{
     available?: boolean;
@@ -51,7 +54,9 @@ export function syncTaskPush(
           await pushRequest("DELETE", { endpoint: subscription.endpoint });
           if (!(await subscription.unsubscribe()))
             throw new Error(
-              "The browser could not revoke its push subscription. Try again.",
+              t(
+                "The browser could not revoke its push subscription. Try again.",
+              ),
             );
         }
         return "local" as const;
@@ -59,7 +64,9 @@ export function syncTaskPush(
       const config = await pushRequest("GET");
       if (!config.available || !config.publicKey) {
         if (subscription && !(await subscription.unsubscribe()))
-          throw new Error("Unable to disable the previous push subscription.");
+          throw new Error(
+            t("Unable to disable the previous push subscription."),
+          );
         return "local" as const;
       }
       const applicationServerKey = Uint8Array.from(
@@ -74,7 +81,9 @@ export function syncTaskPush(
       ) {
         await pushRequest("DELETE", { endpoint: subscription.endpoint });
         if (!(await subscription.unsubscribe()))
-          throw new Error("Unable to replace the previous push subscription.");
+          throw new Error(
+            t("Unable to replace the previous push subscription."),
+          );
         subscription = null;
       }
       let created = false;

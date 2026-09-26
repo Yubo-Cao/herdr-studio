@@ -1,4 +1,5 @@
 import { roamgateLocalStorage, roamgateSessionStorage } from "./browserStorage";
+import { t } from "./i18n";
 import { syncTaskPush, type TaskNotificationPreferences } from "./taskPush";
 import {
   isTaskNotificationTarget,
@@ -672,9 +673,12 @@ function reloadWhenUpdatedServerIsReady(
               pendingRestartVersion: null,
               notice: {
                 kind: "success",
-                message: `Roamgate ${expectedVersion} is running`,
-                detail:
+                message: t("Roamgate {version} is running", {
+                  version: expectedVersion,
+                }),
+                detail: t(
                   "Reloading the application to use the updated frontend.",
+                ),
                 loading: true,
               },
             });
@@ -693,8 +697,11 @@ function reloadWhenUpdatedServerIsReady(
       pendingRestartVersion: null,
       notice: {
         kind: "error",
-        message: "Updated server did not become ready",
-        detail: `Could not verify Roamgate ${expectedVersion}. Reload the page after checking the server process.`,
+        message: t("Updated server did not become ready"),
+        detail: t(
+          "Could not verify Roamgate {version}. Reload the page after checking the server process.",
+          { version: expectedVersion },
+        ),
       },
     });
   })().finally(() => {
@@ -823,8 +830,8 @@ function taskNotificationBody(
   const tab = tabs.find((t) => t.tab_id === pane.tab_id);
   const parts = [
     pane.agent ?? "Agent",
-    workspace?.label ? `workspace ${workspace.label}` : null,
-    tab?.label ? `tab ${tab.label}` : null,
+    workspace?.label ? t("workspace {name}", { name: workspace.label }) : null,
+    tab?.label ? t("tab {name}", { name: tab.label }) : null,
   ].filter((part): part is string => !!part);
   return parts.join(" · ");
 }
@@ -840,7 +847,7 @@ function reportTaskNotificationFailure(error: unknown, version: number) {
     taskNotificationPermission: notificationPermission(),
     notice: {
       kind: "error",
-      message: "Task notifications are unavailable",
+      message: t("Task notifications are unavailable"),
       detail: error instanceof Error ? error.message : String(error),
     },
   });
@@ -867,7 +874,9 @@ function maybeShowBrowserTaskNotification(
   if (notificationPermission() !== "granted") {
     reportTaskNotificationFailure(
       new Error(
-        "Enable notifications for this site in the browser settings, then try again.",
+        t(
+          "Enable notifications for this site in the browser settings, then try again.",
+        ),
       ),
       version,
     );
@@ -946,8 +955,8 @@ function notifyTaskCompleted(pane: Pane, workspaces: Workspace[], tabs: Tab[]) {
   if (runtimeGeneration === null) return;
   const body = taskNotificationBody(pane, workspaces, tabs);
   const title = blocked
-    ? "Roamgate agent needs input"
-    : "Roamgate task completed";
+    ? t("Roamgate agent needs input")
+    : t("Roamgate task completed");
   const target = taskNotificationTarget(
     state.activeConnectionId,
     runtimeGeneration,
@@ -956,9 +965,9 @@ function notifyTaskCompleted(pane: Pane, workspaces: Workspace[], tabs: Tab[]) {
   set({
     notice: {
       kind: blocked ? "info" : "success",
-      message: blocked ? "Agent needs input" : "Task completed",
+      message: blocked ? t("Agent needs input") : t("Task completed"),
       detail: body,
-      actionLabel: pane.agent ? "Open agent" : "Open workspace",
+      actionLabel: pane.agent ? t("Open agent") : t("Open workspace"),
       actionConnectionId: state.activeConnectionId,
       actionRuntimeGeneration: runtimeGeneration,
       actionWorkspaceId: pane.workspace_id,
@@ -1393,8 +1402,8 @@ async function checkForUpdate(showErrors = false) {
       set({
         notice: {
           kind: "info",
-          message: "Connection is paused",
-          detail: "Resume the connection before checking for updates.",
+          message: t("Connection is paused"),
+          detail: t("Resume the connection before checking for updates."),
         },
       });
     }
@@ -1411,7 +1420,7 @@ async function checkForUpdate(showErrors = false) {
         set({
           notice: {
             kind: "error",
-            message: "Update check failed",
+            message: t("Update check failed"),
             detail: body?.error ?? r.statusText,
           },
         });
@@ -1432,9 +1441,11 @@ async function checkForUpdate(showErrors = false) {
         notice: showErrors
           ? {
               kind: "success",
-              message: "Roamgate is up to date",
+              message: t("Roamgate is up to date"),
               detail: info.latest_version
-                ? `Current version: ${info.current_version}`
+                ? t("Current version: {version}", {
+                    version: info.current_version,
+                  })
                 : undefined,
             }
           : state.notice,
@@ -1445,7 +1456,7 @@ async function checkForUpdate(showErrors = false) {
       set({
         notice: {
           kind: "error",
-          message: "Update check failed",
+          message: t("Update check failed"),
           detail: (e as Error).message,
         },
       });
@@ -1771,8 +1782,8 @@ async function action<T>(
     set({
       notice: {
         kind: "info",
-        message: "Connection is paused",
-        detail: "Resume the connection before sending actions to Herdr.",
+        message: t("Connection is paused"),
+        detail: t("Resume the connection before sending actions to Herdr."),
       },
     });
     return undefined;
@@ -1833,13 +1844,13 @@ async function action<T>(
 function hookEventLabel(event: WorktreeHookEvent): string {
   switch (event) {
     case "worktree.before_remove":
-      return "Worktree teardown hook";
+      return t("Worktree teardown hook");
     case "worktree.opened":
-      return "Worktree opened hook";
+      return t("Worktree opened hook");
     case "worktree.removed":
-      return "Worktree removed hook";
+      return t("Worktree removed hook");
     case "worktree.created":
-      return "Worktree setup hook";
+      return t("Worktree setup hook");
   }
 }
 
@@ -1860,17 +1871,22 @@ export function summarizeDirectHookResult(
 ): Notice | null {
   if (result.status === "skipped") return null;
   const output = hookOutput(result);
-  const exitSuffix =
-    typeof result.exit_code === "number" ? ` (exit ${result.exit_code})` : "";
   return {
     kind: result.status === "succeeded" ? "success" : "error",
     message:
       result.status === "succeeded"
-        ? `${hookEventLabel(result.event)} completed`
-        : `${hookEventLabel(result.event)} failed${exitSuffix}`,
+        ? t("{hook} completed", { hook: hookEventLabel(result.event) })
+        : typeof result.exit_code === "number"
+          ? t("{hook} failed (exit {code})", {
+              hook: hookEventLabel(result.event),
+              code: result.exit_code,
+            })
+          : t("{hook} failed", { hook: hookEventLabel(result.event) }),
     detail: output ? output.slice(0, 1400) : undefined,
     detailMode: output ? "output" : undefined,
-    detailTitle: output ? `${hookEventLabel(result.event)} output` : undefined,
+    detailTitle: output
+      ? t("{hook} output", { hook: hookEventLabel(result.event) })
+      : undefined,
     ...(result.status === "succeeded"
       ? { autoDismissMs: DEFAULT_NOTICE_AUTO_DISMISS_MS }
       : {}),
@@ -1888,12 +1904,20 @@ export function worktreeRemovalCompletionNotice(
   const stopped = Number(cleanup.terminated_processes ?? 0);
   const recoveryDetails = [
     stopped > 0
-      ? `Stopped ${stopped} process${stopped === 1 ? "" : "es"} still using the checkout.`
+      ? stopped === 1
+        ? t("Stopped 1 process still using the checkout.")
+        : t("Stopped {count} processes still using the checkout.", {
+            count: stopped,
+          })
       : "",
     cleanup.preserved_path
-      ? `Stale files were preserved at ${cleanup.preserved_path}.`
+      ? t("Stale files were preserved at {path}.", {
+          path: cleanup.preserved_path,
+        })
       : cleanup.recovered_stale_checkout
-        ? "The checkout was already absent; stale Herdr state was reconciled."
+        ? t(
+            "The checkout was already absent; stale Herdr state was reconciled.",
+          )
         : "",
     cleanup.warning ?? "",
   ].filter(Boolean);
@@ -1905,7 +1929,7 @@ export function worktreeRemovalCompletionNotice(
       kind: cleanupWarning ? "error" : removedHookNotice.kind,
       message:
         cleanupWarning && removedHookNotice.kind !== "error"
-          ? "Worktree removed with cleanup warning"
+          ? t("Worktree removed with cleanup warning")
           : removedHookNotice.message,
       detail: [
         cleanupWarning && removedHookNotice.kind !== "error"
@@ -1918,7 +1942,7 @@ export function worktreeRemovalCompletionNotice(
         .join("\n"),
       detailTitle:
         removedHookNotice.detail || cleanupWarning
-          ? "Worktree removal details"
+          ? t("Worktree removal details")
           : undefined,
     };
   }
@@ -1926,8 +1950,8 @@ export function worktreeRemovalCompletionNotice(
   return {
     kind: cleanup.warning ? "error" : "success",
     message: cleanup.warning
-      ? "Worktree removed with cleanup warning"
-      : "Worktree removed",
+      ? t("Worktree removed with cleanup warning")
+      : t("Worktree removed"),
     detail: recoveryDetails.join("\n"),
   };
 }
@@ -2181,8 +2205,8 @@ export const store = {
       if (s === "connected") connectionRecoveryIntent = null;
       const completedRecoveryMessage =
         completedRecovery === "reconnect"
-          ? "Browser reconnected"
-          : "Browser sync resumed";
+          ? t("Browser reconnected")
+          : t("Browser sync resumed");
       set(
         completedRecovery
           ? {
@@ -2233,7 +2257,9 @@ export const store = {
       if (control.type === "pause_connection") {
         store.pauseConnection(
           control.reason ??
-            "Another Roamgate client paused this connection. Resume when you want this browser to sync again.",
+            t(
+              "Another Roamgate client paused this connection. Resume when you want this browser to sync again.",
+            ),
         );
       }
     });
@@ -2289,7 +2315,7 @@ export const store = {
   },
 
   pauseConnection(
-    detail = "This browser will stop syncing until you resume it.",
+    detail = t("This browser will stop syncing until you resume it."),
   ) {
     connectionRecoveryIntent = null;
     roamgateLocalStorage.setItem("connectionPaused", "true");
@@ -2310,7 +2336,7 @@ export const store = {
       terminalAttachEpoch: state.terminalAttachEpoch + 1,
       notice: {
         kind: "info",
-        message: "Connection paused",
+        message: t("Connection paused"),
         detail,
       },
     });
@@ -2325,8 +2351,8 @@ export const store = {
           kind: pausedClients > 0 ? "success" : "info",
           message:
             pausedClients === 1
-              ? "Paused 1 other browser"
-              : `Paused ${pausedClients} other browsers`,
+              ? t("Paused 1 other browser")
+              : t("Paused {count} other browsers", { count: pausedClients }),
           autoDismissMs: 5000,
         },
       });
@@ -2345,8 +2371,8 @@ export const store = {
         kind: "info",
         message:
           connectionRecoveryIntent === "reconnect"
-            ? "Reconnecting browser"
-            : "Resuming browser sync",
+            ? t("Reconnecting browser")
+            : t("Resuming browser sync"),
         loading: true,
       },
     });
@@ -2445,7 +2471,7 @@ export const store = {
           setForConnection(lease, {
             notice: {
               kind: "error",
-              message: "Tab created, but naming failed",
+              message: t("Tab created, but naming failed"),
               detail: (error as Error).message,
             },
           });
@@ -2455,7 +2481,7 @@ export const store = {
       {
         failureNotice: (error) => ({
           kind: "error",
-          message: "Tab creation failed",
+          message: t("Tab creation failed"),
           detail: error.message,
         }),
       },
@@ -2593,7 +2619,7 @@ export const store = {
       {
         failureNotice: (error) => ({
           kind: "error",
-          message: "Workspace creation failed",
+          message: t("Workspace creation failed"),
           detail: error.message,
         }),
       },
@@ -2617,10 +2643,12 @@ export const store = {
         failureNotice: (error) => ({
           kind: "error",
           message: error.message.startsWith("workspace_group_close_required:")
-            ? "Workspace belongs to a group"
-            : "Workspace close failed",
+            ? t("Workspace belongs to a group")
+            : t("Workspace close failed"),
           detail: error.message.startsWith("workspace_group_close_required:")
-            ? "Nothing was closed. To close this workspace and its linked workspaces, explicitly close the group in the Herdr CLI with --group."
+            ? t(
+                "Nothing was closed. To close this workspace and its linked workspaces, explicitly close the group in the Herdr CLI with --group.",
+              )
             : error.message,
         }),
       },
@@ -2644,10 +2672,10 @@ export const store = {
         setForConnection(lease, {
           notice: {
             kind: "info",
-            message: "Running git pull",
+            message: t("Running git pull"),
             detail: "git pull --ff-only",
             detailMode: "output",
-            detailTitle: "Command",
+            detailTitle: t("Command"),
             loading: true,
           },
         });
@@ -2664,8 +2692,8 @@ export const store = {
         setForConnection(lease, {
           notice: {
             kind: "success",
-            message: "Git pull completed",
-            detail: output ? output.slice(0, 1400) : "Already up to date.",
+            message: t("Git pull completed"),
+            detail: output ? output.slice(0, 1400) : t("Already up to date."),
             detailMode: output ? "output" : "text",
             detailTitle: output ? "git pull --ff-only" : undefined,
           },
@@ -2676,7 +2704,7 @@ export const store = {
         refresh: "immediate",
         failureNotice: (error) => ({
           kind: "error",
-          message: "Git pull failed",
+          message: t("Git pull failed"),
           detail: error.message,
           detailMode: "output",
           detailTitle: "git pull --ff-only",
@@ -2715,7 +2743,7 @@ export const store = {
         refresh: "immediate",
         failureNotice: (error) => ({
           kind: "error",
-          message: `${label} failed`,
+          message: t("{action} failed", { action: label }),
           detail: error.message,
           detailMode: "text",
         }),
@@ -2751,9 +2779,15 @@ export const store = {
         setForConnection(lease, {
           notice: {
             kind: "success",
-            message: `${gitFileActionSuccessMessage(gitAction)} (${
-              completed === 1 ? "1 file" : `${completed} files`
-            })`,
+            message:
+              completed === 1
+                ? t("{message} (1 file)", {
+                    message: gitFileActionSuccessMessage(gitAction),
+                  })
+                : t("{message} ({count} files)", {
+                    message: gitFileActionSuccessMessage(gitAction),
+                    count: completed,
+                  }),
             autoDismissMs: 5000,
           },
         });
@@ -2763,8 +2797,12 @@ export const store = {
         refresh: "immediate",
         failureNotice: (error) => ({
           kind: "error",
-          message: `${label} failed`,
-          detail: `${completed} of ${entries.length} files completed. ${error.message}`,
+          message: t("{action} failed", { action: label }),
+          detail: t("{completed} of {total} files completed. {error}", {
+            completed,
+            total: entries.length,
+            error: error.message,
+          }),
           detailMode: "text",
         }),
       },
@@ -2796,7 +2834,7 @@ export const store = {
         refresh: "immediate",
         failureNotice: (error) => ({
           kind: "error",
-          message: "Git action failed",
+          message: t("Git action failed"),
           detail: error.message,
           detailMode: "text",
         }),
@@ -2811,10 +2849,15 @@ export const store = {
         setForConnection(lease, {
           notice: {
             kind: "info",
-            message: "Creating worktree",
-            detail: `Updating origin's default branch before creating ${branch}.`,
+            message: t("Creating worktree"),
+            detail: t(
+              "Updating origin's default branch before creating {branch}.",
+              {
+                branch,
+              },
+            ),
             detailMode: "output",
-            detailTitle: "Fetch origin's default branch",
+            detailTitle: t("Fetch origin's default branch"),
             loading: true,
           },
         });
@@ -2836,15 +2879,22 @@ export const store = {
         } else {
           const commit = String(result?.base_sync?.commit ?? "").slice(0, 12);
           const base = String(
-            result?.base_sync?.base ?? "origin's default branch",
+            result?.base_sync?.base ?? t("origin's default branch"),
           );
           setForConnection(lease, {
             notice: {
               kind: "success",
-              message: "Worktree created",
+              message: t("Worktree created"),
               detail: commit
-                ? `${branch} starts from ${base} at ${commit}.`
-                : `${branch} starts from the latest ${base}.`,
+                ? t("{branch} starts from {base} at {commit}.", {
+                    branch,
+                    base,
+                    commit,
+                  })
+                : t("{branch} starts from the latest {base}.", {
+                    branch,
+                    base,
+                  }),
               autoDismissMs: 5000,
             },
           });
@@ -2854,7 +2904,7 @@ export const store = {
       {
         failureNotice: (error) => ({
           kind: "error",
-          message: "Failed to create worktree",
+          message: t("Failed to create worktree"),
           detail: error.message,
         }),
       },
@@ -2928,8 +2978,8 @@ export const store = {
         setForConnection(lease, {
           notice: {
             kind: "info",
-            message: "Removing worktree",
-            detail: "Running teardown hook if configured.",
+            message: t("Removing worktree"),
+            detail: t("Running teardown hook if configured."),
             loading: true,
           },
         });
@@ -2990,7 +3040,7 @@ export const store = {
           setForConnection(lease, {
             notice: {
               kind: "success",
-              message: "Worktree removed",
+              message: t("Worktree removed"),
             },
           });
         }
@@ -2999,7 +3049,7 @@ export const store = {
       {
         failureNotice: (error) => ({
           kind: "error",
-          message: "Failed to remove worktree",
+          message: t("Failed to remove worktree"),
           detail: error.message,
         }),
       },
@@ -3031,10 +3081,12 @@ export const store = {
           notice: {
             kind: "success",
             message: enabled
-              ? "Automatic branch updates enabled"
-              : "Automatic branch updates disabled",
+              ? t("Automatic branch updates enabled")
+              : t("Automatic branch updates disabled"),
             detail: enabled
-              ? "A sync will run now, then every 10 minutes while this workspace remains open."
+              ? t(
+                  "A sync will run now, then every 10 minutes while this workspace remains open.",
+                )
               : undefined,
             autoDismissMs: 5000,
           },
@@ -3045,7 +3097,7 @@ export const store = {
         refresh: "none",
         failureNotice: (error) => ({
           kind: "error",
-          message: "Failed to update automatic sync settings",
+          message: t("Failed to update automatic sync settings"),
           detail: error.message,
         }),
       },
@@ -3063,8 +3115,8 @@ export const store = {
           notice: {
             kind: "success",
             message: enabled
-              ? "Automatic branch updates enabled"
-              : "Automatic branch updates disabled",
+              ? t("Automatic branch updates enabled")
+              : t("Automatic branch updates disabled"),
             detail: key,
             autoDismissMs: 5000,
           },
@@ -3075,7 +3127,7 @@ export const store = {
         refresh: "none",
         failureNotice: (error) => ({
           kind: "error",
-          message: "Failed to update automatic sync settings",
+          message: t("Failed to update automatic sync settings"),
           detail: error.message,
         }),
       },
@@ -3109,7 +3161,7 @@ export const store = {
         set({
           notice: {
             kind: "error",
-            message: "Background notification sync failed",
+            message: t("Background notification sync failed"),
             detail: (error as Error).message,
           },
         });
@@ -3149,7 +3201,7 @@ export const store = {
         set({
           notice: {
             kind: "error",
-            message: "Notification preference was not saved",
+            message: t("Notification preference was not saved"),
             detail: (error as Error).message,
           },
         });
@@ -3171,7 +3223,7 @@ export const store = {
             taskNotificationBusy: false,
             notice: {
               kind: "error",
-              message: "Notification revocation failed",
+              message: t("Notification revocation failed"),
               detail: (error as Error).message,
             },
           });
@@ -3186,7 +3238,7 @@ export const store = {
         taskNotificationPermission: notificationPermission(),
         notice: {
           kind: "info",
-          message: "Task notifications disabled on this device",
+          message: t("Task notifications disabled on this device"),
           autoDismissMs: 5000,
         },
       });
@@ -3201,9 +3253,10 @@ export const store = {
         taskNotificationBusy: false,
         notice: {
           kind: "error",
-          message: "Browser notifications are not supported",
-          detail:
+          message: t("Browser notifications are not supported"),
+          detail: t(
             "Use a browser with notification support over HTTPS. On iPhone or iPad, open Roamgate from the Home Screen (iOS/iPadOS 16.4 or later).",
+          ),
         },
       });
       return;
@@ -3224,7 +3277,7 @@ export const store = {
         taskNotificationPermission: notificationPermission(),
         notice: {
           kind: "error",
-          message: "Notification permission failed",
+          message: t("Notification permission failed"),
           detail: (e as Error).message,
         },
       });
@@ -3265,18 +3318,23 @@ export const store = {
       notice: granted
         ? {
             kind: "success",
-            message: "Task notifications enabled",
+            message: t("Task notifications enabled"),
             detail:
               transport === "push"
-                ? "This device receives completion and input-required notifications even when Roamgate is closed, subject to your platform settings."
-                : "Local notifications work while this page is running. Background delivery requires Web Push support and server configuration.",
+                ? t(
+                    "This device receives completion and input-required notifications even when Roamgate is closed, subject to your platform settings.",
+                  )
+                : t(
+                    "Local notifications work while this page is running. Background delivery requires Web Push support and server configuration.",
+                  ),
             autoDismissMs: 5000,
           }
         : {
             kind: "error",
-            message: "Notification permission was not granted",
-            detail:
+            message: t("Notification permission was not granted"),
+            detail: t(
               "Enable notifications for this site in the browser settings, then try again.",
+            ),
           },
     });
   },
@@ -3327,8 +3385,8 @@ export const store = {
       set({
         notice: {
           kind: "info",
-          message: "Connection is paused",
-          detail: "Resume the connection before installing updates.",
+          message: t("Connection is paused"),
+          detail: t("Resume the connection before installing updates."),
         },
       });
       return;
@@ -3357,9 +3415,10 @@ export const store = {
             dismissedUpdateVersion: latestVersion,
             notice: {
               kind: "info",
-              message: "Restarting the Roamgate process",
-              detail:
+              message: t("Restarting the Roamgate process"),
+              detail: t(
                 "The binary was updated. Waiting for the external process supervisor to start the new version.",
+              ),
               loading: true,
             },
           });
@@ -3372,8 +3431,10 @@ export const store = {
           dismissedUpdateVersion: latestVersion,
           notice: {
             kind: "success",
-            message: `Roamgate ${installedVersion} installed`,
-            detail: "Restart the Roamgate process to use the new version.",
+            message: t("Roamgate {version} installed", {
+              version: installedVersion,
+            }),
+            detail: t("Restart the Roamgate process to use the new version."),
           },
         });
         return;
@@ -3384,7 +3445,7 @@ export const store = {
         dismissedUpdateVersion: latestVersion,
         notice: {
           kind: "success",
-          message: "Roamgate is already up to date",
+          message: t("Roamgate is already up to date"),
         },
       });
     } catch (e) {
@@ -3392,7 +3453,7 @@ export const store = {
         updateInstalling: false,
         notice: {
           kind: "error",
-          message: "Update install failed",
+          message: t("Update install failed"),
           detail: (e as Error).message,
         },
       });

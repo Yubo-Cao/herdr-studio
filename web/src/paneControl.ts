@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { ConnectionClient } from "./api";
 import type { CollaborationSnapshot } from "./collaboration";
 
@@ -27,7 +28,7 @@ export function paneControlState(
     ownerName: claim
       ? (snapshot?.participants.find(
           (item) => item.participant_id === claim.participant_id,
-        )?.display_name ?? "Another collaborator")
+        )?.display_name ?? t("Another collaborator"))
       : null,
     protectedUntil:
       claim && !ownsLayout ? (claim.protected_until_unix_ms ?? 0) : 0,
@@ -56,7 +57,9 @@ export function paneControlClient(
           method === "pane.paste" ||
           method === "pane.send_key")
       ) {
-        throw new Error("This pane is view only. Take control to send input.");
+        throw new Error(
+          t("This pane is view only. Take control to send input."),
+        );
       }
       if (
         (!access.canResize &&

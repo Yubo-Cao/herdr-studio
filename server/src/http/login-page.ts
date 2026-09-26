@@ -1,11 +1,77 @@
-export const LOGIN_HTML = `<!doctype html>
-<html lang="en">
+export type LoginLocale = "en" | "zh-CN";
+
+const STRINGS = {
+  en: {
+    title: "Roamgate login",
+    heading: "Welcome back",
+    intro: "Log in to access your workspaces.",
+    passwordLabel: "Password or token",
+    showPassword: "Show password",
+    hidePassword: "Hide password",
+    show: "Show",
+    hide: "Hide",
+    logIn: "Log in",
+    loggingIn: "Logging in...",
+    note: "Use the password or token configured on your server.",
+    noscript: "Enable JavaScript to log in to Roamgate.",
+    footer: "Your workspace, wherever you are.",
+    wrongPassword: "Wrong password or token. Try again.",
+    loginFailed: "Unable to log in. Please try again.",
+    unreachable:
+      "Cannot reach the server. Check your connection and try again.",
+  },
+  "zh-CN": {
+    title: "登录 Roamgate",
+    heading: "欢迎回来",
+    intro: "登录以访问你的工作区。",
+    passwordLabel: "密码或令牌",
+    showPassword: "显示密码",
+    hidePassword: "隐藏密码",
+    show: "显示",
+    hide: "隐藏",
+    logIn: "登录",
+    loggingIn: "正在登录…",
+    note: "请使用服务器上配置的密码或令牌。",
+    noscript: "请启用 JavaScript 以登录 Roamgate。",
+    footer: "你的工作区，随你而行。",
+    wrongPassword: "密码或令牌错误，请重试。",
+    loginFailed: "无法登录，请重试。",
+    unreachable: "无法连接到服务器。请检查网络连接后重试。",
+  },
+} satisfies Record<LoginLocale, Record<string, string>>;
+
+/** Chinese when the highest-weighted Accept-Language entry is any zh variant. */
+export function loginLocale(
+  acceptLanguage: string | null | undefined,
+): LoginLocale {
+  let best: { tag: string; q: number } | null = null;
+  for (const entry of (acceptLanguage ?? "").split(",")) {
+    const [rawTag, ...params] = entry.trim().split(";");
+    const tag = rawTag?.trim() ?? "";
+    if (!tag || tag === "*") continue;
+    const qParam = params.find((param) => /^\s*q\s*=/i.test(param));
+    const q = qParam ? Number(qParam.split("=")[1]) : 1;
+    if (!Number.isFinite(q) || q <= 0) continue;
+    if (!best || q > best.q) best = { tag, q };
+  }
+  return best && /^zh\b/i.test(best.tag) ? "zh-CN" : "en";
+}
+
+/** A JSON string literal that is safe inside an inline script. */
+function scriptString(value: string): string {
+  return JSON.stringify(value).replace(/</g, "\\u003c");
+}
+
+export function renderLoginHtml(locale: LoginLocale = "en"): string {
+  const s = STRINGS[locale];
+  return `<!doctype html>
+<html lang="${locale}">
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="light dark">
 <meta name="referrer" content="no-referrer">
-<title>Roamgate login</title>
+<title>${s.title}</title>
 <link rel="icon" type="image/svg+xml" href="/roamgate-icon.svg">
 <link rel="icon" type="image/png" href="/roamgate-icon-192.png">
 <style>
@@ -54,30 +120,30 @@ export const LOGIN_HTML = `<!doctype html>
 <main>
   <div class="brand"><img src="/roamgate-icon-192.png" alt="" width="48" height="48"><span>Roamgate</span></div>
   <section class="card" aria-labelledby="heading">
-    <h1 id="heading">Welcome back</h1>
-    <p>Log in to access your workspaces.</p>
+    <h1 id="heading">${s.heading}</h1>
+    <p>${s.intro}</p>
     <form id="login">
-      <label for="pw">Password or token</label>
+      <label for="pw">${s.passwordLabel}</label>
       <div class="password">
-        <input id="pw" name="password" type="password" placeholder="Password or token"
+        <input id="pw" name="password" type="password" placeholder="${s.passwordLabel}"
           autocomplete="current-password" autocapitalize="none" spellcheck="false" required autofocus aria-describedby="err">
-        <button class="reveal" id="reveal" type="button" aria-label="Show password" aria-controls="pw" aria-pressed="false">Show</button>
+        <button class="reveal" id="reveal" type="button" aria-label="${s.showPassword}" aria-controls="pw" aria-pressed="false">${s.show}</button>
       </div>
       <div class="err" id="err" role="alert" aria-live="polite"></div>
-      <button class="submit" id="btn" type="submit">Log in</button>
+      <button class="submit" id="btn" type="submit">${s.logIn}</button>
     </form>
-    <p class="note">Use the password or token configured on your server.</p>
-    <noscript><p class="err">Enable JavaScript to log in to Roamgate.</p></noscript>
+    <p class="note">${s.note}</p>
+    <noscript><p class="err">${s.noscript}</p></noscript>
   </section>
-  <footer>Your workspace, wherever you are.</footer>
+  <footer>${s.footer}</footer>
 </main>
 <script>
   const form=document.getElementById('login'),pw=document.getElementById('pw'),btn=document.getElementById('btn'),err=document.getElementById('err'),reveal=document.getElementById('reveal');
   reveal.onclick=()=>{
     const show=pw.type==='password';
     pw.type=show?'text':'password';
-    reveal.textContent=show?'Hide':'Show';
-    reveal.setAttribute('aria-label',show?'Hide password':'Show password');
+    reveal.textContent=show?${scriptString(s.hide)}:${scriptString(s.show)};
+    reveal.setAttribute('aria-label',show?${scriptString(s.hidePassword)}:${scriptString(s.showPassword)});
     reveal.setAttribute('aria-pressed',String(show));
   };
   form.onsubmit=async event=>{
@@ -85,17 +151,18 @@ export const LOGIN_HTML = `<!doctype html>
     if(btn.disabled)return;
     err.textContent='';
     pw.removeAttribute('aria-invalid');
-    btn.disabled=true;btn.textContent='Logging in...';
+    btn.disabled=true;btn.textContent=${scriptString(s.loggingIn)};
     try{
       const r=await fetch('/api/login',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({password:pw.value})});
       if(r.ok){location.replace('/'+location.hash);return;}
       if(r.status===401){
-        err.textContent='Wrong password or token. Try again.';
+        err.textContent=${scriptString(s.wrongPassword)};
         pw.setAttribute('aria-invalid','true');pw.value='';pw.focus();
-      }else{err.textContent='Unable to log in. Please try again.';}
-    }catch{err.textContent='Cannot reach the server. Check your connection and try again.';}
-    finally{btn.disabled=false;btn.textContent='Log in';}
+      }else{err.textContent=${scriptString(s.loginFailed)};}
+    }catch{err.textContent=${scriptString(s.unreachable)};}
+    finally{btn.disabled=false;btn.textContent=${scriptString(s.logIn)};}
   };
 </script>
 </body>
 </html>`;
+}

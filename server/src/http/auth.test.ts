@@ -27,6 +27,31 @@ describe("request authentication boundaries", () => {
     expect(html).not.toContain("herdr-gui");
   });
 
+  test("serves the login page in Simplified Chinese when the browser prefers it", async () => {
+    const handlers = createAuthHandlers({
+      authRequired: true,
+      password: "fixed-password",
+    });
+    const page = (acceptLanguage: string) =>
+      handlers
+        .loginPage(
+          new Request("http://localhost/login", {
+            headers: { "accept-language": acceptLanguage },
+          }),
+        )
+        .text();
+    const zh = await page("zh-CN,zh;q=0.9,en;q=0.8");
+    expect(zh).toContain('<html lang="zh-CN">');
+    expect(zh).toContain("<title>登录 Roamgate</title>");
+    expect(zh).toContain('<label for="pw">密码或令牌</label>');
+    expect(zh).toContain('btn.textContent="登录"');
+    expect(await page("en-US,en;q=0.9,zh-CN;q=0.8")).toContain(
+      '<html lang="en">',
+    );
+    expect(await page("en;q=0.5,zh-TW;q=0.8")).toContain('<html lang="zh-CN">');
+    expect(await handlers.loginPage().text()).toContain('<html lang="en">');
+  });
+
   test("login preserves same-origin notification launch fragments", async () => {
     const handlers = createAuthHandlers({
       authRequired: true,

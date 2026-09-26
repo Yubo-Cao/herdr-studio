@@ -1,3 +1,4 @@
+import { msg, t } from "./i18n";
 import type { ConnectionLifecycleState, ConnectionSummary } from "./api";
 import {
   validateRemoteSocketPath,
@@ -78,7 +79,7 @@ export function connectionProfileCapabilities(
 export function connectionTypeLabel(
   connection: Pick<ConnectionSummary, "type">,
 ): string {
-  return connection.type === "ssh" ? "SSH" : "Local";
+  return connection.type === "ssh" ? "SSH" : t("Local");
 }
 
 export function suggestConnectionId(
@@ -113,7 +114,9 @@ export function localConnectionProfilePayload(value: {
     id === "legacy-default"
   ) {
     throw new Error(
-      "ID must start with a letter or number and use only letters, numbers, dot, colon, underscore, or hyphen.",
+      t(
+        "ID must start with a letter or number and use only letters, numbers, dot, colon, underscore, or hyphen.",
+      ),
     );
   }
   if (
@@ -121,11 +124,11 @@ export function localConnectionProfilePayload(value: {
     label.length > 80 ||
     /[\u0000-\u001f\u007f-\u009f]/.test(label)
   ) {
-    throw new Error("Label must be 1-80 printable characters.");
+    throw new Error(t("Label must be 1-80 printable characters."));
   }
   for (const [field, path] of [
-    ["Control socket", controlSocketPath],
-    ["Render socket", clientSocketPath],
+    [msg("Control socket"), controlSocketPath],
+    [msg("Render socket"), clientSocketPath],
   ] as const) {
     const isAbsoluteSocketPath =
       path.startsWith("/") ||
@@ -138,7 +141,10 @@ export function localConnectionProfilePayload(value: {
       path.length > 4096
     ) {
       throw new Error(
-        `${field} path must be an absolute socket path without parent traversal.`,
+        t(
+          "{field} path must be an absolute socket path without parent traversal.",
+          { field: t(field) },
+        ),
       );
     }
   }
@@ -171,7 +177,9 @@ export function sshConnectionProfilePayload(value: {
     id === "legacy-default"
   ) {
     throw new Error(
-      "ID must start with a letter or number and use only letters, numbers, dot, colon, underscore, or hyphen.",
+      t(
+        "ID must start with a letter or number and use only letters, numbers, dot, colon, underscore, or hyphen.",
+      ),
     );
   }
   if (
@@ -179,17 +187,20 @@ export function sshConnectionProfilePayload(value: {
     label.length > 80 ||
     /[\u0000-\u001f\u007f-\u009f]/.test(label)
   ) {
-    throw new Error("Label must be 1-80 printable characters.");
+    throw new Error(t("Label must be 1-80 printable characters."));
   }
   validateSshDestination(sshDestination);
-  validateRemoteSocketPath(remoteControlSocketPath, "Remote control socket");
-  validateRemoteSocketPath(remoteClientSocketPath, "Remote render socket");
+  validateRemoteSocketPath(
+    remoteControlSocketPath,
+    msg("Remote control socket"),
+  );
+  validateRemoteSocketPath(remoteClientSocketPath, msg("Remote render socket"));
   if (
     remoteControlSocketPath &&
     remoteClientSocketPath &&
     remoteControlSocketPath === remoteClientSocketPath
   ) {
-    throw new Error("Remote control and render socket paths must differ.");
+    throw new Error(t("Remote control and render socket paths must differ."));
   }
   return {
     id,
@@ -232,5 +243,5 @@ export async function reconnectConnectionProfile(args: {
 
 export function connectionErrorDetail(error: unknown): string {
   if (error instanceof Error && error.message) return error.message;
-  return "Connection operation failed";
+  return t("Connection operation failed");
 }

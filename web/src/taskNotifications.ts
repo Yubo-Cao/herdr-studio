@@ -1,3 +1,5 @@
+import { t } from "./i18n";
+
 export const TASK_NOTIFICATION_ACTIVATE_EVENT =
   "roamgate:task-notification-activate";
 const NOTIFICATION_WORKER = "/task-notifications-sw.js";
@@ -78,7 +80,7 @@ export async function prepareTaskNotifications(): Promise<ServiceWorkerRegistrat
         if (!registration.active) await serviceWorker.ready;
         if (!registration.active) {
           throw new Error(
-            "The notification service worker could not activate.",
+            t("The notification service worker could not activate."),
           );
         }
         return typeof registration.showNotification === "function"
@@ -90,7 +92,9 @@ export async function prepareTaskNotifications(): Promise<ServiceWorkerRegistrat
           () =>
             reject(
               new Error(
-                "The notification service worker did not become ready. Check the connection and try again.",
+                t(
+                  "The notification service worker did not become ready. Check the connection and try again.",
+                ),
               ),
             ),
           10_000,
