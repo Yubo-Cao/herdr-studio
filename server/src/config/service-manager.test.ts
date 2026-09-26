@@ -1304,7 +1304,9 @@ describe("legacy management safety", () => {
     );
     mkdirSync(dirname(legacy.definition), { recursive: true });
     mkdirSync(dirname(legacy.config), { recursive: true });
-    writeFileSync(legacy.definition, definition, { mode: 0o640 });
+    writeFileSync(legacy.definition, definition);
+    // Explicit, so a restrictive umask cannot turn 0640 into 0600.
+    chmodSync(legacy.definition, 0o640);
     writeFileSync(legacy.config, "HOST=127.0.0.1\n");
     const tokenPath = join(dirname(legacy.config), "auth-token");
     writeFileSync(tokenPath, "a".repeat(64));

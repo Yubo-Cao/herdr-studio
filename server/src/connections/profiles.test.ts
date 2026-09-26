@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import {
+  chmodSync,
   existsSync,
   lstatSync,
   mkdirSync,
@@ -24,6 +25,8 @@ function tempRoot() {
   const root = join(tmpdir(), `herdr-gui-profiles-${crypto.randomUUID()}`);
   roots.push(root);
   mkdirSync(root, { recursive: true });
+  // A shared (group/world-readable) parent, whatever the process umask is.
+  chmodSync(root, 0o755);
   return root;
 }
 
@@ -271,7 +274,9 @@ describe("connection profile persistence", () => {
     if (process.platform === "win32") return;
     const root = tempRoot();
     const path = join(root, "connections.json");
-    writeFileSync(path, JSON.stringify(registry()), { mode: 0o644 });
+    writeFileSync(path, JSON.stringify(registry()));
+    // Set the mode explicitly: a restrictive umask would mask it to 0600.
+    chmodSync(path, 0o644);
     expect(() => new ConnectionProfileStore({ path }).load()).toThrow(
       "permissions must be 0700/0600",
     );
