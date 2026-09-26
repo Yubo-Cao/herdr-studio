@@ -1,3 +1,4 @@
+import { msg, t } from "../i18n";
 import { shortcutTitle, useShortcutPreferences } from "../shortcutPreferences";
 import {
   shallowEqual,
@@ -34,7 +35,7 @@ export function tabName(tab?: Tab) {
   if (!tab) return "";
   return tab.label && tab.label !== String(tab.number)
     ? tab.label
-    : `Tab ${tab.number}`;
+    : t("Tab {number}", { number: tab.number });
 }
 
 /**
@@ -99,9 +100,11 @@ export function TabBar({
     focusedWs?.workspace_id,
   );
   const tabs = s.tabs
-    .filter((t) => t.workspace_id === focusedWs?.workspace_id)
+    .filter((tab) => tab.workspace_id === focusedWs?.workspace_id)
     .sort((a, b) => a.number - b.number);
-  const pendingCloseTab = s.tabs.find((t) => t.tab_id === pendingCloseTabId);
+  const pendingCloseTab = s.tabs.find(
+    (tab) => tab.tab_id === pendingCloseTabId,
+  );
   const pendingCloseTabName = tabName(pendingCloseTab);
   const pendingCloseTabPaneIds = s.panes
     .filter((pane) => pane.tab_id === pendingCloseTabId)
@@ -169,13 +172,13 @@ export function TabBar({
       />
       <ConfirmDialog
         open={!!pendingCloseTabId}
-        title="Close Tab"
+        title={t("Close Tab")}
         message={`${
           pendingCloseTabName
-            ? `Close "${pendingCloseTabName}"?`
-            : "Close this tab?"
+            ? t("Close {name}?", { name: `"${pendingCloseTabName}"` })
+            : t("Close this tab?")
         }${pendingCloseDraftWarning}`}
-        confirmLabel="Close"
+        confirmLabel={t("Close")}
         danger
         onClose={() => setPendingCloseTabId(null)}
         onConfirm={() => {
@@ -191,9 +194,9 @@ export function TabBar({
       />
       <ConfirmDialog
         open={!!pendingClosePane}
-        title="Close Pane"
-        message={`Close this terminal pane?${pendingClosePaneDraftWarning}`}
-        confirmLabel="Close"
+        title={t("Close Pane")}
+        message={`${t("Close this terminal pane?")}${pendingClosePaneDraftWarning}`}
+        confirmLabel={t("Close")}
         danger
         onClose={() => setPendingClosePaneId(null)}
         onConfirm={() => {
@@ -208,10 +211,10 @@ export function TabBar({
       />
       <TextInputDialog
         open={!!pendingRenameTab}
-        title="Rename Tab"
-        label="Name"
+        title={t("Rename Tab")}
+        label={t("Name")}
         initialValue={tabName(pendingRenameTab ?? undefined)}
-        submitLabel="Rename"
+        submitLabel={t("Rename")}
         onClose={() => setPendingRenameTab(null)}
         onSubmit={(label) => {
           const value = label.trim();
@@ -228,36 +231,42 @@ export function TabBar({
     <>
       {showTabStrip ? (
         <div className="tabbar">
-          {tabs.map((t) => {
-            const name =
-              t.label && t.label !== String(t.number)
-                ? t.label
-                : `Tab ${t.number}`;
-            const agentSummary = summarizeTabAgents(s.panes, t.tab_id);
+          {tabs.map((tab) => {
+            const name = tabName(tab);
+            const agentSummary = summarizeTabAgents(s.panes, tab.tab_id);
             return (
               <div
-                key={t.tab_id}
-                className={`tabbar-tab ${t.focused ? "is-active" : ""}`}
+                key={tab.tab_id}
+                className={`tabbar-tab ${tab.focused ? "is-active" : ""}`}
                 onClick={() => {
-                  store.focusTab(t.tab_id);
+                  store.focusTab(tab.tab_id);
                 }}
                 onContextMenu={(e) => {
                   e.preventDefault();
-                  setMenu({ tab: t, x: e.clientX, y: e.clientY });
+                  setMenu({ tab, x: e.clientX, y: e.clientY });
                 }}
-                title={t.tab_id}
+                title={tab.tab_id}
               >
                 {agentSummary ? (
                   <span
                     className="tabbar-agent-marker"
                     title={`${agentSummary.primaryAgent} · ${agentSummary.status}${
                       agentSummary.additionalAgents > 0
-                        ? ` · ${agentSummary.additionalAgents} more agent${
-                            agentSummary.additionalAgents === 1 ? "" : "s"
+                        ? ` · ${
+                            agentSummary.additionalAgents === 1
+                              ? t("{count} more agent", {
+                                  count: agentSummary.additionalAgents,
+                                })
+                              : t("{count} more agents", {
+                                  count: agentSummary.additionalAgents,
+                                })
                           }`
                         : ""
                     }`}
-                    aria-label={`${agentSummary.primaryAgent}, status ${agentSummary.status}`}
+                    aria-label={t("{agent}, status {status}", {
+                      agent: agentSummary.primaryAgent,
+                      status: agentSummary.status,
+                    })}
                   >
                     <AgentStatusIcon
                       agent={agentSummary.primaryAgent}
@@ -271,8 +280,8 @@ export function TabBar({
                   </span>
                 ) : null}
                 <TabLongPressTarget
-                  tab={t}
-                  onOpenMenu={(x, y) => setMenu({ tab: t, x, y })}
+                  tab={tab}
+                  onOpenMenu={(x, y) => setMenu({ tab, x, y })}
                 >
                   <span className="tabbar-name">{name}</span>
                 </TabLongPressTarget>
@@ -280,9 +289,9 @@ export function TabBar({
                   className="tabbar-close"
                   onClick={(e) => {
                     e.stopPropagation();
-                    setPendingCloseTabId(t.tab_id);
+                    setPendingCloseTabId(tab.tab_id);
                   }}
-                  title="Close tab"
+                  title={t("Close tab")}
                 >
                   ×
                 </button>
@@ -295,7 +304,7 @@ export function TabBar({
               store.createTab(focusedWs.workspace_id);
             }}
             disabled={!!createReason}
-            title={createReason ?? shortcutTitle("New tab", "tab.create")}
+            title={createReason ?? shortcutTitle(t("New tab"), "tab.create")}
           >
             +
           </button>
@@ -307,14 +316,14 @@ export function TabBar({
               aria-expanded={inspectorOpen}
               title={shortcutTitle(
                 inspectorOpen
-                  ? "Close Workspace Inspector"
-                  : "Open Workspace Inspector",
+                  ? t("Close Workspace Inspector")
+                  : t("Open Workspace Inspector"),
                 "inspector.toggle",
               )}
               onClick={onToggleInspector}
             >
               <PanelRight size={14} />
-              <span>Inspector</span>
+              <span>{t("Inspector")}</span>
               {changedCount > 0 ? (
                 <span className="tabbar-change-count">{changedCount}</span>
               ) : null}
@@ -324,13 +333,15 @@ export function TabBar({
               className={annotationsOpen ? "is-active" : ""}
               aria-expanded={annotationsOpen}
               title={shortcutTitle(
-                annotationsOpen ? "Close Annotations" : "Open Annotations",
+                annotationsOpen
+                  ? t("Close Annotations")
+                  : t("Open Annotations"),
                 "annotations.toggle",
               )}
               onClick={onToggleAnnotations}
             >
               <MessageSquareText size={14} />
-              <span>Annotations</span>
+              <span>{t("Annotations")}</span>
               {annotationCount > 0 ? (
                 <span className="tabbar-change-count">{annotationCount}</span>
               ) : null}
@@ -432,13 +443,13 @@ function TabContextMenu({
     const onKey = (e: KeyboardEvent) => {
       if (e.key === "Escape") onClose();
     };
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       window.addEventListener("mousedown", onDown);
       window.addEventListener("keydown", onKey);
       window.addEventListener("scroll", onClose, true);
     }, 0);
     return () => {
-      clearTimeout(t);
+      clearTimeout(timer);
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("scroll", onClose, true);
@@ -448,11 +459,11 @@ function TabContextMenu({
   if (!state) return null;
 
   const items = [
-    { label: "Focus tab", action: () => onFocus(state.tab) },
-    { label: "Rename tab...", action: () => onRename(state.tab) },
-    { label: "Create tab", action: onCreateTab, reason: createReason },
+    { label: msg("Focus tab"), action: () => onFocus(state.tab) },
+    { label: msg("Rename tab..."), action: () => onRename(state.tab) },
+    { label: msg("Create tab"), action: onCreateTab, reason: createReason },
     {
-      label: "Close tab",
+      label: msg("Close tab"),
       danger: true,
       action: () => onCloseTab(state.tab),
     },
@@ -485,7 +496,7 @@ function TabContextMenu({
             item.action();
           }}
         >
-          {item.label}
+          {t(item.label)}
         </button>
       ))}
     </div>

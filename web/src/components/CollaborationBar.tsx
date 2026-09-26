@@ -21,6 +21,7 @@ import {
   updateCollaborationPresence,
 } from "../collaboration";
 import { bridge } from "../api";
+import { t } from "../i18n";
 import { shallowEqual, store, useStoreSelector } from "../store";
 import { useConnectionClient } from "../useConnectionClient";
 
@@ -116,7 +117,10 @@ export function CollaborationBar() {
   return (
     <Popover.Root open={editing} onOpenChange={setEditing}>
       <div className="collaboration-bar">
-        <div className="collaboration-roster" aria-label="Live collaborators">
+        <div
+          className="collaboration-roster"
+          aria-label={t("Live collaborators")}
+        >
           <Users size={14} aria-hidden="true" />
           <span className="collaboration-count">
             {participants.length || 1}
@@ -142,8 +146,22 @@ export function CollaborationBar() {
                         "--participant-color": participant.color,
                       } as CSSProperties
                     }
-                    title={`${participant.display_name}${isTyping ? " · typing" : participant.pane_id ? " · viewing a pane" : ""}`}
-                    aria-label={`${participant.display_name}${isSelf ? " (you)" : ""}`}
+                    title={
+                      isTyping
+                        ? t("{name} · typing", {
+                            name: participant.display_name,
+                          })
+                        : participant.pane_id
+                          ? t("{name} · viewing a pane", {
+                              name: participant.display_name,
+                            })
+                          : participant.display_name
+                    }
+                    aria-label={
+                      isSelf
+                        ? t("{name} (you)", { name: participant.display_name })
+                        : participant.display_name
+                    }
                     onClick={() => {
                       if (!isSelf && participant.pane_id)
                         void store.focusPane(participant.pane_id);
@@ -178,13 +196,15 @@ export function CollaborationBar() {
             {visibleParticipants.length > 3 ? (
               <span
                 className="collaboration-overflow"
-                title={`${visibleParticipants.length} collaborators`}
+                title={t("{count} collaborators", {
+                  count: visibleParticipants.length,
+                })}
               >
                 +{visibleParticipants.length - 3}
               </span>
             ) : null}
           </div>
-          <span className="collaboration-live">Live</span>
+          <span className="collaboration-live">{t("Live")}</span>
         </div>
         <Popover.Portal>
           <Popover.Content
@@ -199,15 +219,15 @@ export function CollaborationBar() {
                 autoFocus
                 value={name}
                 maxLength={80}
-                aria-label="Your collaboration display name"
+                aria-label={t("Your collaboration display name")}
                 onChange={(event) => setName(event.target.value)}
               />
-              <Button type="submit" icon aria-label="Save display name">
+              <Button type="submit" icon aria-label={t("Save display name")}>
                 <Check size={14} />
               </Button>
               <Button
                 icon
-                aria-label="Cancel"
+                aria-label={t("Cancel")}
                 onClick={() => setEditing(false)}
               >
                 <X size={14} />

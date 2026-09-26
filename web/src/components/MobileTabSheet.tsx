@@ -1,6 +1,7 @@
 import { Plus, X } from "lucide-react";
 import { useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import { t } from "../i18n";
 import {
   shallowEqual,
   store,
@@ -67,7 +68,7 @@ export function MobileTabSheet({
   );
   const tabs = focusedWs
     ? s.tabs
-        .filter((t) => t.workspace_id === focusedWs.workspace_id)
+        .filter((tab) => tab.workspace_id === focusedWs.workspace_id)
         .sort((a, b) => a.number - b.number)
     : [];
 
@@ -106,41 +107,44 @@ export function MobileTabSheet({
         className="mobile-tab-sheet"
         role="dialog"
         aria-modal="true"
-        aria-label="Tabs"
+        aria-label={t("Tabs")}
         aria-busy={transitionPending}
         tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="mobile-tab-sheet-head">
-          <h3>Tabs</h3>
+          <h3>{t("Tabs")}</h3>
           <CloseButton
-            label="Close tab switcher"
+            label={t("Close tab switcher")}
             disabled={transitionPending}
             onClick={closeIfIdle}
           />
         </div>
         <div className="mobile-tab-sheet-list" role="list">
-          {tabs.map((t) => {
-            const name = tabName(t);
-            const agentSummary = summarizeTabAgents(s.panes, t.tab_id);
+          {tabs.map((tab) => {
+            const name = tabName(tab);
+            const agentSummary = summarizeTabAgents(s.panes, tab.tab_id);
             return (
               <div
-                key={t.tab_id}
+                key={tab.tab_id}
                 role="listitem"
-                className={`mobile-tab-sheet-row ${t.focused ? "is-active" : ""}`}
+                className={`mobile-tab-sheet-row ${tab.focused ? "is-active" : ""}`}
               >
                 <button
                   type="button"
                   className="mobile-tab-sheet-focus"
                   disabled={transitionPending}
                   onClick={() =>
-                    void runTabTransition(() => store.focusTab(t.tab_id))
+                    void runTabTransition(() => store.focusTab(tab.tab_id))
                   }
                 >
                   {agentSummary ? (
                     <span
                       className="tabbar-agent-marker"
-                      aria-label={`${agentSummary.primaryAgent}, status ${agentSummary.status}`}
+                      aria-label={t("{agent}, status {status}", {
+                        agent: agentSummary.primaryAgent,
+                        status: agentSummary.status,
+                      })}
                     >
                       <AgentStatusIcon
                         agent={agentSummary.primaryAgent}
@@ -158,10 +162,10 @@ export function MobileTabSheet({
                 <button
                   type="button"
                   className="mobile-tab-sheet-close"
-                  aria-label={`Close ${name}`}
-                  title={`Close ${name}`}
+                  aria-label={t("Close {name}", { name })}
+                  title={t("Close {name}", { name })}
                   disabled={transitionPending}
-                  onClick={() => requestCloseTab(t.tab_id)}
+                  onClick={() => requestCloseTab(tab.tab_id)}
                 >
                   <X size={14} />
                 </button>
@@ -179,7 +183,7 @@ export function MobileTabSheet({
           }
         >
           <Plus size={15} />
-          <span>{createReason ?? "New Tab"}</span>
+          <span>{createReason ?? t("New Tab")}</span>
         </button>
       </div>
     </div>,

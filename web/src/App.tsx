@@ -21,6 +21,7 @@ import {
   shortcutTitle,
   useShortcutPreferences,
 } from "./shortcutPreferences";
+import { t } from "./i18n";
 import { SHORTCUT_NUMBERS } from "./shortcutBindings";
 import {
   CheckCircle2,
@@ -252,7 +253,7 @@ type TerminalViewProps = {
 };
 
 function TerminalLoadingFallback({
-  label = "Loading terminal",
+  label = t("Loading terminal"),
 }: {
   label?: string;
 }) {
@@ -674,11 +675,11 @@ function PaneJumpOverlay({
     <div className="pane-jump-backdrop">
       <div className="pane-jump-popover">
         <div className="pane-jump-head">
-          <strong>{searching ? "Find Pane" : "Switch Pane"}</strong>
+          <strong>{searching ? t("Find Pane") : t("Switch Pane")}</strong>
           <span>
             {searching
-              ? "Filters every open pane. Use Up / Down and Enter"
-              : "K to search; Enter or release modifier to switch"}
+              ? t("Filters every open pane. Use Up / Down and Enter")
+              : t("K to search; Enter or release modifier to switch")}
           </span>
         </div>
         {searching ? (
@@ -689,9 +690,9 @@ function PaneJumpOverlay({
             value={search}
             spellCheck={false}
             autoComplete="off"
-            placeholder="Workspace, tab, directory, or agent"
+            placeholder={t("Workspace, tab, directory, or agent")}
             role="combobox"
-            aria-label="Search panes"
+            aria-label={t("Search panes")}
             aria-expanded={true}
             aria-autocomplete="list"
             aria-controls={listId}
@@ -706,14 +707,14 @@ function PaneJumpOverlay({
         ) : null}
         {entries.length === 0 ? (
           <p className="pane-jump-empty" role="status">
-            No panes match this search.
+            {t("No panes match this search.")}
           </p>
         ) : null}
         <div
           className="pane-jump-list"
           id={listId}
           role="listbox"
-          aria-label={searching ? "Matching panes" : "Recent panes"}
+          aria-label={searching ? t("Matching panes") : t("Recent panes")}
         >
           {entries.map((entry, index) => (
             <button
@@ -743,7 +744,9 @@ function PaneJumpOverlay({
                 <span className="pane-jump-title-line">
                   <strong>{entry.title}</strong>
                   {entry.current ? (
-                    <span className="pane-jump-current-badge">Current</span>
+                    <span className="pane-jump-current-badge">
+                      {t("Current")}
+                    </span>
                   ) : null}
                   {entry.agentStatus ? (
                     <span
@@ -1032,13 +1035,13 @@ function TerminalPaneLayout({
       <div
         ref={setLayoutContainer}
         className="pane-switcher-layout"
-        aria-label="Terminal pane switcher"
+        aria-label={t("Terminal pane switcher")}
       >
         <div className="pane-switcher">
           <button
             type="button"
             className="pane-switcher-button"
-            aria-label="Previous pane"
+            aria-label={t("Previous pane")}
             tabIndex={-1}
             onPointerDown={blurActiveInput}
             onClick={() => void store.focusPane(previousPane.pane_id)}
@@ -1047,14 +1050,17 @@ function TerminalPaneLayout({
           </button>
           <div className="pane-switcher-label">
             <strong>
-              Pane {activeIndex + 1} / {visiblePanes.length}
+              {t("Pane {index} / {count}", {
+                index: activeIndex + 1,
+                count: visiblePanes.length,
+              })}
             </strong>
             <span>{paneTitle(activePaneId, s.panes)}</span>
           </div>
           <button
             type="button"
             className="pane-switcher-button"
-            aria-label="Next pane"
+            aria-label={t("Next pane")}
             tabIndex={-1}
             onPointerDown={blurActiveInput}
             onClick={() => void store.focusPane(nextPane.pane_id)}
@@ -1155,7 +1161,7 @@ function TerminalPaneLayout({
     <div
       ref={setLayoutContainer}
       className="pane-layout"
-      aria-label="Terminal panes"
+      aria-label={t("Terminal panes")}
     >
       {visiblePanes.map((layoutPane) => {
         const rect = layoutPane.rect;
@@ -1349,8 +1355,8 @@ export default function App() {
     } catch {
       store.notify({
         kind: "error",
-        message: "Annotation layout could not be saved",
-        detail: "The layout applies until this page reloads.",
+        message: t("Annotation layout could not be saved"),
+        detail: t("The layout applies until this page reloads."),
       });
     }
   };
@@ -1661,14 +1667,13 @@ export default function App() {
       if (!workspace) {
         store.notify({
           kind: "error",
-          message: `Cannot open ${
+          message:
             view === "files"
-              ? "Files"
+              ? t("Cannot open Files")
               : view === "changes"
-                ? "Changes"
-                : "History"
-          }`,
-          detail: "The target workspace is no longer open.",
+                ? t("Cannot open Changes")
+                : t("Cannot open History"),
+          detail: t("The target workspace is no longer open."),
         });
         return;
       }
@@ -1883,7 +1888,7 @@ export default function App() {
       if (!message) {
         store.notify({
           kind: "error",
-          message: "Add text to a review comment before delivery",
+          message: t("Add text to a review comment before delivery"),
         });
         return;
       }
@@ -1894,14 +1899,14 @@ export default function App() {
         store.notify({
           kind: "success",
           message: fallback
-            ? "No agent pane found; feedback copied"
-            : "Review feedback copied",
+            ? t("No agent pane found; feedback copied")
+            : t("Review feedback copied"),
           autoDismissMs: 3000,
         });
       } catch (error) {
         store.notify({
           kind: "error",
-          message: "Failed to copy review feedback",
+          message: t("Failed to copy review feedback"),
           detail: error instanceof Error ? error.message : String(error),
         });
       } finally {
@@ -1924,7 +1929,7 @@ export default function App() {
       if (!message) {
         store.notify({
           kind: "error",
-          message: "Add text to a review comment before delivery",
+          message: t("Add text to a review comment before delivery"),
         });
         return;
       }
@@ -1945,17 +1950,19 @@ export default function App() {
         }
         store.notify({
           kind: "success",
-          message: "Feedback pre-filled in the agent pane",
+          message: t("Feedback pre-filled in the agent pane"),
           detail: draftActive
-            ? "Review the message there, then press Enter to submit it."
-            : "Original draft retained because its workspace was left or unloaded, or its connection changed. Review the message in the agent pane, then press Enter.",
+            ? t("Review the message there, then press Enter to submit it.")
+            : t(
+                "Original draft retained because its workspace was left or unloaded, or its connection changed. Review the message in the agent pane, then press Enter.",
+              ),
           autoDismissMs: 6000,
         });
       } catch (error) {
         if (!connectionClient.isCurrent()) return;
         store.notify({
           kind: "error",
-          message: "Failed to pre-fill review feedback",
+          message: t("Failed to pre-fill review feedback"),
           detail: error instanceof Error ? error.message : String(error),
         });
       } finally {
@@ -2058,8 +2065,8 @@ export default function App() {
       ) {
         store.notify({
           kind: "error",
-          message: "Cannot open History",
-          detail: "Select an active agent pane first.",
+          message: t("Cannot open History"),
+          detail: t("Select an active agent pane first."),
         });
         return;
       }
@@ -2304,13 +2311,13 @@ export default function App() {
           () =>
             store.notify({
               kind: "success",
-              message: "Copied to clipboard",
+              message: t("Copied to clipboard"),
               autoDismissMs: 5000,
             }),
           (error) =>
             store.notify({
               kind: "error",
-              message: "Terminal copy failed",
+              message: t("Terminal copy failed"),
               detail: error instanceof Error ? error.message : String(error),
             }),
         );
@@ -3561,18 +3568,18 @@ export default function App() {
         <button
           type="button"
           className="zen-island"
-          title={shortcutTitle("Exit Zen mode", "zen.toggle")}
-          aria-label={shortcutTitle("Exit Zen mode", "zen.toggle")}
+          title={shortcutTitle(t("Exit Zen mode"), "zen.toggle")}
+          aria-label={shortcutTitle(t("Exit Zen mode"), "zen.toggle")}
           onClick={() => applyZenMode(false)}
         >
           <Minimize2 size={13} />
-          <span>Exit Zen</span>
+          <span>{t("Exit Zen")}</span>
         </button>
       ) : null}
 
       <nav
         className="mobile-nav"
-        aria-label="Workspace view switcher"
+        aria-label={t("Workspace view switcher")}
         aria-hidden={mobileControlsCollapsed}
       >
         <button
@@ -3580,48 +3587,49 @@ export default function App() {
           className={
             mobileView === "session" && !agentHistoryOpen ? "active" : ""
           }
-          title="Session"
-          aria-label="Show terminal session"
+          title={t("Session")}
+          aria-label={t("Show terminal session")}
           tabIndex={mobileControlsCollapsed ? -1 : 0}
           onClick={activateTerminalSurface}
         >
           <SquareTerminal size={16} />
-          <span className="mobile-nav-label">Session</span>
+          <span className="mobile-nav-label">{t("Session")}</span>
         </button>
         <button
           type="button"
           className={mobileView === "files" ? "active" : ""}
-          title={shortcutTitle("Files", "files.toggle")}
-          aria-label="Show workspace files"
+          title={shortcutTitle(t("Files"), "files.toggle")}
+          aria-label={t("Show workspace files")}
           tabIndex={mobileControlsCollapsed ? -1 : 0}
           onClick={() => openFileExplorer()}
         >
           <FolderTree size={16} />
-          <span className="mobile-nav-label">Files</span>
+          <span className="mobile-nav-label">{t("Files")}</span>
         </button>
         <button
           type="button"
           className={mobileView === "changes" ? "active" : ""}
-          title={shortcutTitle("Changes", "diff.toggle")}
-          aria-label="Show workspace changes"
+          title={shortcutTitle(t("Changes"), "diff.toggle")}
+          aria-label={t("Show workspace changes")}
           tabIndex={mobileControlsCollapsed ? -1 : 0}
           onClick={() => openDiffViewer()}
         >
           <FileDiff size={16} />
-          <span className="mobile-nav-label">Changes</span>
+          <span className="mobile-nav-label">{t("Changes")}</span>
         </button>
         <button
           type="button"
           className={mobileView === "annotations" ? "active" : ""}
-          title={shortcutTitle("Annotations", "annotations.toggle")}
-          aria-label="Show review annotations"
+          title={shortcutTitle(t("Annotations"), "annotations.toggle")}
+          aria-label={t("Show review annotations")}
           aria-pressed={annotationsOpen}
           tabIndex={mobileControlsCollapsed ? -1 : 0}
           onClick={toggleAnnotations}
         >
           <MessageSquareText size={16} />
           <span className="mobile-nav-label">
-            Annotations{annotations.length > 0 ? ` ${annotations.length}` : ""}
+            {t("Annotations")}
+            {annotations.length > 0 ? ` ${annotations.length}` : ""}
           </span>
         </button>
         <button
@@ -3629,10 +3637,10 @@ export default function App() {
           className={mobileView === "history" ? "active" : ""}
           title={
             activePaneHasAgent || historyInspectorOpen
-              ? "History"
-              : "Select an agent pane to view History"
+              ? t("History")
+              : t("Select an agent pane to view History")
           }
-          aria-label="Show agent message history"
+          aria-label={t("Show agent message history")}
           aria-pressed={historyInspectorOpen}
           tabIndex={mobileControlsCollapsed ? -1 : 0}
           disabled={!activePaneHasAgent && !historyInspectorOpen}
@@ -3645,7 +3653,7 @@ export default function App() {
           }}
         >
           <History size={16} />
-          <span className="mobile-nav-label">History</span>
+          <span className="mobile-nav-label">{t("History")}</span>
         </button>
       </nav>
       <MobileTabSheet
@@ -3658,9 +3666,11 @@ export default function App() {
         className={`mobile-workspace-shortcut ${
           mobileView === "workspaces" ? "is-active" : ""
         }`}
-        title={shortcutTitle("Workspaces", "workspaces.open")}
+        title={shortcutTitle(t("Workspaces"), "workspaces.open")}
         aria-label={
-          mobileView === "workspaces" ? "Hide workspaces" : "Show workspaces"
+          mobileView === "workspaces"
+            ? t("Hide workspaces")
+            : t("Show workspaces")
         }
         aria-pressed={mobileView === "workspaces"}
         aria-hidden={mobileControlsCollapsed}
@@ -3677,16 +3687,16 @@ export default function App() {
           className="mobile-nav mobile-terminal-tools"
           aria-label={
             activeTerminalComposerDraftKey
-              ? "Tabs and terminal composer"
-              : "Tabs"
+              ? t("Tabs and terminal composer")
+              : t("Tabs")
           }
           aria-hidden={mobileControlsCollapsed}
         >
           <button
             type="button"
             className={mobileTabSheetOpen ? "active" : ""}
-            title="Tabs"
-            aria-label="Show tabs"
+            title={t("Tabs")}
+            aria-label={t("Show tabs")}
             aria-pressed={mobileTabSheetOpen}
             tabIndex={mobileControlsCollapsed ? -1 : 0}
             disabled={!focusedWorkspace}
@@ -3699,7 +3709,7 @@ export default function App() {
                 {focusedWorkspaceTabCount}
               </span>
             ) : null}
-            <span className="mobile-nav-label">Tabs</span>
+            <span className="mobile-nav-label">{t("Tabs")}</span>
           </button>
           {activeTerminalComposerDraftKey ? (
             <button
@@ -3707,14 +3717,18 @@ export default function App() {
               className={terminalComposerOpen ? "active" : ""}
               title={
                 terminalComposerOpen
-                  ? "Close terminal composer"
-                  : "Open terminal composer"
+                  ? t("Close terminal composer")
+                  : t("Open terminal composer")
               }
-              aria-label={`${
-                terminalComposerOpen
-                  ? "Close terminal composer"
-                  : "Open terminal composer"
-              }${terminalComposerHasDraft ? ", unsent draft" : ""}`}
+              aria-label={
+                terminalComposerHasDraft
+                  ? terminalComposerOpen
+                    ? t("Close terminal composer, unsent draft")
+                    : t("Open terminal composer, unsent draft")
+                  : terminalComposerOpen
+                    ? t("Close terminal composer")
+                    : t("Open terminal composer")
+              }
               aria-pressed={terminalComposerOpen}
               tabIndex={mobileControlsCollapsed ? -1 : 0}
               onPointerDown={blurActiveInput}
@@ -3734,7 +3748,7 @@ export default function App() {
                   aria-hidden="true"
                 />
               ) : null}
-              <span className="mobile-nav-label">Composer</span>
+              <span className="mobile-nav-label">{t("Composer")}</span>
             </button>
           ) : null}
         </nav>
@@ -3776,12 +3790,16 @@ export default function App() {
                   <ToastMark kind="info" loading={s.updateInstalling} />
                   <div className="toast-content">
                     <strong>
-                      Roamgate {s.updateInfo.latest_version} is available
+                      {t("Roamgate {version} is available", {
+                        version: s.updateInfo.latest_version ?? "",
+                      })}
                     </strong>
                     <p>
-                      Current {s.updateInfo.current_version}
+                      {t("Current {version}", {
+                        version: s.updateInfo.current_version ?? "",
+                      })}
                       {s.updateInfo.can_auto_update
-                        ? " · ready to update and restart"
+                        ? ` · ${t("ready to update and restart")}`
                         : s.updateInfo.reason
                           ? ` · ${s.updateInfo.reason}`
                           : ""}
@@ -3795,8 +3813,8 @@ export default function App() {
                           disabled={s.updateInstalling}
                         >
                           {s.updateInstalling
-                            ? "Updating..."
-                            : "Update & restart"}
+                            ? t("Updating...")
+                            : t("Update & restart")}
                         </button>
                       ) : null}
                       <button
@@ -3805,13 +3823,13 @@ export default function App() {
                         onClick={() => store.dismissUpdate()}
                         disabled={s.updateInstalling}
                       >
-                        Dismiss
+                        {t("Dismiss")}
                       </button>
                     </div>
                   </div>
                   <CloseButton
                     variant="toast"
-                    label="Dismiss update notification"
+                    label={t("Dismiss update notification")}
                     onClick={() => store.dismissUpdate()}
                     disabled={s.updateInstalling}
                   />
@@ -3845,7 +3863,7 @@ export default function App() {
                   </div>
                   <CloseButton
                     variant="toast"
-                    label="Dismiss notification"
+                    label={t("Dismiss notification")}
                     onClick={() => store.clearNotice()}
                   />
                 </div>
@@ -3891,7 +3909,7 @@ export default function App() {
         <div
           className="resizer"
           onPointerDown={startResize}
-          title="Drag to resize sidebar"
+          title={t("Drag to resize sidebar")}
         />
         <main className="main">
           <TabBar
@@ -3934,7 +3952,11 @@ export default function App() {
                 <div
                   className="workspace-inspector-resizer"
                   role="separator"
-                  aria-label={`Resize ${inspectorState.dock} Inspector`}
+                  aria-label={
+                    inspectorState.dock === "bottom"
+                      ? t("Resize bottom Inspector")
+                      : t("Resize right Inspector")
+                  }
                   aria-orientation={
                     inspectorState.dock === "right" ? "vertical" : "horizontal"
                   }
@@ -3958,7 +3980,7 @@ export default function App() {
                 >
                   <Suspense
                     fallback={
-                      <TerminalLoadingFallback label="Loading Inspector" />
+                      <TerminalLoadingFallback label={t("Loading Inspector")} />
                     }
                   >
                     <WorkspaceInspectorHost

@@ -1,5 +1,6 @@
 import { X } from "lucide-react";
 import type { ButtonHTMLAttributes } from "react";
+import { t } from "../i18n";
 import "./CloseButton.css";
 
 type CloseButtonProps = Omit<
@@ -11,7 +12,7 @@ type CloseButtonProps = Omit<
 };
 
 export function CloseButton({
-  label = "Close",
+  label = t("Close"),
   variant = "dialog",
   className,
   title,
