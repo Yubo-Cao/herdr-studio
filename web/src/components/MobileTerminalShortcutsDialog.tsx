@@ -40,7 +40,7 @@ const OPTION_GROUP_LABELS: Record<(typeof OPTION_GROUPS)[number], string> = {
   Control: msg("Control"),
   Basic: msg("Basic"),
   Navigation: msg("Navigation"),
-  Modified: msg("Modified"),
+  Modified: msg("Modified keys"),
 };
 let nextShortcutId = 1;
 

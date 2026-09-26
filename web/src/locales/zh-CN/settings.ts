@@ -266,7 +266,7 @@ export default {
     "语音输入：按住说话，轻按开始或插入",
   "Search the raw file preview or diff": "在原始文件预览或差异中搜索",
   "Select all in the file preview": "在文件预览中全选",
-  "Add a review comment": "添加审阅评论",
+  "Add a review comment": "添加批注",
   "Copy review feedback": "复制审阅反馈",
   "Pre-fill agent with review feedback": "用审阅反馈预填 Agent 输入",
 
@@ -292,7 +292,7 @@ export default {
     "此会话中未找到历史记录条目。",
   "History messages": "历史消息",
   "Resize message list": "调整消息列表大小",
-  "Drag to resize; double-click to reset": "拖动调整大小；双击重置",
+  "Drag to resize; double-click to reset": "拖动以调整大小；双击以重置",
   "Select a message to read it here.": "选择一条消息以在此阅读。",
   "Agent session": "Agent 会话",
   "{shown} of {total} history entries": "{shown} / {total} 条历史记录",
