@@ -1,11 +1,12 @@
 import { useEffect, useRef } from "react";
+import { t } from "../i18n";
 import { focusDialogElement } from "./dialogFocus";
 import { MobileSheetHandle } from "./MobileSheetHandle";
 import "./ConfigurationDialog.css";
 
 export function ConfigurationLoadingDialog({
   onClose,
-  buttonLabel = "Cancel",
+  buttonLabel = t("Cancel"),
 }: {
   onClose: () => void;
   buttonLabel?: string;
@@ -48,13 +49,13 @@ export function ConfigurationLoadingDialog({
         className="modal configuration-loading-modal mobile-sheet"
         role="dialog"
         aria-modal="true"
-        aria-label="Loading Configuration"
+        aria-label={t("Loading Configuration")}
       >
         <MobileSheetHandle
-          label="Dismiss loading configuration"
+          label={t("Dismiss loading configuration")}
           onClose={onClose}
         />
-        <p role="status">Loading configuration...</p>
+        <p role="status">{t("Loading configuration...")}</p>
         <button ref={buttonRef} type="button" onClick={onClose}>
           {buttonLabel}
         </button>

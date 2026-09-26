@@ -8,6 +8,7 @@ import {
   ShieldCheck,
   Terminal,
 } from "lucide-react";
+import { t } from "../i18n";
 import "./HerdrSetupCard.css";
 
 type SetupInfo = {
@@ -78,7 +79,8 @@ export function HerdrSetupCard({
       const result = await response.json();
       if (!response.ok || result?.ok !== true) {
         throw new Error(
-          result?.error ?? "Herdr setup could not complete. Please try again.",
+          result?.error ??
+            t("Herdr setup could not complete. Please try again."),
         );
       }
       window.location.reload();
@@ -86,7 +88,7 @@ export function HerdrSetupCard({
       setError(
         cause instanceof Error
           ? cause.message
-          : "Herdr setup could not complete.",
+          : t("Herdr setup could not complete."),
       );
       setBusy(false);
       requestInProgress.current = false;
@@ -102,7 +104,7 @@ export function HerdrSetupCard({
           className="herdr-setup-spinner"
           aria-hidden="true"
         />
-        Checking Herdr connection
+        {t("Checking Herdr connection")}
       </div>
     );
   }
@@ -110,14 +112,14 @@ export function HerdrSetupCard({
 
   const missing = info.state === "missing";
   const title = busy
-    ? "Setting up Herdr"
+    ? t("Setting up Herdr")
     : confirming
       ? missing
-        ? `Install Herdr ${info.verified_version}?`
-        : "Start Herdr as a service?"
+        ? t("Install Herdr {version}?", { version: info.verified_version })
+        : t("Start Herdr as a service?")
       : missing
-        ? "Your workspace starts here"
-        : "Bring your workspace online";
+        ? t("Your workspace starts here")
+        : t("Bring your workspace online");
 
   return (
     <section
@@ -136,7 +138,7 @@ export function HerdrSetupCard({
           <Terminal size={24} />
         </span>
         <span className="herdr-setup-eyebrow">
-          {missing ? "FIRST-TIME SETUP" : "HERDR SERVER"}
+          {missing ? t("FIRST-TIME SETUP") : t("HERDR SERVER")}
         </span>
         <span className="herdr-setup-badge">
           {missing ? (
@@ -144,7 +146,9 @@ export function HerdrSetupCard({
           ) : (
             <Server size={13} aria-hidden="true" />
           )}
-          {missing ? `Verified ${info.verified_version}` : "Installed"}
+          {missing
+            ? t("Verified {version}", { version: info.verified_version })
+            : t("Installed")}
         </span>
       </div>
 
@@ -152,12 +156,20 @@ export function HerdrSetupCard({
         <h2 id={titleId}>{title}</h2>
         <p>
           {busy
-            ? "Keep this page open. Roamgate will reconnect when Herdr is ready."
+            ? t(
+                "Keep this page open. Roamgate will reconnect when Herdr is ready.",
+              )
             : confirming
-              ? "This changes the machine running Roamgate, not your browser or a remote SSH host."
+              ? t(
+                  "This changes the machine running Roamgate, not your browser or a remote SSH host.",
+                )
               : missing
-                ? "Herdr runs your terminals and agents. Set it up once, then manage your workspace from here."
-                : "Herdr is installed but isn't running. Start it in the background to reconnect your terminals and agents."}
+                ? t(
+                    "Herdr runs your terminals and agents. Set it up once, then manage your workspace from here.",
+                  )
+                : t(
+                    "Herdr is installed but isn't running. Start it in the background to reconnect your terminals and agents.",
+                  )}
         </p>
       </div>
 
@@ -171,10 +183,10 @@ export function HerdrSetupCard({
           <div>
             <strong>
               {missing
-                ? "Installing and starting the service"
-                : "Starting the service"}
+                ? t("Installing and starting the service")
+                : t("Starting the service")}
             </strong>
-            <span>This may take a few minutes.</span>
+            <span>{t("This may take a few minutes.")}</span>
           </div>
         </div>
       ) : (
@@ -189,20 +201,20 @@ export function HerdrSetupCard({
               <strong>
                 {missing
                   ? `Herdr ${info.verified_version}`
-                  : "Use your existing installation"}
+                  : t("Use your existing installation")}
               </strong>
               <span>
                 {missing
-                  ? "Verified release with SHA-256 checks"
-                  : "Your Herdr binary stays unchanged"}
+                  ? t("Verified release with SHA-256 checks")
+                  : t("Your Herdr binary stays unchanged")}
               </span>
             </div>
           </li>
           <li>
             <Server size={18} aria-hidden="true" />
             <div>
-              <strong>Run as a background service</strong>
-              <span>Starts at login, independently of Roamgate</span>
+              <strong>{t("Run as a background service")}</strong>
+              <span>{t("Starts at login, independently of Roamgate")}</span>
             </div>
           </li>
         </ul>
@@ -210,7 +222,7 @@ export function HerdrSetupCard({
 
       {error ? (
         <div className="herdr-setup-error" role="alert">
-          <strong>Setup couldn't finish</strong>
+          <strong>{t("Setup couldn't finish")}</strong>
           <span>{error}</span>
         </div>
       ) : null}
@@ -225,12 +237,12 @@ export function HerdrSetupCard({
               onClick={() => void setup()}
             >
               {busy
-                ? "Setting up..."
+                ? t("Setting up...")
                 : error
-                  ? "Try again"
+                  ? t("Try again")
                   : missing
-                    ? "Install & start"
-                    : "Start service"}
+                    ? t("Install & start")
+                    : t("Start service")}
               {!busy ? <ArrowRight size={16} aria-hidden="true" /> : null}
             </button>
             <button
@@ -239,7 +251,7 @@ export function HerdrSetupCard({
               disabled={busy}
               onClick={cancel}
             >
-              Cancel
+              {t("Cancel")}
             </button>
           </div>
         ) : (
@@ -249,14 +261,14 @@ export function HerdrSetupCard({
             className="herdr-setup-primary"
             onClick={() => setConfirming(true)}
           >
-            {missing ? "Set up Herdr" : "Start Herdr"}
+            {missing ? t("Set up Herdr") : t("Start Herdr")}
             <ArrowRight size={16} aria-hidden="true" />
           </button>
         )}
         <p className="herdr-setup-footnote">
           {confirming
-            ? "A user service will be registered on the Roamgate host."
-            : "Review the details before making any changes."}
+            ? t("A user service will be registered on the Roamgate host.")
+            : t("Review the details before making any changes.")}
         </p>
       </div>
     </section>

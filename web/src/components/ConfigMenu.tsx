@@ -19,6 +19,7 @@ import {
 import packageJson from "../../package.json";
 import { logoutBrowserSession } from "../api";
 import { connectionHttpPath } from "../connectionHttp";
+import { msg, t } from "../i18n";
 import { useLayoutPreferences } from "../layoutPreferences";
 import { shortcutLabel, useShortcutPreferences } from "../shortcutPreferences";
 import { shallowEqual, store, useStoreSelector } from "../store";
@@ -40,6 +41,11 @@ const ConfigurationDialog = lazyWithReload("configuration", () =>
 const APP_VERSION = packageJson.version;
 const RELEASES_URL = "https://github.com/Yubo-Cao/herdr-studio/releases";
 export const CONFIG_MENU_ID = "roamgate-config-menu";
+const CONNECTION_STATUS_LABELS: Record<string, string> = {
+  connecting: msg("connecting"),
+  connected: msg("connected"),
+  disconnected: msg("disconnected"),
+};
 
 export function reloadApplicationPage(
   target: Pick<Location, "reload"> = window.location,
@@ -168,23 +174,26 @@ export function ConfigMenu({
             setLogoutError("");
             setOpen((value) => !value);
           }}
-          aria-label={updateAvailable ? "Menu, update available" : "Menu"}
+          aria-label={updateAvailable ? t("Menu, update available") : t("Menu")}
           aria-controls={open ? CONFIG_MENU_ID : undefined}
           aria-expanded={open}
           aria-haspopup="dialog"
         >
-          Menu{updateAvailable ? <span className="menu-update-dot" /> : null}
+          {t("Menu")}
+          {updateAvailable ? <span className="menu-update-dot" /> : null}
         </button>
         {open ? (
           <div
             id={CONFIG_MENU_ID}
             className={`config-dropdown mobile-sheet${expanded ? " is-expanded" : ""}`}
             role="dialog"
-            aria-label="Application menu"
+            aria-label={t("Application menu")}
           >
             <MobileSheetHandle
               label={
-                expanded ? "Show fewer menu options" : "Show more menu options"
+                expanded
+                  ? t("Show fewer menu options")
+                  : t("Show more menu options")
               }
               expanded={expanded}
               onExpand={() => setExpanded(true)}
@@ -196,23 +205,33 @@ export function ConfigMenu({
               <div className="config-summary">
                 <div>
                   <strong>Roamgate</strong>
-                  <span>Version {APP_VERSION}</span>
+                  <span>
+                    {t("Version {version}", { version: APP_VERSION })}
+                  </span>
                 </div>
                 <span
                   className={`config-connection-summary status-${s.connectionPaused ? "paused" : s.status}`}
                 >
                   <span className="status-dot" />
-                  {s.connectionPaused ? "Paused" : s.status}
+                  {s.connectionPaused
+                    ? t("Paused")
+                    : t(CONNECTION_STATUS_LABELS[s.status] ?? s.status)}
                   {typeof clientCount === "number"
-                    ? ` · ${clientCount} client${clientCount === 1 ? "" : "s"}`
+                    ? ` · ${
+                        clientCount === 1
+                          ? t("{count} client", { count: clientCount })
+                          : t("{count} clients", { count: clientCount })
+                      }`
                     : ""}
                 </span>
               </div>
               <div className="config-section">
                 <ConfigMenuItem
                   icon={<Settings size={15} />}
-                  label="Configuration"
-                  description="Appearance, behavior, connections, and agent integrations"
+                  label={t("Configuration")}
+                  description={t(
+                    "Appearance, behavior, connections, and agent integrations",
+                  )}
                   className="config-menu-item-row"
                   onClick={() => {
                     setOpen(false);
@@ -225,16 +244,16 @@ export function ConfigMenu({
                       <Focus size={15} />
                     </span>
                     <div className="config-item-copy">
-                      <strong>Zen mode</strong>
+                      <strong>{t("Zen mode")}</strong>
                       <span>
-                        {zenMode ? "Enabled" : "Disabled"} ·{" "}
+                        {zenMode ? t("Enabled") : t("Disabled")} ·{" "}
                         {shortcutLabel("zen.toggle")}
                       </span>
                     </div>
                     <button
                       type="button"
                       role="switch"
-                      aria-label="Zen mode"
+                      aria-label={t("Zen mode")}
                       aria-checked={zenMode}
                       className={"settings-switch" + (zenMode ? " is-on" : "")}
                       onClick={() => {
@@ -248,11 +267,11 @@ export function ConfigMenu({
                 )}
               </div>
               <div className="config-section config-section-tiles-3">
-                <div className="config-title">Help & updates</div>
+                <div className="config-title">{t("Help & updates")}</div>
                 <ConfigMenuItem
                   icon={<ExternalLink size={15} />}
-                  label="Changelog"
-                  description="Recent changes on GitHub"
+                  label={t("Changelog")}
+                  description={t("Recent changes on GitHub")}
                   onClick={() => {
                     setOpen(false);
                     window.open(RELEASES_URL, "_blank", "noopener,noreferrer");
@@ -260,8 +279,8 @@ export function ConfigMenu({
                 />
                 <ConfigMenuItem
                   icon={<RefreshCw size={15} />}
-                  label="Reload page"
-                  description="Refresh the application"
+                  label={t("Reload page")}
+                  description={t("Refresh the application")}
                   onClick={() => {
                     setOpen(false);
                     reloadApplicationPage();
@@ -272,18 +291,22 @@ export function ConfigMenu({
                   label={
                     canInstallUpdate
                       ? s.updateInstalling
-                        ? "Updating..."
-                        : `Update to ${updateVersion}`
+                        ? t("Updating...")
+                        : t("Update to {version}", {
+                            version: updateVersion ?? "",
+                          })
                       : updateAvailable
-                        ? `Version ${updateVersion} available`
-                        : "Check for updates"
+                        ? t("Version {version} available", {
+                            version: updateVersion ?? "",
+                          })
+                        : t("Check for updates")
                   }
                   description={
                     canInstallUpdate
-                      ? "Install and restart"
+                      ? t("Install and restart")
                       : updateAvailable
-                        ? "Automatic install unavailable"
-                        : "Check the release server"
+                        ? t("Automatic install unavailable")
+                        : t("Check the release server")
                   }
                   primary={canInstallUpdate}
                   disabled={s.updateInstalling}
@@ -294,24 +317,24 @@ export function ConfigMenu({
                 />
               </div>
               <div className="config-section">
-                <div className="config-title">Runtime</div>
+                <div className="config-title">{t("Runtime")}</div>
                 <div className="config-runtime-row">
                   <span className="config-item-icon">
                     <Server size={15} />
                   </span>
                   <div className="config-item-copy">
-                    <strong>Herdr server</strong>
+                    <strong>{t("Herdr server")}</strong>
                     <span>
                       {herdrInfo?.version
-                        ? `Version ${herdrInfo.version}`
+                        ? t("Version {version}", { version: herdrInfo.version })
                         : herdrUnavailable
-                          ? "Unavailable"
-                          : "Loading server information"}
+                          ? t("Unavailable")
+                          : t("Loading server information")}
                     </span>
                   </div>
                   <code>
                     {typeof herdrInfo?.protocol === "number"
-                      ? `Protocol ${herdrInfo.protocol}`
+                      ? t("Protocol {version}", { version: herdrInfo.protocol })
                       : "-"}
                   </code>
                 </div>
@@ -334,7 +357,7 @@ export function ConfigMenu({
                   <span className="config-item-icon">
                     <Wifi size={15} />
                   </span>
-                  <span>Connection details</span>
+                  <span>{t("Connection details")}</span>
                   {connectionDetailsOpen ? (
                     <ChevronDown size={15} />
                   ) : (
@@ -344,7 +367,10 @@ export function ConfigMenu({
                 {connectionDetailsOpen ? (
                   <div className="config-details">
                     <ConfigRow label="URL" value={location.origin} />
-                    <ConfigRow label="Socket" value={health?.socket ?? "-"} />
+                    <ConfigRow
+                      label={t("Socket")}
+                      value={health?.socket ?? "-"}
+                    />
                   </div>
                 ) : null}
               </div>
@@ -352,8 +378,8 @@ export function ConfigMenu({
                 <div className="config-section">
                   <ConfigMenuItem
                     icon={<LogOut size={15} />}
-                    label={loggingOut ? "Logging out..." : "Log out"}
-                    description="End this browser session only"
+                    label={loggingOut ? t("Logging out...") : t("Log out")}
+                    description={t("End this browser session only")}
                     className="config-menu-item-row"
                     disabled={loggingOut}
                     onClick={async () => {
@@ -363,7 +389,9 @@ export function ConfigMenu({
                         await logoutBrowserSession();
                       } catch {
                         setLogoutError(
-                          "Could not log out. Check your connection and try again.",
+                          t(
+                            "Could not log out. Check your connection and try again.",
+                          ),
                         );
                         setLoggingOut(false);
                       }
@@ -380,19 +408,19 @@ export function ConfigMenu({
                 <div className="mobile-sheet-more" aria-hidden={!expanded}>
                   <div className="mobile-sheet-more-content">
                     <div className="config-section">
-                      <div className="config-title">Quick settings</div>
+                      <div className="config-title">{t("Quick settings")}</div>
                       {(
                         [
-                          ["Appearance", Palette],
-                          ["Behavior", SlidersHorizontal],
-                          ["Connection", Server],
-                          ["Integrations", Plug],
+                          ["Appearance", msg("Appearance"), Palette],
+                          ["Behavior", msg("Behavior"), SlidersHorizontal],
+                          ["Connection", msg("Connection"), Server],
+                          ["Integrations", msg("Integrations"), Plug],
                         ] as const
-                      ).map(([name, Icon]) => (
+                      ).map(([name, label, Icon]) => (
                         <ConfigMenuItem
                           key={name}
                           icon={<Icon size={15} />}
-                          label={name}
+                          label={t(label)}
                           onClick={() => {
                             setOpen(false);
                             setConfigurationTab(name);

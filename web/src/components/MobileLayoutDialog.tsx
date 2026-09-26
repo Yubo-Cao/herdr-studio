@@ -1,4 +1,5 @@
 import { useEffect, useRef } from "react";
+import { msg, t } from "../i18n";
 import { CloseButton } from "./CloseButton";
 import { ThemedSelect } from "./ThemedSelect";
 import { focusDialogElement } from "./dialogFocus";
@@ -11,6 +12,18 @@ import {
   useLayoutPreferences,
 } from "../layoutPreferences";
 import "./MobileLayoutDialog.css";
+
+const DISPLAY_MODE_OPTIONS = [
+  { value: "auto", label: msg("Automatic") },
+  { value: "mobile", label: msg("Mobile") },
+  { value: "desktop", label: msg("Desktop") },
+];
+const SIDEBAR_ORDER_OPTIONS = [
+  { value: "agents-first", label: msg("Agents on top") },
+  { value: "workspaces-first", label: msg("Workspaces on top") },
+];
+const translateOptions = (options: { value: string; label: string }[]) =>
+  options.map((option) => ({ ...option, label: t(option.label) }));
 
 export function MobileLayoutDialog({
   open,
@@ -52,7 +65,7 @@ export function MobileLayoutDialog({
         className="modal mobile-layout-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="Layout Preferences"
+        aria-label={t("Layout Preferences")}
         tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
         onKeyDown={(event) => {
@@ -79,34 +92,42 @@ export function MobileLayoutDialog({
       >
         <div className="modal-head">
           <div>
-            <h2>Layout Preferences</h2>
-            <p>Choose display mode, mobile breakpoint, and sidebar order.</p>
+            <h2>{t("Layout Preferences")}</h2>
+            <p>
+              {t("Choose display mode, mobile breakpoint, and sidebar order.")}
+            </p>
           </div>
-          <CloseButton label="Close Layout Preferences" onClick={onClose} />
+          <CloseButton
+            label={t("Close Layout Preferences")}
+            onClick={onClose}
+          />
         </div>
         <div className="layout-preferences">
           <label>
-            <span>Display mode</span>
+            <span>{t("Display mode")}</span>
             <ThemedSelect
-              aria-label="Display mode"
+              aria-label={t("Display mode")}
               value={urlOverride ?? preferences.mode}
-              options={[
-                { value: "auto", label: "Automatic" },
-                { value: "mobile", label: "Mobile" },
-                { value: "desktop", label: "Desktop" },
-              ]}
+              options={translateOptions(DISPLAY_MODE_OPTIONS)}
               onChange={(mode) =>
                 updateLayoutPreferences({ mode: mode as LayoutMode })
               }
             />
           </label>
           <p className="muted">
-            Using {mobile ? "mobile" : "desktop"} layout
-            {urlOverride ? " (URL override)" : ""}. Bookmark with ?layout=mobile
-            or ?layout=desktop to force a layout.
+            {urlOverride
+              ? mobile
+                ? t("Using mobile layout (URL override).")
+                : t("Using desktop layout (URL override).")
+              : mobile
+                ? t("Using mobile layout.")
+                : t("Using desktop layout.")}{" "}
+            {t(
+              "Bookmark with ?layout=mobile or ?layout=desktop to force a layout.",
+            )}
           </p>
           <label>
-            <span>Mobile up to (px)</span>
+            <span>{t("Mobile up to (px)")}</span>
             <input
               key={preferences.mobileBreakpoint}
               type="number"
@@ -135,14 +156,15 @@ export function MobileLayoutDialog({
           </label>
           {(["mobile", "desktop"] as const).map((view) => (
             <label key={view}>
-              <span>{view === "mobile" ? "Mobile" : "Desktop"} sidebar</span>
+              <span>
+                {view === "mobile" ? t("Mobile sidebar") : t("Desktop sidebar")}
+              </span>
               <ThemedSelect
-                aria-label={`${view === "mobile" ? "Mobile" : "Desktop"} sidebar`}
+                aria-label={
+                  view === "mobile" ? t("Mobile sidebar") : t("Desktop sidebar")
+                }
                 value={preferences[`${view}SidebarOrder`]}
-                options={[
-                  { value: "agents-first", label: "Agents on top" },
-                  { value: "workspaces-first", label: "Workspaces on top" },
-                ]}
+                options={translateOptions(SIDEBAR_ORDER_OPTIONS)}
                 onChange={(order) =>
                   updateLayoutPreferences({
                     [`${view}SidebarOrder`]: order as SidebarOrder,
@@ -152,13 +174,15 @@ export function MobileLayoutDialog({
             </label>
           ))}
           <p className="muted">
-            Sidebar order applies when Agents is set to Separate.
+            {t("Sidebar order applies when Agents is set to Separate.")}
           </p>
         </div>
         <div className="modal-actions">
-          <span className="muted">Changes are saved in this browser.</span>
+          <span className="muted">
+            {t("Changes are saved in this browser.")}
+          </span>
           <button type="button" onClick={onClose}>
-            Done
+            {t("Done")}
           </button>
         </div>
       </div>

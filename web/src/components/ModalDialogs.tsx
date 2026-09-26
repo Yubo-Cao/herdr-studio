@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { t } from "../i18n";
 import { CloseButton } from "./CloseButton";
 import { focusDialogElement } from "./dialogFocus";
 import { dialogKeyAction } from "./dialogKeyboard";
@@ -9,7 +10,7 @@ export function TextInputDialog({
   label,
   initialValue = "",
   placeholder,
-  submitLabel = "Save",
+  submitLabel = t("Save"),
   onSubmit,
   onClose,
 }: {
@@ -76,7 +77,7 @@ export function TextInputDialog({
 
         <div className="modal-actions">
           <button type="button" className="ghost" onClick={onClose}>
-            Cancel
+            {t("Cancel")}
           </button>
           <button type="submit">{submitLabel}</button>
         </div>
@@ -89,7 +90,7 @@ export function ConfirmDialog({
   open,
   title,
   message,
-  confirmLabel = "Confirm",
+  confirmLabel = t("Confirm"),
   danger = false,
   onConfirm,
   onClose,
@@ -164,7 +165,7 @@ export function ConfirmDialog({
 
         <div className="modal-actions">
           <button type="button" className="ghost" onClick={onClose}>
-            Cancel
+            {t("Cancel")}
           </button>
           <button
             type="button"
@@ -247,7 +248,7 @@ export function MessageDialog({
 
         <div className="modal-actions">
           <button type="button" onClick={onClose}>
-            OK
+            {t("OK")}
           </button>
         </div>
       </div>
