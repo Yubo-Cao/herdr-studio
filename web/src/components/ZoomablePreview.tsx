@@ -1,4 +1,5 @@
 import "./ZoomablePreview.css";
+import { t } from "../i18n";
 import {
   useEffect,
   useLayoutEffect,
@@ -110,26 +111,26 @@ export function ZoomablePreview({
       <div
         className="visual-preview-controls"
         role="toolbar"
-        aria-label={`${label} zoom controls`}
+        aria-label={t("{label} zoom controls", { label })}
       >
         <button
           type="button"
           onClick={() => changeZoom(scale / 1.25)}
           disabled={scale <= 0.01}
-          aria-label="Zoom out"
-          title="Zoom out"
+          aria-label={t("Zoom out")}
+          title={t("Zoom out")}
         >
           <Minus size={14} />
         </button>
-        <output aria-live="polite" aria-label="Zoom level">
+        <output aria-live="polite" aria-label={t("Zoom level")}>
           {Math.round(scale * 100)}%
         </output>
         <button
           type="button"
           onClick={() => changeZoom(scale * 1.25)}
           disabled={scale >= 8}
-          aria-label="Zoom in"
-          title="Zoom in"
+          aria-label={t("Zoom in")}
+          title={t("Zoom in")}
         >
           <Plus size={14} />
         </button>
@@ -137,11 +138,15 @@ export function ZoomablePreview({
           type="button"
           onClick={() => changeZoom(null)}
           aria-pressed={zoom === null}
-          title="Fit preview"
+          title={t("Fit preview")}
         >
-          <Maximize size={13} /> Fit
+          <Maximize size={13} /> {t("Fit")}
         </button>
-        <button type="button" onClick={() => changeZoom(1)} title="Actual size">
+        <button
+          type="button"
+          onClick={() => changeZoom(1)}
+          title={t("Actual size")}
+        >
           100%
         </button>
       </div>
@@ -150,8 +155,8 @@ export function ZoomablePreview({
         ref={viewportRef}
         tabIndex={0}
         role="region"
-        aria-label={`${label} viewport`}
-        title="Scroll to pan. Ctrl/Cmd + wheel to zoom."
+        aria-label={t("{label} viewport", { label })}
+        title={t("Scroll to pan. Ctrl/Cmd + wheel to zoom.")}
       >
         <div className="visual-preview-stage">
           <div

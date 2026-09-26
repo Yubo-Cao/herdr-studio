@@ -42,6 +42,7 @@ import {
 } from "../gitDiffSummaryStore";
 import { diffAutoCollapseInfo } from "./diffAutoCollapse";
 import { store } from "../store";
+import { t } from "../i18n";
 import { copyTextFromUserGesture } from "../terminalClipboard";
 import { bumpFileExplorerRefresh } from "../fileExplorerRefresh";
 import {
@@ -1458,19 +1459,25 @@ export const DiffViewerPanel = forwardRef<
     longPressStartRef.current = null;
   };
 
-  const copyPath = (path: string, label: string) => {
+  const copyPath = (path: string, kind: "relative" | "absolute") => {
     void copyTextFromUserGesture(path).then(
       () =>
         store.notify({
           kind: "success",
-          message: `${label} copied`,
+          message:
+            kind === "relative"
+              ? t("Relative path copied")
+              : t("Absolute path copied"),
           detail: path,
           autoDismissMs: 5000,
         }),
       (error) =>
         store.notify({
           kind: "error",
-          message: `Failed to copy ${label.toLowerCase()}`,
+          message:
+            kind === "relative"
+              ? t("Failed to copy relative path")
+              : t("Failed to copy absolute path"),
           detail: error instanceof Error ? error.message : String(error),
         }),
     );
@@ -1709,7 +1716,7 @@ export const DiffViewerPanel = forwardRef<
             ))}
           </span>
           {stats.hasStats ? (
-            <span className="diff-tree-stats" aria-label="Line changes">
+            <span className="diff-tree-stats" aria-label={t("Line changes")}>
               <span className="diff-stat-add">+{stats.additions}</span>
               <span className="diff-stat-del">-{stats.deletions}</span>
             </span>
@@ -1721,56 +1728,56 @@ export const DiffViewerPanel = forwardRef<
   };
 
   return (
-    <aside className="diff-viewer-side" aria-label="Diff Viewer">
+    <aside className="diff-viewer-side" aria-label={t("Diff Viewer")}>
       <div className="diff-panel-toolbar">
         <SegmentedControl
           className="diff-scope-toggle"
           stretch
-          aria-label="Diff scope"
+          aria-label={t("Diff scope")}
           value={diffScope}
           onChange={setDiffScope}
           options={[
             {
               value: "last-step",
-              ariaLabel: "Last step",
-              title: "Last step",
+              ariaLabel: t("Last step"),
+              title: t("Last step"),
               label: (
                 <>
                   <span className="diff-scope-label-full" aria-hidden="true">
-                    Last step
+                    {t("Last step")}
                   </span>
                   <span className="diff-scope-label-short" aria-hidden="true">
-                    Last
+                    {t("Last")}
                   </span>
                 </>
               ),
             },
             {
               value: "working",
-              ariaLabel: "Working tree",
-              title: "Working tree",
+              ariaLabel: t("Working tree"),
+              title: t("Working tree"),
               label: (
                 <>
                   <span className="diff-scope-label-full" aria-hidden="true">
-                    Working tree
+                    {t("Working tree")}
                   </span>
                   <span className="diff-scope-label-short" aria-hidden="true">
-                    Working
+                    {t("Working")}
                   </span>
                 </>
               ),
             },
             {
               value: "branch-main",
-              ariaLabel: "Against main",
-              title: "Against main",
+              ariaLabel: t("Against main"),
+              title: t("Against main"),
               label: (
                 <>
                   <span className="diff-scope-label-full" aria-hidden="true">
-                    Against main
+                    {t("Against main")}
                   </span>
                   <span className="diff-scope-label-short" aria-hidden="true">
-                    Main
+                    {t("Main")}
                   </span>
                 </>
               ),
@@ -1780,11 +1787,13 @@ export const DiffViewerPanel = forwardRef<
         <div
           className="diff-toolbar-actions"
           role="group"
-          aria-label="Diff actions"
+          aria-label={t("Diff actions")}
         >
           <IconButton
             className="diff-refresh"
-            label={summaryLoading ? "Refreshing changes" : "Refresh changes"}
+            label={
+              summaryLoading ? t("Refreshing changes") : t("Refresh changes")
+            }
             aria-busy={summaryLoading}
             disabled={summaryLoading}
             onClick={() => void loadSummary(cache.selected, true)}
@@ -1799,12 +1808,12 @@ export const DiffViewerPanel = forwardRef<
       </div>
 
       {!workspace ? (
-        <p className="modal-error">No workspace is focused.</p>
+        <p className="modal-error">{t("No workspace is focused.")}</p>
       ) : null}
 
       {cache.error ? <p className="modal-error">{cache.error}</p> : null}
 
-      <div className="diff-list diff-tree" aria-label="Changed files">
+      <div className="diff-list diff-tree" aria-label={t("Changed files")}>
         {summaryLoading && !cache.summary ? (
           <DiffSkeleton />
         ) : cache.summary?.entries.length ? (
@@ -1815,14 +1824,14 @@ export const DiffViewerPanel = forwardRef<
             <span>
               {diffScope === "last-step" &&
               cache.summary?.baseline_available === false
-                ? "No completed agent step yet"
-                : "No changes"}
+                ? t("No completed agent step yet")
+                : t("No changes")}
             </span>
           </div>
         )}
       </div>
       {fileLoadingKey ? (
-        <div className="diff-loading-inline">Loading diff...</div>
+        <div className="diff-loading-inline">{t("Loading diff...")}</div>
       ) : null}
       {contextMenu ? (
         <ActionsMenu
@@ -1831,7 +1840,7 @@ export const DiffViewerPanel = forwardRef<
           header={{ title: contextMenu.path, subtitle: "Git" }}
           groups={[
             {
-              label: contextMenu.directory ? "Folder" : "File",
+              label: contextMenu.directory ? t("Folder") : t("File"),
               items: [
                 ...(!contextMenu.directory &&
                 onOpenFile &&
@@ -1839,25 +1848,25 @@ export const DiffViewerPanel = forwardRef<
                   ? [
                       {
                         key: "open",
-                        label: "Open file",
+                        label: t("Open file"),
                         action: () => onOpenFile(contextMenu.entries[0]!),
                       },
                     ]
                   : []),
                 {
                   key: "copy-relative",
-                  label: "Copy relative path",
-                  action: () => copyPath(contextMenu.path, "Relative path"),
+                  label: t("Copy relative path"),
+                  action: () => copyPath(contextMenu.path, "relative"),
                 },
                 ...(cache.summary?.root
                   ? [
                       {
                         key: "copy-absolute",
-                        label: "Copy absolute path",
+                        label: t("Copy absolute path"),
                         action: () =>
                           copyPath(
                             `${cache.summary?.root}/${contextMenu.path}`,
-                            "Absolute path",
+                            "absolute",
                           ),
                       },
                     ]
@@ -1877,7 +1886,7 @@ export const DiffViewerPanel = forwardRef<
               })),
             },
             {
-              label: "Repository",
+              label: t("Repository"),
               items: buildGitRepoMenuItems(workingCounts).map((item) => ({
                 key: item.action,
                 label: item.label,
@@ -1895,7 +1904,7 @@ export const DiffViewerPanel = forwardRef<
         open={!!confirmState}
         title={confirmState?.title ?? ""}
         message={confirmState?.message ?? ""}
-        confirmLabel={confirmState?.confirmLabel ?? "Confirm"}
+        confirmLabel={confirmState?.confirmLabel ?? t("Confirm")}
         danger
         onClose={() => setConfirmState(null)}
         onConfirm={() => confirmState?.run()}

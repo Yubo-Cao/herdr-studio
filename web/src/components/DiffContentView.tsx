@@ -37,7 +37,7 @@ import {
 } from "react";
 import type { ConnectionClient } from "../api";
 import {
-  diffReviewLineLabel,
+  diffReviewLineDisplayLabel,
   findDiffReviewSelection,
   type DiffReviewAnnotation,
   type NewReviewAnnotation,
@@ -51,6 +51,7 @@ import type {
 } from "../types";
 import { connectionClientScopeKey } from "../useConnectionClient";
 import { gitDiffCode, gitDiffCodeLabel } from "../gitDiffStatus";
+import { t } from "../i18n";
 import { requestFilePreview } from "./fileExplorerResources";
 import {
   AnnotationComposerPopover,
@@ -361,7 +362,7 @@ function DiffImagePreview({
       <div className="diff-image-preview">
         <div className="diff-content-state">
           <span className="file-loading-spinner" />
-          Loading image preview
+          {t("Loading image preview")}
         </div>
       </div>
     );
@@ -376,7 +377,9 @@ function DiffImagePreview({
   if (!state.preview?.image_data_url) {
     return (
       <div className="diff-image-preview">
-        <div className="diff-content-state">Image preview unavailable.</div>
+        <div className="diff-content-state">
+          {t("Image preview unavailable.")}
+        </div>
       </div>
     );
   }
@@ -547,8 +550,8 @@ const DiffFileSection = memo(function DiffFileSection({
   const statusCode = gitDiffCode(section.entry);
   const metaNote = [
     section.autoCollapse?.label ?? null,
-    section.file?.truncated ? "truncated" : null,
-    section.collapsed && section.autoCollapse ? "auto-collapsed" : null,
+    section.file?.truncated ? t("truncated") : null,
+    section.collapsed && section.autoCollapse ? t("auto-collapsed") : null,
   ]
     .filter(Boolean)
     .join(" · ");
@@ -574,8 +577,12 @@ const DiffFileSection = memo(function DiffFileSection({
               onClick={toggle}
               disabled={!section.active && !onSelectFile}
               aria-expanded={!section.collapsed}
-              aria-label={`${section.collapsed ? "Expand" : "Collapse"} ${section.entry.path}`}
-              title={section.collapsed ? "Expand" : "Collapse"}
+              aria-label={
+                section.collapsed
+                  ? t("Expand {path}", { path: section.entry.path })
+                  : t("Collapse {path}", { path: section.entry.path })
+              }
+              title={section.collapsed ? t("Expand") : t("Collapse")}
             >
               {section.collapsed ? (
                 <ChevronRight size={14} />
@@ -633,7 +640,7 @@ const DiffFileSection = memo(function DiffFileSection({
             disabled={!onOpenFile}
           >
             <FolderOpen size={14} />
-            <span>Open in Files</span>
+            <span>{t("Open in Files")}</span>
           </button>
         </header>
       )}
@@ -652,7 +659,7 @@ const DiffFileSection = memo(function DiffFileSection({
                   type="button"
                   onClick={() => onSelectFile(section.entry)}
                 >
-                  Retry
+                  {t("Retry")}
                 </button>
               ) : null}
             </div>
@@ -661,21 +668,23 @@ const DiffFileSection = memo(function DiffFileSection({
             <div className="diff-content-state">
               {loading ? <span className="file-loading-spinner" /> : null}
               {loading ? (
-                "Loading diff"
+                t("Loading diff")
               ) : onSelectFile ? (
                 <button
                   type="button"
                   onClick={() => onSelectFile(section.entry)}
                 >
-                  Load diff
+                  {t("Load diff")}
                 </button>
               ) : (
-                "Select this file to load its diff."
+                t("Select this file to load its diff.")
               )}
             </div>
           ) : null}
           {section.file && !section.file.diff && !section.imagePreview ? (
-            <div className="diff-content-state">No textual diff available.</div>
+            <div className="diff-content-state">
+              {t("No textual diff available.")}
+            </div>
           ) : null}
           {section.imagePreview && section.file ? (
             <DiffImagePreview
@@ -684,7 +693,9 @@ const DiffFileSection = memo(function DiffFileSection({
             />
           ) : null}
           {section.file?.truncated ? (
-            <div className="diff-truncated">Diff truncated at 512 KB.</div>
+            <div className="diff-truncated">
+              {t("Diff truncated at 512 KB.")}
+            </div>
           ) : null}
           {section.file?.diff && !section.imagePreview ? (
             <div className="pierre-diff-surface">
@@ -708,14 +719,14 @@ const DiffFileSection = memo(function DiffFileSection({
                     <button
                       type="button"
                       className={`diff-review-annotation ${metadata.stale ? "is-stale" : ""}`}
-                      title="Open review comment"
+                      title={t("Open review comment")}
                       onClick={(event) => {
                         event.stopPropagation();
                         onEditAnnotation?.(metadata.id);
                       }}
                     >
                       <MessageSquareText size={13} />
-                      <span>{metadata.comment || "Review comment"}</span>
+                      <span>{metadata.comment || t("Review comment")}</span>
                     </button>
                   )}
                 />
@@ -976,7 +987,7 @@ export function DiffContentView({
       ? {
           x: pendingAnnotation.x,
           y: pendingAnnotation.y,
-          title: `${pendingAnnotation.path} · ${diffReviewLineLabel(pendingAnnotation)}`,
+          title: `${pendingAnnotation.path} · ${diffReviewLineDisplayLabel(pendingAnnotation)}`,
           quote: pendingAnnotation.quote,
         }
       : null;
@@ -1299,7 +1310,7 @@ export function DiffContentView({
       className={`diff-content-view ${embedded ? "is-embedded" : ""} ${
         mobile ? "is-mobile" : ""
       }`}
-      aria-label={embedded ? "File changes" : "Diff Viewer content"}
+      aria-label={embedded ? t("File changes") : t("Diff Viewer content")}
       tabIndex={-1}
       onKeyDownCapture={(e) => {
         if (
@@ -1329,11 +1340,11 @@ export function DiffContentView({
         {embedded ? null : (
           <div className="diff-content-title">
             <strong>
-              {changedFileCount
-                ? `${changedFileCount} changed file${
-                    changedFileCount === 1 ? "" : "s"
-                  }`
-                : "Diff Viewer"}
+              {changedFileCount === 1
+                ? t("1 changed file")
+                : changedFileCount
+                  ? t("{count} changed files", { count: changedFileCount })
+                  : t("Diff Viewer")}
             </strong>
           </div>
         )}
@@ -1342,34 +1353,41 @@ export function DiffContentView({
             aria-pressed={mobileWrap}
             onClick={() => setMobileWrap((value) => !value)}
           >
-            Wrap
+            {t("Wrap")}
           </Button>
         ) : null}
         <div className="diff-content-actions">
           {hunkTargets.length ? (
             <div
               className="diff-hunk-navigation"
-              aria-label="Change navigation"
+              aria-label={t("Change navigation")}
             >
               <button
                 type="button"
                 onClick={() => goToHunk(-1)}
-                aria-label="Previous change"
-                title="Previous change"
+                aria-label={t("Previous change")}
+                title={t("Previous change")}
               >
                 <ChevronUp size={14} />
               </button>
               <span>
-                {hunkIndex < 0 ? "–" : hunkIndex + 1}/{hunkTargets.length}
                 {mobile
-                  ? ""
-                  : ` ${hunkTargets.length === 1 ? "change" : "changes"}`}
+                  ? `${hunkIndex < 0 ? "–" : hunkIndex + 1}/${hunkTargets.length}`
+                  : hunkTargets.length === 1
+                    ? t("{position}/{total} change", {
+                        position: hunkIndex < 0 ? "–" : hunkIndex + 1,
+                        total: hunkTargets.length,
+                      })
+                    : t("{position}/{total} changes", {
+                        position: hunkIndex < 0 ? "–" : hunkIndex + 1,
+                        total: hunkTargets.length,
+                      })}
               </span>
               <button
                 type="button"
                 onClick={() => goToHunk(1)}
-                aria-label="Next change"
-                title="Next change"
+                aria-label={t("Next change")}
+                title={t("Next change")}
               >
                 <ChevronDown size={14} />
               </button>
@@ -1394,7 +1412,7 @@ export function DiffContentView({
                       setSearchQuery("");
                     }
                   }}
-                  placeholder="Find loaded files"
+                  placeholder={t("Find loaded files")}
                   disabled={!hasSearchableDiff}
                 />
               </label>
@@ -1406,7 +1424,7 @@ export function DiffContentView({
                 {deferredSearchQuery && searchMatchCount
                   ? `${searchIndex + 1}/${searchMatchCount}`
                   : deferredSearchQuery
-                    ? "No results"
+                    ? t("No results")
                     : ""}
               </span>
               <button
@@ -1414,7 +1432,7 @@ export function DiffContentView({
                 className="diff-search-button"
                 onClick={() => goToSearchMatch(-1)}
                 disabled={!searchMatchCount}
-                aria-label="Previous matching loaded file"
+                aria-label={t("Previous matching loaded file")}
               >
                 <ChevronUp size={14} />
               </button>
@@ -1423,7 +1441,7 @@ export function DiffContentView({
                 className="diff-search-button"
                 onClick={() => goToSearchMatch(1)}
                 disabled={!searchMatchCount}
-                aria-label="Next matching loaded file"
+                aria-label={t("Next matching loaded file")}
               >
                 <ChevronDown size={14} />
               </button>
@@ -1435,7 +1453,7 @@ export function DiffContentView({
                     setSearchQuery("");
                     focusSearch();
                   }}
-                  aria-label="Clear diff search"
+                  aria-label={t("Clear diff search")}
                 >
                   <X size={14} />
                 </button>
@@ -1447,19 +1465,19 @@ export function DiffContentView({
           <div className="diff-display-controls">
             <SegmentedControl
               className="diff-view-toggle"
-              aria-label="Diff view mode"
+              aria-label={t("Diff view mode")}
               value={viewMode}
               onChange={setViewMode}
               options={[
-                { value: "split", label: "Split" },
-                { value: "unified", label: "Unified" },
+                { value: "split", label: t("Split") },
+                { value: "unified", label: t("Unified") },
               ]}
             />
             <Button
               aria-pressed={desktopWrap}
               onClick={() => setDesktopWrap((value) => !value)}
             >
-              Wrap
+              {t("Wrap")}
             </Button>
           </div>
         ) : null}
@@ -1471,11 +1489,11 @@ export function DiffContentView({
       {summaryLoading && !visibleEntries.length ? (
         <div className="diff-content-state">
           <span className="file-loading-spinner" />
-          Loading diff
+          {t("Loading diff")}
         </div>
       ) : null}
       {!summaryLoading && !error && !visibleEntries.length ? (
-        <div className="diff-content-state">No changed files.</div>
+        <div className="diff-content-state">{t("No changed files.")}</div>
       ) : null}
       {hasExpandedTextDiff && diffList ? (
         <WorkerPoolContextProvider

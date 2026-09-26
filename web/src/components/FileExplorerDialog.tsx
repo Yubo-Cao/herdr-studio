@@ -39,6 +39,7 @@ import {
   subscribeFileExplorerRefresh,
 } from "../fileExplorerRefresh";
 import { store, useStoreSelector } from "../store";
+import { t } from "../i18n";
 import { copyTextFromUserGesture } from "../terminalClipboard";
 import { useConnectionClient } from "../useConnectionClient";
 import type {
@@ -123,7 +124,7 @@ export function FileExplorerDialog({
         className="modal file-explorer-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="File Explorer"
+        aria-label={t("File Explorer")}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <FileExplorerContent
@@ -166,7 +167,7 @@ export function FileExplorerPanel({
   if (!open) return null;
 
   return (
-    <aside className="file-explorer-side" aria-label="File Explorer">
+    <aside className="file-explorer-side" aria-label={t("File Explorer")}>
       <FileExplorerContent
         open={open}
         workspaceId={workspaceId}
@@ -247,14 +248,14 @@ function FileExplorerEntryMenu({
               : (currentIndex - 1 + buttons.length) % buttons.length;
       buttons[nextIndex]?.focus();
     };
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       window.addEventListener("mousedown", onDown);
       window.addEventListener("keydown", onKey);
       window.addEventListener("scroll", close, true);
       ref.current?.querySelector<HTMLButtonElement>("button")?.focus();
     }, 0);
     return () => {
-      clearTimeout(t);
+      clearTimeout(timer);
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("scroll", close, true);
@@ -270,11 +271,11 @@ function FileExplorerEntryMenu({
   // Keep ENTRY_MENU_ITEM_COUNT in sync with this array.
   const items = [
     {
-      label: isDirectory ? "Download directory" : "Download file",
+      label: isDirectory ? t("Download directory") : t("Download file"),
       action: () => onDownload(entry),
     },
     {
-      label: "Copy absolute path",
+      label: t("Copy absolute path"),
       action: () => onCopy(entry),
     },
     ...(onDelete
@@ -282,10 +283,10 @@ function FileExplorerEntryMenu({
           {
             label:
               entry.type === "symlink"
-                ? "Delete symlink"
+                ? t("Delete symlink")
                 : isDirectory
-                  ? "Delete directory"
-                  : "Delete file",
+                  ? t("Delete directory")
+                  : t("Delete file"),
             danger: true,
             action: () => onDelete(entry),
           },
@@ -1022,7 +1023,7 @@ function FileExplorerContent({
       if (!connectionClient.isCurrent()) return;
       store.notify({
         kind: "success",
-        message: "Path copied",
+        message: t("Path copied"),
         detail: value,
         autoDismissMs: 5000,
       });
@@ -1030,7 +1031,7 @@ function FileExplorerContent({
       if (!connectionClient.isCurrent()) return;
       store.notify({
         kind: "error",
-        message: "Failed to copy path",
+        message: t("Failed to copy path"),
         detail: (e as Error).message,
       });
     }
@@ -1059,7 +1060,7 @@ function FileExplorerContent({
         if (result === "shared" || !connectionClient.isCurrent()) return;
         store.notify({
           kind: "info",
-          message: "Download started",
+          message: t("Download started"),
           detail: entry.path,
           autoDismissMs: 5000,
         });
@@ -1164,10 +1165,10 @@ function FileExplorerContent({
         kind: "success",
         message:
           entry.type === "symlink"
-            ? "Symlink deleted"
+            ? t("Symlink deleted")
             : entry.type === "directory"
-              ? "Directory deleted"
-              : "File deleted",
+              ? t("Directory deleted")
+              : t("File deleted"),
         detail: entry.path,
         autoDismissMs: 5000,
       });
@@ -1175,7 +1176,7 @@ function FileExplorerContent({
       if (!runtimeContextIsCurrent(requestContext)) return;
       store.notify({
         kind: "error",
-        message: "Delete failed",
+        message: t("Delete failed"),
         detail: (e as Error).message,
       });
     } finally {
@@ -1230,7 +1231,7 @@ function FileExplorerContent({
       store.notify({
         kind: "error",
         message:
-          kind === "file" ? "Cannot create file" : "Cannot create folder",
+          kind === "file" ? t("Cannot create file") : t("Cannot create folder"),
         detail: (e as Error).message,
       });
     }
@@ -1300,18 +1301,21 @@ function FileExplorerContent({
       const uploaded = results.length;
       store.notify({
         kind: "success",
-        message: uploaded === 1 ? "File uploaded" : "Files uploaded",
+        message: uploaded === 1 ? t("File uploaded") : t("Files uploaded"),
         detail:
           uploaded === 1
             ? uploadFiles[0]?.name
-            : `${uploaded} files uploaded to ${directory || "/"}`,
+            : t("{count} files uploaded to {path}", {
+                count: uploaded,
+                path: directory || "/",
+              }),
         autoDismissMs: 5000,
       });
     } catch (e) {
       if (!runtimeContextIsCurrent(requestContext)) return;
       store.notify({
         kind: "error",
-        message: "Upload failed",
+        message: t("Upload failed"),
         detail: (e as Error).message,
       });
     } finally {
@@ -1400,8 +1404,8 @@ function FileExplorerContent({
     if (entry.type === "symlink" && entry.symlink_status === "broken") {
       store.notify({
         kind: "error",
-        message: "Cannot open symlink",
-        detail: "The symlink target does not exist or cannot be resolved.",
+        message: t("Cannot open symlink"),
+        detail: t("The symlink target does not exist or cannot be resolved."),
       });
       return;
     }
@@ -1566,7 +1570,7 @@ function FileExplorerContent({
                 ?.focus({ preventScroll: true });
               if (isDirectory) toggleDirectory(entry.path);
             }}
-            aria-label={isExpanded ? "Collapse folder" : "Expand folder"}
+            aria-label={isExpanded ? t("Collapse folder") : t("Expand folder")}
           >
             {isDirectory ? (
               isExpanded ? (
@@ -1590,7 +1594,9 @@ function FileExplorerContent({
           <span
             className="file-name"
             title={
-              entry.ignored ? `${entry.path} · Ignored by Git` : entry.path
+              entry.ignored
+                ? t("{path} · Ignored by Git", { path: entry.path })
+                : entry.path
             }
           >
             {entry.name}
@@ -1622,8 +1628,8 @@ function FileExplorerContent({
               type="button"
               className="ghost file-action"
               tabIndex={-1}
-              title="File actions"
-              aria-label="File actions"
+              title={t("File actions")}
+              aria-label={t("File actions")}
               aria-haspopup="menu"
               onClick={(e) => {
                 e.stopPropagation();
@@ -1661,7 +1667,7 @@ function FileExplorerContent({
           }}
         >
           <span className="file-loading-spinner" />
-          <span className="file-loading-text">Loading directory</span>
+          <span className="file-loading-text">{t("Loading directory")}</span>
         </div>
       );
     }
@@ -1674,7 +1680,7 @@ function FileExplorerContent({
             paddingLeft: FILE_TREE_BASE_INDENT + depth * FILE_TREE_INDENT,
           }}
         >
-          Empty
+          {t("Empty")}
         </div>
       );
     }
@@ -1684,7 +1690,7 @@ function FileExplorerContent({
   };
 
   const renderInitialLoading = () => (
-    <div className="file-skeleton-list" aria-label="Loading files">
+    <div className="file-skeleton-list" aria-label={t("Loading files")}>
       {Array.from({ length: 5 }, (_, index) => (
         <div className="file-skeleton-row" key={index}>
           <span className="file-skeleton-icon" />
@@ -1702,7 +1708,7 @@ function FileExplorerContent({
       {showCloseButton ? (
         <>
           <div className="modal-head">
-            <h2>File Explorer</h2>
+            <h2>{t("File Explorer")}</h2>
             <CloseButton onClick={onClose} />
           </div>
           {workspace ? (
@@ -1710,7 +1716,7 @@ function FileExplorerContent({
               <span>{workspaceName(workspace)}</span>
               <code>
                 {rootInfo?.root ??
-                  (initialWorkspacePath(workspace) || "Loading path...")}
+                  (initialWorkspacePath(workspace) || t("Loading path..."))}
               </code>
             </div>
           ) : null}
@@ -1718,7 +1724,7 @@ function FileExplorerContent({
       ) : null}
 
       {!workspace ? (
-        <p className="modal-error">No workspace is focused.</p>
+        <p className="modal-error">{t("No workspace is focused.")}</p>
       ) : null}
 
       <div className="file-explorer-content">
@@ -1727,19 +1733,19 @@ function FileExplorerContent({
             <div className="ui-bar file-explorer-modebar">
               <SegmentedControl
                 className="file-explorer-mode-switch"
-                aria-label="Explorer scope"
+                aria-label={t("Explorer scope")}
                 value={filesystem ? "filesystem" : "workspace"}
                 onChange={setExplorerMode}
                 options={[
                   {
                     value: "workspace",
-                    label: "Workspace",
-                    title: "Browse this workspace checkout",
+                    label: t("Workspace"),
+                    title: t("Browse this workspace checkout"),
                   },
                   {
                     value: "filesystem",
-                    label: "Filesystem",
-                    title: "Browse any path on the connected host",
+                    label: t("Filesystem"),
+                    title: t("Browse any path on the connected host"),
                   },
                 ]}
               />
@@ -1780,9 +1786,11 @@ function FileExplorerContent({
                     onChange={(e) =>
                       updateCache({ search: e.currentTarget.value })
                     }
-                    placeholder="Search loaded files"
-                    aria-label="Search loaded files"
-                    title="Search loaded names or paths. Globs: r*md, ?.txt, **/*.md, *.{md,txt}"
+                    placeholder={t("Search loaded files")}
+                    aria-label={t("Search loaded files")}
+                    title={t(
+                      "Search loaded names or paths. Globs: r*md, ?.txt, **/*.md, *.{md,txt}",
+                    )}
                     maxLength={512}
                   />
                 </label>
@@ -1792,12 +1800,12 @@ function FileExplorerContent({
                     checked={showHidden}
                     onChange={(e) => setShowHidden(e.currentTarget.checked)}
                   />
-                  Hidden
+                  {t("Hidden")}
                 </label>
                 <Button
                   icon
-                  title="New file"
-                  aria-label="New file"
+                  title={t("New file")}
+                  aria-label={t("New file")}
                   disabled={!workspace}
                   onClick={() => setCreatingEntry("file")}
                 >
@@ -1805,8 +1813,8 @@ function FileExplorerContent({
                 </Button>
                 <Button
                   icon
-                  title="New folder"
-                  aria-label="New folder"
+                  title={t("New folder")}
+                  aria-label={t("New folder")}
                   disabled={!workspace}
                   onClick={() => setCreatingEntry("directory")}
                 >
@@ -1815,7 +1823,7 @@ function FileExplorerContent({
                 <button
                   type="button"
                   className="ghost file-action"
-                  title="Refresh"
+                  title={t("Refresh")}
                   disabled={!workspace}
                   onClick={() => {
                     const pathsToRefresh = Array.from(expanded);
@@ -1838,7 +1846,7 @@ function FileExplorerContent({
               {error ? <p className="modal-error">{error}</p> : null}
               {rootInfo?.truncated ? (
                 <p className="modal-error">
-                  This directory is truncated at 1000 entries.
+                  {t("This directory is truncated at 1000 entries.")}
                 </p>
               ) : null}
 
@@ -1867,12 +1875,12 @@ function FileExplorerContent({
                 {uploadingPaths.has("") ? (
                   <div className="file-upload-status">
                     <span className="row-spinner" />
-                    Uploading to workspace root
+                    {t("Uploading to workspace root")}
                   </div>
                 ) : dropTargetPath === "" ? (
                   <div className="file-upload-status">
                     <Upload size={14} />
-                    Drop files to upload to workspace root
+                    {t("Drop files to upload to workspace root")}
                   </div>
                 ) : null}
                 {query ? (
@@ -1882,7 +1890,7 @@ function FileExplorerContent({
                     )
                   ) : (
                     <div className="file-row file-row-muted">
-                      No loaded files match.
+                      {t("No loaded files match.")}
                     </div>
                   )
                 ) : !children[""] && loadingPaths.has("") ? (
@@ -1895,7 +1903,9 @@ function FileExplorerContent({
           )}
         </div>
         {previewPlacement === "inline" ? (
-          <Suspense fallback={<div role="status">Loading preview...</div>}>
+          <Suspense
+            fallback={<div role="status">{t("Loading preview...")}</div>}
+          >
             <FilePreviewContent
               entry={previewEntry}
               preview={preview}
@@ -1934,12 +1944,12 @@ function FileExplorerContent({
       />
       <TextInputDialog
         open={creatingEntry !== null}
-        title={creatingEntry === "directory" ? "New Folder" : "New File"}
-        label="Path relative to the workspace root"
+        title={creatingEntry === "directory" ? t("New Folder") : t("New File")}
+        label={t("Path relative to the workspace root")}
         placeholder={
           creatingEntry === "directory" ? "src/components" : "src/notes.md"
         }
-        submitLabel="Create"
+        submitLabel={t("Create")}
         onClose={() => setCreatingEntry(null)}
         onSubmit={(value) => {
           const kind = creatingEntry;
@@ -1951,17 +1961,27 @@ function FileExplorerContent({
         open={!!pendingDeleteEntry}
         title={
           pendingDeleteEntry?.type === "symlink"
-            ? "Delete Symlink"
+            ? t("Delete Symlink")
             : pendingDeleteEntry && isExplorerDirectoryEntry(pendingDeleteEntry)
-              ? "Delete Directory"
-              : "Delete File"
+              ? t("Delete Directory")
+              : t("Delete File")
         }
         message={
-          pendingDeleteEntry
-            ? `Delete ${pendingDeleteEntry.type === "symlink" ? "symlink" : pendingDeleteEntry.type === "directory" ? "directory" : "file"} "${pendingDeleteEntry.path}"? This cannot be undone.`
-            : "Delete this item?"
+          !pendingDeleteEntry
+            ? t("Delete this item?")
+            : pendingDeleteEntry.type === "symlink"
+              ? t('Delete symlink "{path}"? This cannot be undone.', {
+                  path: pendingDeleteEntry.path,
+                })
+              : pendingDeleteEntry.type === "directory"
+                ? t('Delete directory "{path}"? This cannot be undone.', {
+                    path: pendingDeleteEntry.path,
+                  })
+                : t('Delete file "{path}"? This cannot be undone.', {
+                    path: pendingDeleteEntry.path,
+                  })
         }
-        confirmLabel="Delete"
+        confirmLabel={t("Delete")}
         danger
         onClose={() => setPendingDeleteEntry(null)}
         onConfirm={() => {

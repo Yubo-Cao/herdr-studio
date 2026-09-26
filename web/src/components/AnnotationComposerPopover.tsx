@@ -5,6 +5,7 @@ import {
 } from "../shortcutPreferences";
 import { useLayoutEffect, useRef, useState, type FormEvent } from "react";
 import { createPortal } from "react-dom";
+import { t } from "../i18n";
 import "./AnnotationComposerPopover.css";
 
 export type AnnotationComposerDraft = {
@@ -119,7 +120,7 @@ export function AnnotationComposerPopover({
       className="annotation-composer-popover"
       style={{ left: position.x, top: position.y }}
       role="dialog"
-      aria-label="Add review comment"
+      aria-label={t("Add review comment")}
       onSubmit={submit}
       onKeyDown={(event) => {
         event.stopPropagation();
@@ -150,25 +151,29 @@ export function AnnotationComposerPopover({
       }}
     >
       <strong>{draft.title}</strong>
-      <blockquote>{draft.quote || "Blank line"}</blockquote>
+      <blockquote>{draft.quote || t("Blank line")}</blockquote>
       <textarea
         ref={textareaRef}
         value={comment}
         onChange={(event) => setComment(event.currentTarget.value)}
-        aria-label="Review comment"
-        placeholder="Add a review comment"
+        aria-label={t("Review comment")}
+        placeholder={t("Add a review comment")}
         rows={3}
         maxLength={10_000}
       />
       <div className="annotation-composer-actions">
         <button type="button" className="ghost" onClick={close}>
-          Cancel
+          {t("Cancel")}
         </button>
         <button type="submit" disabled={!comment.trim()}>
-          Add comment
+          {t("Add comment")}
         </button>
       </div>
-      <small>{shortcutLabel("annotation.submit")} to add</small>
+      <small>
+        {t("{shortcut} to add", {
+          shortcut: shortcutLabel("annotation.submit"),
+        })}
+      </small>
     </form>,
     document.body,
   );

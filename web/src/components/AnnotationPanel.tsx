@@ -11,12 +11,14 @@ import {
 } from "lucide-react";
 import { useEffect, useState } from "react";
 import {
-  diffReviewLineLabel,
-  fileReviewLineLabel,
+  diffReviewLineDisplayLabel,
+  fileReviewLineDisplayLabel,
   terminalAnnotationTitle,
   type ReviewAnnotation,
 } from "../annotations";
+import { t } from "../i18n";
 import {
+  getShortcutSnapshot,
   shortcutLabel,
   shortcutMatches,
   shortcutTitle,
@@ -29,16 +31,27 @@ import "./AnnotationPanel.css";
 
 function annotationLocation(annotation: ReviewAnnotation) {
   if (annotation.source === "terminal")
-    return `Terminal · ${annotation.title} · selected passage`;
+    return t("Terminal · {title} · selected passage", {
+      title: annotation.title,
+    });
   if (annotation.source === "diff") {
-    return `Diff · ${annotation.path} · ${diffReviewLineLabel(annotation)}`;
+    return t("Diff · {path} · {lines}", {
+      path: annotation.path,
+      lines: diffReviewLineDisplayLabel(annotation),
+    });
   }
   if (annotation.anchor === "line") {
-    return `File · ${annotation.path} · ${fileReviewLineLabel(annotation)}`;
+    return t("File · {path} · {lines}", {
+      path: annotation.path,
+      lines: fileReviewLineDisplayLabel(annotation),
+    });
   }
   return annotation.section.length
-    ? `Markdown · ${annotation.path} · ${annotation.section.join(" › ")}`
-    : `Markdown · ${annotation.path} · selected passage`;
+    ? t("Markdown · {path} · {section}", {
+        path: annotation.path,
+        section: annotation.section.join(" › "),
+      })
+    : t("Markdown · {path} · selected passage", { path: annotation.path });
 }
 
 function paneLabel(pane: Pane) {
@@ -83,6 +96,9 @@ export function AnnotationPanel({
   useShortcutPreferences();
   const copyShortcut = shortcutLabel("annotations.copy");
   const prefillShortcut = shortcutLabel("annotations.prefill");
+  const { bindings } = getShortcutSnapshot().preset;
+  const hasCopyShortcut = bindings["annotations.copy"].length > 0;
+  const hasPrefillShortcut = bindings["annotations.prefill"].length > 0;
   const hasFeedback = annotations.some((annotation) =>
     annotation.comment.trim(),
   );
@@ -125,7 +141,7 @@ export function AnnotationPanel({
   return (
     <aside
       className={`annotation-panel ${floating ? "is-floating" : ""}`}
-      aria-label="Review annotations"
+      aria-label={t("Review annotations")}
       onKeyDown={(event) => {
         if (
           event.defaultPrevented ||
@@ -149,18 +165,21 @@ export function AnnotationPanel({
     >
       <header className="annotation-panel-head">
         <div>
-          <strong>Review feedback</strong>
+          <strong>{t("Review feedback")}</strong>
           <span>
-            {annotations.length} comment
-            {annotations.length === 1 ? "" : "s"}
+            {annotations.length === 1
+              ? t("1 comment")
+              : t("{count} comments", { count: annotations.length })}
           </span>
         </div>
         {onToggleFloating ? (
           <button
             type="button"
             className="annotation-icon-button annotation-mode-button"
-            aria-label={floating ? "Pin annotations" : "Float annotations"}
-            title={floating ? "Fixed layout" : "Floating layout"}
+            aria-label={
+              floating ? t("Pin annotations") : t("Float annotations")
+            }
+            title={floating ? t("Fixed layout") : t("Floating layout")}
             aria-pressed={!floating}
             onClick={onToggleFloating}
           >
@@ -170,8 +189,8 @@ export function AnnotationPanel({
         <button
           type="button"
           className="annotation-icon-button"
-          aria-label="Close review feedback"
-          title="Close"
+          aria-label={t("Close review feedback")}
+          title={t("Close")}
           onClick={onClose}
         >
           <X size={16} />
@@ -182,10 +201,11 @@ export function AnnotationPanel({
         {annotations.length === 0 ? (
           <div className="annotation-panel-empty">
             <MessageSquareText size={24} />
-            <strong>No review comments yet</strong>
+            <strong>{t("No review comments yet")}</strong>
             <span>
-              Click or drag across diff line numbers or a source gutter, or
-              select rendered Markdown or terminal text.
+              {t(
+                "Click or drag across diff line numbers or a source gutter, or select rendered Markdown or terminal text.",
+              )}
             </span>
           </div>
         ) : (
@@ -204,22 +224,24 @@ export function AnnotationPanel({
                 {annotation.stale ? (
                   <span>
                     {annotation.source === "terminal"
-                      ? "Pane unavailable"
-                      : "Stale anchor"}
+                      ? t("Pane unavailable")
+                      : t("Stale anchor")}
                   </span>
                 ) : null}
               </div>
               <blockquote
                 tabIndex={0}
-                aria-label={`Selected text for comment ${index + 1}`}
+                aria-label={t("Selected text for comment {number}", {
+                  number: index + 1,
+                })}
               >
-                {annotation.quote || "Blank line"}
+                {annotation.quote || t("Blank line")}
               </blockquote>
               <textarea
                 value={annotation.comment}
                 rows={3}
                 maxLength={10_000}
-                aria-label={`Comment ${index + 1}`}
+                aria-label={t("Comment {number}", { number: index + 1 })}
                 onChange={(event) =>
                   onUpdateComment(annotation.id, event.currentTarget.value)
                 }
@@ -229,8 +251,10 @@ export function AnnotationPanel({
                   type="button"
                   className="annotation-icon-button"
                   disabled={index === 0}
-                  aria-label={`Move comment ${index + 1} up`}
-                  title="Move up"
+                  aria-label={t("Move comment {number} up", {
+                    number: index + 1,
+                  })}
+                  title={t("Move up")}
                   onClick={() => onMove(annotation.id, -1)}
                 >
                   <ArrowUp size={14} />
@@ -239,8 +263,10 @@ export function AnnotationPanel({
                   type="button"
                   className="annotation-icon-button"
                   disabled={index === annotations.length - 1}
-                  aria-label={`Move comment ${index + 1} down`}
-                  title="Move down"
+                  aria-label={t("Move comment {number} down", {
+                    number: index + 1,
+                  })}
+                  title={t("Move down")}
                   onClick={() => onMove(annotation.id, 1)}
                 >
                   <ArrowDown size={14} />
@@ -248,8 +274,10 @@ export function AnnotationPanel({
                 <button
                   type="button"
                   className="annotation-icon-button is-danger"
-                  aria-label={`Delete comment ${index + 1}`}
-                  title="Delete"
+                  aria-label={t("Delete comment {number}", {
+                    number: index + 1,
+                  })}
+                  title={t("Delete")}
                   onClick={() => onDelete(annotation.id)}
                 >
                   <Trash2 size={14} />
@@ -263,9 +291,9 @@ export function AnnotationPanel({
       <footer className="annotation-panel-footer">
         {agentPanes.length > 1 ? (
           <label className="annotation-target-picker">
-            <span>Agent pane</span>
+            <span>{t("Agent pane")}</span>
             <ThemedSelect
-              aria-label="Agent pane"
+              aria-label={t("Agent pane")}
               value={targetPaneId}
               options={agentPanes.map((pane) => ({
                 value: pane.pane_id,
@@ -276,11 +304,11 @@ export function AnnotationPanel({
           </label>
         ) : agentPanes.length === 1 ? (
           <div className="annotation-target-summary">
-            Agent pane: {paneLabel(agentPanes[0])}
+            {t("Agent pane: {pane}", { pane: paneLabel(agentPanes[0]) })}
           </div>
         ) : (
           <div className="annotation-target-summary">
-            No agent pane; Send uses the clipboard.
+            {t("No agent pane; Send uses the clipboard.")}
           </div>
         )}
         <div className="annotation-delivery-actions">
@@ -289,30 +317,28 @@ export function AnnotationPanel({
             className="ghost"
             disabled={busy || !hasFeedback}
             onClick={onCopy}
-            title={shortcutTitle("Copy review feedback", "annotations.copy")}
+            title={shortcutTitle(t("Copy review feedback"), "annotations.copy")}
           >
-            <Clipboard size={14} /> Copy
-            {copyShortcut !== "Unassigned" ? <kbd>{copyShortcut}</kbd> : null}
+            <Clipboard size={14} /> {t("Copy")}
+            {hasCopyShortcut ? <kbd>{copyShortcut}</kbd> : null}
           </button>
           <button
             type="button"
             disabled={busy || !hasFeedback}
             onClick={() => onSend(targetPaneId || null)}
             title={shortcutTitle(
-              agentPanes.length ? "Pre-fill agent" : "Copy feedback",
+              agentPanes.length ? t("Pre-fill agent") : t("Copy feedback"),
               "annotations.prefill",
             )}
           >
             {agentPanes.length ? <Send size={14} /> : <Clipboard size={14} />}
-            {agentPanes.length ? "Pre-fill agent" : "Copy feedback"}
-            {prefillShortcut !== "Unassigned" ? (
-              <kbd>{prefillShortcut}</kbd>
-            ) : null}
+            {agentPanes.length ? t("Pre-fill agent") : t("Copy feedback")}
+            {hasPrefillShortcut ? <kbd>{prefillShortcut}</kbd> : null}
           </button>
         </div>
         {onGoToAgent ? (
           <button type="button" className="ghost" onClick={onGoToAgent}>
-            Go to agent
+            {t("Go to agent")}
           </button>
         ) : null}
         <button
@@ -321,14 +347,14 @@ export function AnnotationPanel({
           disabled={busy || annotations.length === 0}
           onClick={() => setConfirmClear(true)}
         >
-          Clear draft
+          {t("Clear draft")}
         </button>
       </footer>
       <ConfirmDialog
         open={confirmClear}
-        title="Clear review feedback?"
-        message="This removes every unsent review comment from this draft."
-        confirmLabel="Clear feedback"
+        title={t("Clear review feedback?")}
+        message={t("This removes every unsent review comment from this draft.")}
+        confirmLabel={t("Clear feedback")}
         danger
         onConfirm={onClear}
         onClose={() => setConfirmClear(false)}

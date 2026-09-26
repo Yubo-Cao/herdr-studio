@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { useCallback, useLayoutEffect, useRef, useState } from "react";
 import {
   annotationDraftStorageKey,
@@ -65,9 +66,10 @@ export function useReviewAnnotationDraft(runtimeKey: string) {
       if (!persisted && !storageFailed.current) {
         store.notify({
           kind: "error",
-          message: "Review draft could not be saved",
-          detail:
+          message: t("Review draft could not be saved"),
+          detail: t(
             "Browser storage is unavailable. Keep this page open or copy the feedback now.",
+          ),
         });
       }
       storageFailed.current = !persisted;

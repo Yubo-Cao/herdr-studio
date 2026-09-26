@@ -4,6 +4,7 @@ import { connectionHttpPath } from "../connectionHttp";
 import { connectionStorageKey } from "../connectionStorage";
 import { gitDiffCode, type GitDiffCode } from "../gitDiffStatus";
 import { retireGitDiffSummaryResource } from "../gitDiffSummaryStore";
+import { t } from "../i18n";
 import { connectionClientScopeKey } from "../useConnectionClient";
 import type {
   FileExplorerEntry,
@@ -386,22 +387,41 @@ function gitStatusTone(entry: Pick<GitDiffEntry, "kind" | "status">) {
 }
 
 function gitStatusLabel(entry: Pick<GitDiffEntry, "kind" | "status">) {
-  if (entry.kind === "conflicted") return "Conflict";
-  if (entry.kind === "untracked") return "Untracked";
+  if (entry.kind === "conflicted") return t("Conflict");
+  if (entry.kind === "untracked") return t("Untracked");
   switch (entry.status) {
     case "added":
-      return "Added";
+      return t("Added");
     case "deleted":
-      return "Deleted";
+      return t("Deleted");
     case "renamed":
-      return "Renamed";
+      return t("Renamed");
     case "copied":
-      return "Copied";
+      return t("Copied");
     case "type changed":
-      return "Type changed";
+      return t("Type changed");
     case "modified":
     default:
-      return "Modified";
+      return t("Modified");
+  }
+}
+
+function gitStatusDescription(status: string) {
+  switch (status) {
+    case "added":
+      return t("added");
+    case "deleted":
+      return t("deleted");
+    case "renamed":
+      return t("renamed");
+    case "copied":
+      return t("copied");
+    case "type changed":
+      return t("type changed");
+    case "modified":
+      return t("modified");
+    default:
+      return status;
   }
 }
 
@@ -417,15 +437,15 @@ function gitStatusPriority(entry: Pick<GitDiffEntry, "kind" | "status">) {
 function gitKindLabel(kind: GitDiffKind) {
   switch (kind) {
     case "staged":
-      return "staged";
+      return t("staged");
     case "unstaged":
-      return "unstaged";
+      return t("unstaged");
     case "untracked":
-      return "untracked";
+      return t("untracked");
     case "conflicted":
-      return "conflicted";
+      return t("conflicted");
     case "branch":
-      return "branch";
+      return t("branch");
     default:
       return kind;
   }
@@ -459,7 +479,10 @@ export function buildGitStatusMaps(
     const entries = [...(existing?.entries ?? []), entry];
     const next: FileGitStatus = {
       label: gitStatusLabel(entry),
-      title: `${gitKindLabel(entry.kind)} ${entry.status}`,
+      title: t("{kind} {status}", {
+        kind: gitKindLabel(entry.kind),
+        status: gitStatusDescription(entry.status),
+      }),
       tone: gitStatusTone(entry),
       priority: gitStatusPriority(entry),
       entry,
@@ -507,8 +530,11 @@ export function buildGitStatusMaps(
   for (const [path, changedFiles] of directoryChangedFiles) {
     const count = changedFiles.size;
     directoryStatuses.set(path, {
-      label: `${count} ${count === 1 ? "change" : "changes"}`,
-      title: `${count} changed ${count === 1 ? "file" : "files"} below this directory`,
+      label: count === 1 ? t("1 change") : t("{count} changes", { count }),
+      title:
+        count === 1
+          ? t("1 changed file below this directory")
+          : t("{count} changed files below this directory", { count }),
       tone: "directory",
       priority: 10,
       count,
@@ -575,11 +601,12 @@ export function isFilesystemPath(path: string) {
 
 export function symlinkDescription(entry: FileExplorerEntry) {
   if (entry.type !== "symlink" && !entry.symlink_status) return "";
-  if (entry.symlink_status === "external") return "external symlink";
-  if (entry.symlink_status === "broken") return "broken symlink";
-  if (entry.symlink_target_type === "directory") return "symlink to directory";
-  if (entry.symlink_target_type === "file") return "symlink to file";
-  return "symlink";
+  if (entry.symlink_status === "external") return t("external symlink");
+  if (entry.symlink_status === "broken") return t("broken symlink");
+  if (entry.symlink_target_type === "directory")
+    return t("symlink to directory");
+  if (entry.symlink_target_type === "file") return t("symlink to file");
+  return t("symlink");
 }
 
 export type ExplorerViewMemory = {

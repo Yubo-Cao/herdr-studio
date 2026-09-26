@@ -23,6 +23,7 @@ import {
 } from "react";
 import type { ConnectionClient } from "../api";
 import { roamgateLocalStorage } from "../browserStorage";
+import { t } from "../i18n";
 import {
   type NewReviewAnnotation,
   type ReviewAnnotation,
@@ -72,7 +73,7 @@ function changedCount(workspace?: Workspace) {
 }
 
 function checkoutLabel(workspace?: Workspace) {
-  if (!workspace) return "Unavailable checkout";
+  if (!workspace) return t("Unavailable checkout");
   return (
     workspace.worktree?.git_status?.branch ||
     workspace.worktree?.repo_name ||
@@ -153,13 +154,13 @@ function InspectorSplitResizer({
       className="workspace-inspector-split-resizer"
       role="separator"
       tabIndex={0}
-      aria-label="Resize file navigation"
+      aria-label={t("Resize file navigation")}
       aria-orientation="vertical"
       aria-controls={`${navigationId} ${detailId}`}
       aria-valuemin={15}
       aria-valuemax={75}
       aria-valuenow={Math.round(ratio * 100)}
-      title="Drag to resize; double-click to reset"
+      title={t("Drag to resize; double-click to reset")}
       onPointerDown={(event) => {
         event.preventDefault();
         event.currentTarget.setPointerCapture(event.pointerId);
@@ -434,19 +435,24 @@ export function WorkspaceInspectorHost({
       className={`workspace-inspector workspace-inspector-${state.dock} ${
         state.expanded ? "is-expanded" : ""
       } ${compact ? "is-compact" : ""} ${hasDetail ? "has-detail" : ""}`}
-      aria-label="Workspace Inspector"
+      aria-label={t("Workspace Inspector")}
       data-view={state.view}
     >
       <header className="workspace-inspector-head">
         <div className="workspace-inspector-identity">
           <span className="workspace-inspector-repo">
-            {workspace?.worktree?.repo_name || workspace?.label || "Workspace"}
+            {workspace?.worktree?.repo_name ||
+              workspace?.label ||
+              t("Workspace")}
           </span>
           <span className="workspace-inspector-checkout">
             {checkoutLabel(workspace)}
             {workspace?.worktree?.is_linked_worktree ? (
-              <span className="workspace-inspector-wt" title="Linked worktree">
-                <GitFork size={11} aria-hidden="true" /> Worktree
+              <span
+                className="workspace-inspector-wt"
+                title={t("Linked worktree")}
+              >
+                <GitFork size={11} aria-hidden="true" /> {t("Worktree")}
               </span>
             ) : null}
           </span>
@@ -470,7 +476,7 @@ export function WorkspaceInspectorHost({
             onClick={() => onViewChange("files")}
             onKeyDown={handleTabKeyDown}
           >
-            <FolderTree size={14} /> Files
+            <FolderTree size={14} /> {t("Files")}
           </button>
           <button
             ref={changesTabRef}
@@ -482,7 +488,7 @@ export function WorkspaceInspectorHost({
             onClick={() => onViewChange("changes")}
             onKeyDown={handleTabKeyDown}
           >
-            <FileDiff size={14} /> Changes
+            <FileDiff size={14} /> {t("Changes")}
             {changeCount > 0 ? (
               <span className="workspace-inspector-count">{changeCount}</span>
             ) : null}
@@ -496,8 +502,8 @@ export function WorkspaceInspectorHost({
             className={state.view === "history" ? "is-active" : ""}
             title={
               historyAvailable
-                ? "Agent history"
-                : "Select an active agent pane to view history"
+                ? t("Agent history")
+                : t("Select an active agent pane to view history")
             }
             disabled={!historyAvailable && state.view !== "history"}
             onClick={() => {
@@ -505,18 +511,20 @@ export function WorkspaceInspectorHost({
             }}
             onKeyDown={handleTabKeyDown}
           >
-            <History size={14} /> History
+            <History size={14} /> {t("History")}
           </button>
         </div>
         <div className="workspace-inspector-actions">
           <button
             type="button"
             className="workspace-inspector-dock-action"
-            title={state.dock === "right" ? "Dock at bottom" : "Dock at right"}
+            title={
+              state.dock === "right" ? t("Dock at bottom") : t("Dock at right")
+            }
             aria-label={
               state.dock === "right"
-                ? "Dock Inspector at bottom"
-                : "Dock Inspector at right"
+                ? t("Dock Inspector at bottom")
+                : t("Dock Inspector at right")
             }
             onClick={() =>
               onDockChange(state.dock === "right" ? "bottom" : "right")
@@ -532,11 +540,15 @@ export function WorkspaceInspectorHost({
             type="button"
             className="workspace-inspector-expand-action"
             title={shortcutTitle(
-              state.expanded ? "Restore Inspector dock" : "Expand Inspector",
+              state.expanded
+                ? t("Restore Inspector dock")
+                : t("Expand Inspector"),
               "inspector.expand",
             )}
             aria-label={
-              state.expanded ? "Restore Inspector dock" : "Expand Inspector"
+              state.expanded
+                ? t("Restore Inspector dock")
+                : t("Expand Inspector")
             }
             aria-pressed={state.expanded}
             onClick={() => onExpandedChange(!state.expanded)}
@@ -545,8 +557,8 @@ export function WorkspaceInspectorHost({
           </button>
           <button
             type="button"
-            title="Close Inspector"
-            aria-label="Close Workspace Inspector"
+            title={t("Close Inspector")}
+            aria-label={t("Close Workspace Inspector")}
             onClick={onClose}
           >
             <X size={16} />
@@ -556,9 +568,9 @@ export function WorkspaceInspectorHost({
 
       {!workspace ? (
         <div className="workspace-inspector-unavailable">
-          <strong>Checkout unavailable</strong>
+          <strong>{t("Checkout unavailable")}</strong>
           <span>
-            The workspace used to route this Inspector is no longer open.
+            {t("The workspace used to route this Inspector is no longer open.")}
           </span>
         </div>
       ) : (
@@ -618,7 +630,7 @@ export function WorkspaceInspectorHost({
                 backAction={
                   compact && drillInByView.files && fileSelection.entry
                     ? {
-                        label: "Files",
+                        label: t("Files"),
                         onClick: () => {
                           setDrillInByView((current) => ({
                             ...current,
@@ -647,7 +659,7 @@ export function WorkspaceInspectorHost({
                       fallback={
                         <div className="diff-content-state">
                           <span className="file-loading-spinner" />
-                          Loading diff viewer
+                          {t("Loading diff viewer")}
                         </div>
                       }
                     >
@@ -737,7 +749,7 @@ export function WorkspaceInspectorHost({
                     <div className="diff-content-view">
                       <div className="diff-content-state">
                         <span className="file-loading-spinner" />
-                        Loading Diff Viewer
+                        {t("Loading Diff Viewer")}
                       </div>
                     </div>
                   }
@@ -767,7 +779,7 @@ export function WorkspaceInspectorHost({
                     backAction={
                       compact && hasDetail
                         ? {
-                            label: "Changed files",
+                            label: t("Changed files"),
                             onClick: () => {
                               setDrillInByView((current) => ({
                                 ...current,
@@ -800,8 +812,8 @@ export function WorkspaceInspectorHost({
               />
             ) : (
               <div className="workspace-inspector-unavailable">
-                <strong>No active agent session</strong>
-                <span>Select an agent pane to inspect its history.</span>
+                <strong>{t("No active agent session")}</strong>
+                <span>{t("Select an agent pane to inspect its history.")}</span>
               </div>
             )}
           </div>

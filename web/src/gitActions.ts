@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { GitDiffEntry } from "./types";
 
 export type GitFileAction =
@@ -46,31 +47,31 @@ export function buildGitFileMenuItems(
   if (kinds.has("untracked")) {
     items.push({
       action: "stage",
-      label: plural ? "Stage files" : "Stage file",
+      label: plural ? t("Stage files") : t("Stage file"),
     });
   } else if (kinds.has("conflicted")) {
     items.push({
       action: "stage",
-      label: plural ? "Mark all resolved" : "Mark resolved",
+      label: plural ? t("Mark all resolved") : t("Mark resolved"),
     });
   } else if (kinds.has("unstaged")) {
     items.push({
       action: "stage",
-      label: plural ? "Stage all changes" : "Stage changes",
+      label: plural ? t("Stage all changes") : t("Stage changes"),
     });
   }
   if (kinds.has("staged")) {
     items.push({
       action: "unstage",
-      label: plural ? "Unstage all changes" : "Unstage changes",
+      label: plural ? t("Unstage all changes") : t("Unstage changes"),
     });
   }
   if (kinds.has("unstaged")) {
     items.push({
       action: "discard_unstaged",
       label: plural
-        ? "Discard all unstaged changes…"
-        : "Discard unstaged changes…",
+        ? t("Discard all unstaged changes…")
+        : t("Discard unstaged changes…"),
       danger: true,
       destructive: true,
     });
@@ -78,7 +79,9 @@ export function buildGitFileMenuItems(
   if (kinds.has("untracked")) {
     items.push({
       action: "delete_untracked",
-      label: plural ? "Delete untracked files…" : "Delete untracked file…",
+      label: plural
+        ? t("Delete untracked files…")
+        : t("Delete untracked file…"),
       danger: true,
       destructive: true,
     });
@@ -112,24 +115,24 @@ export function buildGitRepoMenuItems(
   return [
     {
       action: "stage_all",
-      label: "Stage All Changes",
+      label: t("Stage All Changes"),
       count: counts.unstaged + counts.untracked + counts.conflicted,
     },
     {
       action: "unstage_all",
-      label: "Unstage All Changes",
+      label: t("Unstage All Changes"),
       count: counts.staged,
     },
     {
       action: "discard_all_unstaged",
-      label: "Discard All Unstaged Changes…",
+      label: t("Discard All Unstaged Changes…"),
       count: counts.unstaged,
       danger: true,
       destructive: true,
     },
     {
       action: "delete_all_untracked",
-      label: "Delete All Untracked Files…",
+      label: t("Delete All Untracked Files…"),
       count: counts.untracked,
       danger: true,
       destructive: true,
@@ -140,39 +143,39 @@ export function buildGitRepoMenuItems(
 export function gitFileActionSuccessMessage(action: GitFileAction) {
   switch (action) {
     case "stage":
-      return "File staged";
+      return t("File staged");
     case "unstage":
-      return "Changes unstaged";
+      return t("Changes unstaged");
     case "discard_unstaged":
-      return "Unstaged changes discarded";
+      return t("Unstaged changes discarded");
     case "delete_untracked":
-      return "Untracked file deleted";
+      return t("Untracked file deleted");
   }
 }
 
 export function gitRepoActionSuccessMessage(action: GitRepoAction) {
   switch (action) {
     case "stage_all":
-      return "All changes staged";
+      return t("All changes staged");
     case "unstage_all":
-      return "All changes unstaged";
+      return t("All changes unstaged");
     case "discard_all_unstaged":
-      return "All unstaged changes discarded";
+      return t("All unstaged changes discarded");
     case "delete_all_untracked":
-      return "All untracked files deleted";
+      return t("All untracked files deleted");
   }
 }
 
 export function gitFileActionLabel(action: GitFileAction) {
   switch (action) {
     case "stage":
-      return "Stage";
+      return t("Stage");
     case "unstage":
-      return "Unstage";
+      return t("Unstage");
     case "discard_unstaged":
-      return "Discard unstaged changes";
+      return t("Discard unstaged changes");
     case "delete_untracked":
-      return "Delete untracked file";
+      return t("Delete untracked file");
   }
 }
 
@@ -180,15 +183,20 @@ export function gitFileConfirmCopy(action: GitFileAction, path: string) {
   switch (action) {
     case "discard_unstaged":
       return {
-        title: "Discard Changes",
-        message: `Discard unstaged changes to "${path}"? Any staged version is kept. This cannot be undone.`,
-        confirmLabel: "Discard",
+        title: t("Discard Changes"),
+        message: t(
+          'Discard unstaged changes to "{path}"? Any staged version is kept. This cannot be undone.',
+          { path },
+        ),
+        confirmLabel: t("Discard"),
       };
     case "delete_untracked":
       return {
-        title: "Delete Untracked File",
-        message: `Delete untracked file "${path}"? This cannot be undone.`,
-        confirmLabel: "Delete",
+        title: t("Delete Untracked File"),
+        message: t('Delete untracked file "{path}"? This cannot be undone.', {
+          path,
+        }),
+        confirmLabel: t("Delete"),
       };
     default:
       return null;
@@ -200,19 +208,36 @@ export function gitFolderConfirmCopy(
   path: string,
   count: number,
 ) {
-  const files = count === 1 ? "1 file" : `${count} files`;
   switch (action) {
     case "discard_unstaged":
       return {
-        title: "Discard Changes",
-        message: `Discard unstaged changes in ${files} under "${path}"? Any staged versions are kept. This cannot be undone.`,
-        confirmLabel: "Discard",
+        title: t("Discard Changes"),
+        message:
+          count === 1
+            ? t(
+                'Discard unstaged changes in 1 file under "{path}"? Any staged versions are kept. This cannot be undone.',
+                { path },
+              )
+            : t(
+                'Discard unstaged changes in {count} files under "{path}"? Any staged versions are kept. This cannot be undone.',
+                { count, path },
+              ),
+        confirmLabel: t("Discard"),
       };
     case "delete_untracked":
       return {
-        title: "Delete Untracked Files",
-        message: `Delete ${files} under "${path}" not tracked by Git? Ignored files are kept. This cannot be undone.`,
-        confirmLabel: "Delete",
+        title: t("Delete Untracked Files"),
+        message:
+          count === 1
+            ? t(
+                'Delete 1 file under "{path}" not tracked by Git? Ignored files are kept. This cannot be undone.',
+                { path },
+              )
+            : t(
+                'Delete {count} files under "{path}" not tracked by Git? Ignored files are kept. This cannot be undone.',
+                { count, path },
+              ),
+        confirmLabel: t("Delete"),
       };
     default:
       return null;
@@ -220,19 +245,34 @@ export function gitFolderConfirmCopy(
 }
 
 export function gitRepoConfirmCopy(action: GitRepoAction, count: number) {
-  const files = count === 1 ? "1 file" : `${count} files`;
   switch (action) {
     case "discard_all_unstaged":
       return {
-        title: "Discard All Unstaged Changes",
-        message: `Discard unstaged changes in ${files}? Staged changes are kept. This cannot be undone.`,
-        confirmLabel: "Discard All",
+        title: t("Discard All Unstaged Changes"),
+        message:
+          count === 1
+            ? t(
+                "Discard unstaged changes in 1 file? Staged changes are kept. This cannot be undone.",
+              )
+            : t(
+                "Discard unstaged changes in {count} files? Staged changes are kept. This cannot be undone.",
+                { count },
+              ),
+        confirmLabel: t("Discard All"),
       };
     case "delete_all_untracked":
       return {
-        title: "Delete All Untracked Files",
-        message: `Delete ${files} not tracked by Git? Ignored files are kept. This cannot be undone.`,
-        confirmLabel: "Delete All",
+        title: t("Delete All Untracked Files"),
+        message:
+          count === 1
+            ? t(
+                "Delete 1 file not tracked by Git? Ignored files are kept. This cannot be undone.",
+              )
+            : t(
+                "Delete {count} files not tracked by Git? Ignored files are kept. This cannot be undone.",
+                { count },
+              ),
+        confirmLabel: t("Delete All"),
       };
     default:
       return null;
