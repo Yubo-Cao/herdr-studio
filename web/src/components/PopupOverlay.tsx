@@ -182,6 +182,8 @@ export function PopupOverlay({ terminalTheme }: { terminalTheme: ITheme }) {
 
     const offTerminal = bridge.onTerminal((t) => {
       if (!terminalPushMatches(identity, client, terminalId, t)) return;
+      // Popups attach without row updates, so every frame carries bytes.
+      if (t.bytes === undefined) return;
       const text = b64toText(t.bytes);
       if (text !== null) term.write(text);
     });

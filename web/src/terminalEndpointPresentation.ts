@@ -1,3 +1,7 @@
+import {
+  type TerminalFrameParts,
+  terminalFrameRowUpdate,
+} from "../../shared/terminalFrame";
 import type { TerminalHistoryViewport } from "./terminalHistorySelection";
 
 export interface TerminalPresentationFrame {
@@ -5,6 +9,8 @@ export interface TerminalPresentationFrame {
   size?: { cols: number; rows: number };
   history?: TerminalHistoryViewport;
   linkFrame?: string;
+  /** Row structure of `text`, when the bridge sent row updates. */
+  parts?: TerminalFrameParts;
 }
 
 /** xterm's native selection escape: Shift on non-Mac, Option on Mac. */
@@ -29,6 +35,9 @@ export class TerminalEndpointPresentation {
   private appliedMouseReporting: boolean | undefined;
   private pendingFrame: TerminalPresentationFrame | null = null;
   displayedFrame: TerminalPresentationFrame | null = null;
+  // The xterm viewport when displayedFrame was written, while nothing else has
+  // written since. Only then do its rows match the screen for a row update.
+  private displayedViewport: string | null = null;
   private writing = false;
   private changingLinks = false;
   private incremental = "";
@@ -97,10 +106,11 @@ export class TerminalEndpointPresentation {
     size?: { cols: number; rows: number },
     history?: TerminalHistoryViewport,
     linkFrame?: string,
+    parts?: TerminalFrameParts,
   ): void {
     if (this.disposed) return;
     this.mouseReporting = mouseReporting;
-    this.pendingFrame = { text, size, history, linkFrame };
+    this.pendingFrame = { text, size, history, linkFrame, parts };
     this.flush();
   }
 
@@ -163,6 +173,23 @@ export class TerminalEndpointPresentation {
         }
       }
     }
+    const viewportKey = viewport ? `${viewport.cols}x${viewport.rows}` : null;
+    if (
+      linksChanged &&
+      frame?.parts &&
+      displayed?.parts &&
+      !prefix &&
+      !incremental &&
+      viewportKey !== null &&
+      viewportKey === this.displayedViewport &&
+      frame.size?.cols === displayed.size?.cols &&
+      frame.size?.rows === displayed.size?.rows
+    ) {
+      // Rewrite only the changed rows; xterm then repaints only those rows
+      // instead of clearing and redrawing the whole screen.
+      const update = terminalFrameRowUpdate(displayed.parts, frame.parts);
+      if (update !== null) text = update;
+    }
     if (prefix || frame !== null || incremental) {
       this.writing = true;
       this.changingLinks = linksChanged;
@@ -174,8 +201,10 @@ export class TerminalEndpointPresentation {
           // still release the gate for current intent, never restore old state.
           if (frame && !this.disposed && generation === this.generation) {
             this.displayedFrame = frame;
+            this.displayedViewport = viewportKey;
             this.selectionHistory?.presented(frame);
           }
+          if (incremental) this.displayedViewport = null;
           this.writing = false;
           if (this.disposed) return;
           const replay = this.deferredSelection;
@@ -188,6 +217,11 @@ export class TerminalEndpointPresentation {
     }
   }
 
+  /** Something else rewrote the xterm screen; the next frame repaints fully. */
+  screenChanged(): void {
+    this.displayedViewport = null;
+  }
+
   reset(discardIncremental = false): void {
     // Invalidate presentation/replay, not the outstanding parser operation.
     this.generation++;
@@ -197,6 +231,7 @@ export class TerminalEndpointPresentation {
     this.pendingFrame = null;
     if (discardIncremental) this.incremental = "";
     this.displayedFrame = null;
+    this.displayedViewport = null;
     this.selectionHistory?.reset();
     this.selectionDrag = false;
   }

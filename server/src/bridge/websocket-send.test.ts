@@ -188,7 +188,7 @@ describe("browser WebSocket cleanup", () => {
 });
 
 describe("browser WebSocket sending", () => {
-  test("compresses only terminal frames at or above the byte threshold", () => {
+  test("compresses non-clipboard messages at or above the byte threshold", () => {
     const { ws, compressed } = createWebSocket();
     for (const [context, payload] of [
       ["terminal-frame", "a".repeat(WS_COMPRESSION_MIN_BYTES - 1)],
@@ -201,7 +201,7 @@ describe("browser WebSocket sending", () => {
         true,
       );
     }
-    expect(compressed).toEqual([false, true, true, false, false]);
+    expect(compressed).toEqual([false, true, true, false, true]);
   });
 
   test("keeps the connection open when Bun queues a message under backpressure", () => {

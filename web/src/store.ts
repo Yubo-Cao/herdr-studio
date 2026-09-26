@@ -1132,6 +1132,10 @@ function settlePendingFocusWorkspace(seq: number): void {
   set({ pendingFocusWorkspaceSettledAt: Date.now() });
 }
 
+// Event-driven refreshes already keep metadata current; the backstop poll
+// skips a tick that follows one, so an active session does not pay for both.
+let lastRefreshStartedAt = 0;
+
 async function refreshNow(lease = captureConnectionLease()) {
   if (
     state.connectionPaused ||
@@ -1146,6 +1150,7 @@ async function refreshNow(lease = captureConnectionLease()) {
     return;
   }
   refreshingConnectionKeys.add(refreshKey);
+  lastRefreshStartedAt = Date.now();
   // Snapshot the pending-focus marker when the fetch actually starts. Only a
   // refresh that began after the focus action settled may declare the focus
   // lost, and only while the marker still belongs to that same attempt.
@@ -1371,7 +1376,11 @@ function startMetadataPolling() {
       return;
     }
     if (state.status === "connected") {
-      if (catalogReadyForConnection) scheduleRefresh();
+      if (
+        catalogReadyForConnection &&
+        Date.now() - lastRefreshStartedAt >= METADATA_POLL_MS - 500
+      )
+        scheduleRefresh();
       void refreshBridgeStatus();
     }
   }, METADATA_POLL_MS);
@@ -1951,6 +1960,13 @@ function handleHerdrEvent(event: HerdrEventMsg) {
     ) {
       publishLastStepCompletion(event.connection_id, event.data.workspace_id);
     }
+    // Presence snapshots carry their own state (see collaboration.ts) and
+    // arrive while anyone types; they never change workspace metadata.
+    if (
+      event.event === "collaboration.updated" ||
+      event.event === "collaboration_updated"
+    )
+      return;
     scheduleRefresh();
   }
 }

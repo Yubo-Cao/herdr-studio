@@ -3190,7 +3190,7 @@ export default function App() {
     let cancelled = false;
     let supported = true;
     const refresh = () => {
-      if (!supported) return;
+      if (!supported || document.visibilityState === "hidden") return;
       void connectionClient
         .call("session.appearance")
         .then((result) => {
@@ -3204,10 +3204,14 @@ export default function App() {
         });
     };
     refresh();
-    const timer = window.setInterval(refresh, 5_000);
+    // The session appearance changes rarely; poll it slowly and catch up as
+    // soon as the page returns to the foreground.
+    const timer = window.setInterval(refresh, 15_000);
+    document.addEventListener("visibilitychange", refresh);
     return () => {
       cancelled = true;
       window.clearInterval(timer);
+      document.removeEventListener("visibilitychange", refresh);
     };
   }, [connectionClient, s.status, systemTheme, theme]);
   useLayoutEffect(() => {

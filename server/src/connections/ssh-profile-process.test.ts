@@ -322,7 +322,15 @@ process.on("SIGINT", () => void stop());
   try {
     const port = await bridgeListeningPort(child.stdout);
     await waitForHealth(port);
-    ws = new WebSocket(`ws://127.0.0.1:${port}/ws`);
+    // Bun 1.3's client inflater rejects some valid context-takeover streams
+    // ("Server sent invalid UTF8"); browsers decode them. This test covers
+    // tunnel supervision, not compression, so it opts out.
+    const options: Bun.WebSocketOptions = { perMessageDeflate: false };
+    // The DOM lib overload hides Bun's options parameter from the checker.
+    ws = new WebSocket(
+      `ws://127.0.0.1:${port}/ws`,
+      options as unknown as string[],
+    );
     await new Promise<void>((resolve, reject) => {
       ws!.onopen = () => resolve();
       ws!.onerror = () => reject(new Error("websocket open failed"));

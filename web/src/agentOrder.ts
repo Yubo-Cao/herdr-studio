@@ -160,9 +160,12 @@ export function withAgentActivity(
       sequence >= 0
         ? { state_change_seq: sequence }
         : {}),
+      // Sorting reads activity only among idle agents. A working agent's
+      // timestamp moves on every poll and would re-render the whole app.
       ...(typeof activity === "number" &&
       Number.isFinite(activity) &&
-      activity > 0
+      activity > 0 &&
+      pane.agent_status.toLowerCase() !== "working"
         ? { last_activity_at: activity }
         : {}),
     };

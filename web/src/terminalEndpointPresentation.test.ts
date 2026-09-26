@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { Terminal } from "@xterm/xterm";
+import { terminalFrameText } from "../../shared/terminalFrame";
 import {
   TerminalEndpointPresentation,
   terminalMouseUsesSelection,
@@ -472,5 +473,50 @@ describe("endpoint history selection repaints", () => {
     parsed();
     expect(presentation.displayedFrame).toBeNull();
     expect(shown).toEqual([]);
+  });
+});
+
+describe("endpoint row updates", () => {
+  const tail = "\x1b[?7h\x1b[?25l";
+  const size = { cols: 10, rows: 3 };
+  const frame = (rows: string[]) => ({ rows, tail });
+
+  test("writes only changed rows while the xterm viewport is unchanged", () => {
+    let viewport = { ...size };
+    const writes: string[] = [];
+    const presentation = new TerminalEndpointPresentation(
+      () => false,
+      (text, parsed) => {
+        writes.push(text);
+        parsed();
+      },
+      () => viewport,
+    );
+    const show = (rows: string[]) => {
+      const parts = frame(rows);
+      presentation.update(
+        terminalFrameText(parts),
+        false,
+        size,
+        undefined,
+        undefined,
+        parts,
+      );
+    };
+    show(["one", "two", "three"]);
+    expect(writes[writes.length - 1]).toContain("\x1b[2J");
+    show(["one", "TWO", "three"]);
+    expect(writes[writes.length - 1]).toBe(
+      `\x1b[0m\x1b[?7l\x1b[2;1H\x1b[0m\x1b[2KTWO${tail}`,
+    );
+    // xterm may reflow or pull scrollback on resize: repaint fully.
+    viewport = { cols: 12, rows: 4 };
+    show(["one", "2", "three"]);
+    expect(writes[writes.length - 1]).toContain("\x1b[2J");
+    show(["one", "22", "three"]);
+    expect(writes[writes.length - 1]).not.toContain("\x1b[2J");
+    presentation.screenChanged();
+    show(["one", "222", "three"]);
+    expect(writes[writes.length - 1]).toContain("\x1b[2J");
   });
 });

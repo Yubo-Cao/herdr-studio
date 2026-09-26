@@ -16,7 +16,8 @@ import { isTerminalHelloProtocol } from "./protocol-compat";
 import { EndpointTerminalSession } from "./endpoint-terminal-session";
 import { EndpointClient } from "./endpoint-client";
 import type { Popup, SurfaceBaseline } from "./endpoint-surface";
-import { frameToAnsi } from "./frame-to-ansi";
+import { frameToAnsi, frameToAnsiParts } from "./frame-to-ansi";
+import { TerminalFrameStream } from "./terminal-frame-stream";
 import { isTerminalClipboardPayload } from "./terminal-clipboard";
 
 type TerminalSession = {
@@ -106,6 +107,11 @@ export function createTerminalBridge(args: {
     Map<string, { cols: number; rows: number }>
   >();
   const sharedTerminals = new Map<string, SharedTerminalSession>();
+  // Viewers that attached with `frame_delta` get endpoint frames as row updates.
+  const frameStreams = new Map<
+    ServerWebSocket<unknown>,
+    Map<string, TerminalFrameStream>
+  >();
   /** The dedicated endpoint observer owns this connection-wide popup state. */
   let popupState: PopupIdentity | null = null;
   let popupObserver: EndpointClient | null = null;
@@ -598,6 +604,8 @@ export function createTerminalBridge(args: {
         );
     for (const id of terminalIds) {
       args.dropCoalesced?.(ws, terminalCoalesceKey(id));
+      frameStreams.get(ws)?.get(id)?.dispose();
+      frameStreams.get(ws)?.delete(id);
       attachmentTokens.get(ws)?.delete(id);
       if (clipboardTarget?.ws === ws && clipboardTarget.terminalId === id) {
         clipboardTarget = null;
@@ -617,6 +625,7 @@ export function createTerminalBridge(args: {
     }
     if (!viewed || viewed.size === 0) {
       terminalViewers.delete(ws);
+      frameStreams.delete(ws);
       attachmentTokens.delete(ws);
       terminals.delete(ws);
       if (clipboardTarget?.ws === ws) clipboardTarget = null;
@@ -736,6 +745,7 @@ export function createTerminalBridge(args: {
         shared.lastFrameLogAt = now;
       }
       const payloads = new Map<string, string>();
+      const parts = new Map<string, ReturnType<typeof frameToAnsiParts>>();
       for (const viewer of Array.from(shared.viewers)) {
         const viewport = terminalViewers.get(viewer)?.get(terminalId);
         if (!viewport) {
@@ -745,6 +755,29 @@ export function createTerminalBridge(args: {
         const width = t.frame ? Math.min(t.width, viewport.cols) : t.width;
         const height = t.frame ? Math.min(t.height, viewport.rows) : t.height;
         const key = `${width}x${height}`;
+        const stream = frameStreams.get(viewer)?.get(terminalId);
+        if (stream && t.frame && t.full) {
+          let frameParts = parts.get(key);
+          if (!frameParts) {
+            frameParts = frameToAnsiParts(t.frame, viewport);
+            parts.set(key, frameParts);
+          }
+          stream.offer(frameParts, {
+            width,
+            height,
+            full: t.full,
+            ...(t.linkFrame ? { link_frame: t.linkFrame } : {}),
+            ...(typeof t.mouseReporting === "boolean"
+              ? { mouse_reporting: t.mouseReporting }
+              : {}),
+            ...(t.history &&
+            width === t.history.cols &&
+            height === t.history.rows
+              ? { history: t.history }
+              : {}),
+          });
+          continue;
+        }
         let payload = payloads.get(key);
         if (!payload) {
           const bytes =
@@ -1105,6 +1138,27 @@ export function createTerminalBridge(args: {
         terminals.set(ws, { terminalId, cols, rows });
         viewed.set(terminalId, { cols, rows });
         terminalViewers.set(ws, viewed);
+        const streams = frameStreams.get(ws) ?? new Map();
+        const existingStream = streams.get(terminalId);
+        if (params.frame_delta === true) {
+          if (existingStream) existingStream.reset();
+          else
+            streams.set(
+              terminalId,
+              new TerminalFrameStream((terminal) => {
+                const payload = serialize({
+                  terminal: { terminal_id: terminalId, ...terminal },
+                });
+                return args.safeSend(ws, payload, "terminal-frame")
+                  ? payload.length
+                  : null;
+              }),
+            );
+          frameStreams.set(ws, streams);
+        } else if (existingStream) {
+          existingStream.dispose();
+          streams.delete(terminalId);
+        }
         const tokens = attachmentTokens.get(ws) ?? new Map<string, object>();
         const token = {};
         tokens.set(terminalId, token);
@@ -1324,6 +1378,15 @@ export function createTerminalBridge(args: {
             })),
         });
       }
+      if (method === "terminal.frame_ack") {
+        const stream = requestedTerminalId
+          ? frameStreams.get(ws)?.get(requestedTerminalId)
+          : undefined;
+        if (!stream) return reply({ ok: false });
+        if (params.resync === true) stream.resync();
+        else if (typeof params.seq === "number") stream.ack(params.seq);
+        return reply({ ok: true });
+      }
       if (method === "terminal.input") {
         if (!thin || thin.isClosed || !shared || !requestedTerminalId) {
           return fail(NO_TERMINAL_ATTACHED_MESSAGE);
@@ -1358,6 +1421,7 @@ export function createTerminalBridge(args: {
         const relaySize = relaySizeFromParams(params, { cols, rows });
         thin.resize(cols, rows);
         terminalViewers.get(ws)!.set(requestedTerminalId!, { cols, rows });
+        frameStreams.get(ws)?.get(requestedTerminalId!)?.reset();
         shared.cols = cols;
         shared.rows = rows;
         // Anything held for this terminal was rendered for the previous size.

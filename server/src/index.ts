@@ -268,7 +268,12 @@ function shouldLogRpc(
   if (!method) return failed;
   if (failed) return true;
   if (method === "bridge.ping" || method === "bridge.status") return false;
-  if (method === "terminal.input" || method === "terminal.scroll") return false;
+  if (
+    method === "terminal.input" ||
+    method === "terminal.scroll" ||
+    method === "terminal.frame_ack"
+  )
+    return false;
   if (method === "terminal.resize" && elapsedMs < SLOW_RPC_LOG_MS) return false;
   return IMPORTANT_RPC_METHODS.has(method) || elapsedMs >= SLOW_RPC_LOG_MS;
 }
@@ -1337,7 +1342,10 @@ function main() {
             return loginPage();
           }
           // The login page's logo and favicon must also work before login.
-          if (url.pathname === "/roamgate-icon-192.png") {
+          if (
+            url.pathname === "/roamgate-icon-192.png" ||
+            url.pathname === "/roamgate-icon.svg"
+          ) {
             return serveStatic(req, config.publicDir);
           }
           if (url.pathname === "/api/logout") {

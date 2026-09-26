@@ -81,6 +81,41 @@ const DEFAULT_EVENTS = [
   "worktree.removed",
 ];
 const COLLABORATION_EVENTS = ["collaboration.updated"];
+export const COLLABORATION_FORWARD_INTERVAL_MS = 1000;
+
+/** Deliver the first value at once, then the newest once per interval. */
+export function createTrailingThrottle<T>(
+  intervalMs: number,
+  deliver: (value: T) => void,
+) {
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  let pending: { value: T } | null = null;
+  const open = () => {
+    timer = setTimeout(() => {
+      timer = null;
+      if (!pending) return;
+      const { value } = pending;
+      pending = null;
+      deliver(value);
+      open();
+    }, intervalMs);
+  };
+  return {
+    push(value: T) {
+      if (timer) {
+        pending = { value };
+        return;
+      }
+      deliver(value);
+      open();
+    },
+    cancel() {
+      if (timer) clearTimeout(timer);
+      timer = null;
+      pending = null;
+    },
+  };
+}
 
 type SafeSend = (
   ws: ServerWebSocket<unknown>,
@@ -119,16 +154,20 @@ export function createLegacyConnectionRuntime(args: {
   const clientSocketPath = config.clientSocketPath;
   const sshHost = () => config.sshHost;
   const herdr = new HerdrClient(socketPath);
+  // Herdr republishes the whole presence snapshot on every keystroke (typing
+  // timestamps). Forward at most one per interval, always the newest, so
+  // typing on a slow link does not also download a snapshot per key.
+  const collaborationForward = createTrailingThrottle(
+    COLLABORATION_FORWARD_INTERVAL_MS,
+    (event: unknown) => args.onEvent(event, identity),
+  );
   const collaboration = createCollaborationService({
     herdrCall: (method, params) => herdr.call(method, params),
     onSnapshot: (snapshot) =>
-      args.onEvent(
-        {
-          event: "collaboration.updated",
-          data: { type: "collaboration_updated", snapshot },
-        },
-        identity,
-      ),
+      collaborationForward.push({
+        event: "collaboration.updated",
+        data: { type: "collaboration_updated", snapshot },
+      }),
   });
   const agentSessionFiles = createAgentSessionFileAccess({
     sshHost: config.sshHost,
@@ -414,8 +453,14 @@ export function createLegacyConnectionRuntime(args: {
     taskEvents.handleHerdrEvent(event);
     lastStepTurns.handleHerdrEvent(event);
     agentStatusSubscriptions.handleHerdrEvent(event);
-    if ((event as { event?: string })?.event === "workspace.focused")
+    const name = (event as { event?: string })?.event;
+    if (name === "workspace.focused")
       terminalBridge.refreshPopupObserverFocus();
+    // Herdr names this event with an underscore; the local fallback uses a dot.
+    if (name === "collaboration_updated" || name === "collaboration.updated") {
+      collaborationForward.push(event);
+      return;
+    }
     args.onEvent(event, identity);
   };
   const onHerdrError = (error: unknown) => args.onError?.(error, identity);
@@ -504,6 +549,7 @@ export function createLegacyConnectionRuntime(args: {
     if (stopTask) return stopTask;
     if (disposed) return Promise.resolve();
     disposed = true;
+    collaborationForward.cancel();
     backgroundStarted = false;
     herdr.off("event", onHerdrEvent);
     herdr.off("error", onHerdrError);

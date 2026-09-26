@@ -130,11 +130,17 @@ export function TerminalComposer({
     return subscribeTerminalComposerUpload(draftKey, setUploadCount);
   }, [draftKey]);
 
-  // Autosize within the CSS max-height.
+  // Autosize within the CSS max-height. Growing needs only one measurement;
+  // collapsing to measure forces an extra layout per keystroke, so do that
+  // only when the text got shorter.
+  const autosizedLengthRef = useRef(0);
   useEffect(() => {
     const textarea = textareaRef.current;
     if (!textarea) return;
-    textarea.style.height = "0px";
+    const shrank = text.length < autosizedLengthRef.current;
+    autosizedLengthRef.current = text.length;
+    if (shrank) textarea.style.height = "0px";
+    else if (textarea.scrollHeight <= textarea.clientHeight) return;
     textarea.style.height = `${textarea.scrollHeight}px`;
   }, [text]);
 
@@ -148,6 +154,13 @@ export function TerminalComposer({
     focusSelectionAfterInsertRef.current = false;
     if (!textarea || !selection) return;
     if (shouldFocus && !helpOpen) textarea.focus({ preventScroll: true });
+    // Typing already leaves the caret here; resetting it anyway disturbs
+    // mobile autocorrect and IME composition on every keystroke.
+    if (
+      textarea.selectionStart === selection.start &&
+      textarea.selectionEnd === selection.end
+    )
+      return;
     textarea.setSelectionRange(selection.start, selection.end);
   }, [draftKey, helpOpen, text]);
 

@@ -1,11 +1,15 @@
+import {
+  TERMINAL_FRAME_TAIL_MARK,
+  type TerminalFrameParts,
+  terminalFrameText,
+} from "../../../shared/terminalFrame";
 import type { CellData, FrameData } from "./thin-client";
 
 // Serializes a Herdr wire FrameData cell grid into ANSI bytes for xterm.js.
 // The stable endpoint path delivers server-rendered cells instead of an ANSI
 // stream, so the bridge re-encodes them here.
-//
-// ponytail: full repaint per frame, no diffing. A 100x30 frame is ~20-60KB;
-// add run/diff optimization only if websocket bandwidth measurably hurts.
+// Rows are kept separate so a viewer that supports row updates receives only
+// the rows that changed (see terminal-frame-stream.ts).
 
 const RESET = "\x1b[0m";
 
@@ -69,18 +73,19 @@ function isDefaultBlank(cell: CellData): boolean {
   );
 }
 
-/** Serialize one frame as a full repaint: home, styled rows, cursor. */
-export function frameToAnsi(
+/** Serialize one frame as its styled rows and cursor tail. */
+export function frameToAnsiParts(
   frame: FrameData,
   viewport = { cols: frame.width, rows: frame.height },
-): string {
+): TerminalFrameParts {
   const width = Math.min(frame.width, viewport.cols);
   const height = Math.min(frame.height, viewport.rows);
   // Frames are positioned cell grids, not flowing text. A stale frame can
-  // exceed the viewer width during resize; never let it wrap and scroll.
-  let out = `${RESET}\x1b[H\x1b[2J\x1b[?7l`;
+  // exceed the viewer width during resize; the head disables autowrap so it
+  // never wraps and scrolls.
+  const rows: string[] = [];
   for (let y = 0; y < height; y++) {
-    if (y > 0) out += `\x1b[${y + 1};1H`;
+    let out = "";
     const rowStart = y * frame.width;
     let rowEnd = width;
     // Trim trailing default blanks; the terminal background fills them.
@@ -119,14 +124,23 @@ export function frameToAnsi(
       if (padding && x + 1 < rowEnd) out += `\x1b[${x + 2}G`;
     }
     if (linkOpen) out += "\x1b]8;;\x1b\\";
+    rows.push(out);
   }
-  out += "\x1b[?7h";
+  let tail = TERMINAL_FRAME_TAIL_MARK;
   const cursor = frame.cursor;
   if (cursor?.visible && cursor.x < width && cursor.y < height) {
-    out += `${RESET}\x1b[${cursor.y + 1};${cursor.x + 1}H`;
-    out += `\x1b[${cursor.shape} q\x1b[?25h`;
+    tail += `${RESET}\x1b[${cursor.y + 1};${cursor.x + 1}H`;
+    tail += `\x1b[${cursor.shape} q\x1b[?25h`;
   } else {
-    out += "\x1b[?25l";
+    tail += "\x1b[?25l";
   }
-  return out;
+  return { rows, tail };
+}
+
+/** Serialize one frame as a full repaint: home, styled rows, cursor. */
+export function frameToAnsi(
+  frame: FrameData,
+  viewport = { cols: frame.width, rows: frame.height },
+): string {
+  return terminalFrameText(frameToAnsiParts(frame, viewport));
 }

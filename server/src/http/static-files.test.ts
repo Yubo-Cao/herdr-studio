@@ -24,15 +24,21 @@ test("the app links a credentialed standalone manifest with existing install ico
     scope: "/",
     display: "standalone",
   });
-  expect(manifest.icons.map((icon: { sizes: string }) => icon.sizes)).toEqual([
-    "192x192",
-    "512x512",
-  ]);
+  expect(
+    manifest.icons.map(
+      (icon: { sizes: string; purpose?: string }) =>
+        `${icon.sizes}:${icon.purpose ?? "any"}`,
+    ),
+  ).toEqual(["any:any", "192x192:any", "512x512:any", "512x512:maskable"]);
   for (const icon of manifest.icons) {
-    expect(icon.type).toBe("image/png");
     const bytes = Buffer.from(
       await Bun.file(resolve(web, "public", icon.src.slice(1))).arrayBuffer(),
     );
+    if (icon.type === "image/svg+xml") {
+      expect(bytes.toString("utf8")).toStartWith("<svg");
+      continue;
+    }
+    expect(icon.type).toBe("image/png");
     expect(`${bytes.readUInt32BE(16)}x${bytes.readUInt32BE(20)}`).toBe(
       icon.sizes,
     );
@@ -49,4 +55,30 @@ test("source runs fall back to the built public directory", async () => {
   expect(await response.json()).toEqual(
     await Bun.file(resolve(web, "public/manifest.json")).json(),
   );
+});
+
+test("text assets are compressed and fingerprinted assets are immutable", async () => {
+  const dir = `${process.env.TMPDIR ?? "/tmp"}/roamgate-static-${process.pid}`;
+  const script = `console.log(${JSON.stringify("x".repeat(4096))});\n`;
+  await Bun.write(`${dir}/assets/app-abc123.js`, script);
+  const response = await serveStatic(
+    new Request("https://roamgate.example/assets/app-abc123.js", {
+      headers: { "accept-encoding": "gzip, deflate, br" },
+    }),
+    dir,
+  );
+  expect(response.headers.get("content-encoding")).toBe("br");
+  expect(response.headers.get("vary")).toBe("Accept-Encoding");
+  expect(response.headers.get("cache-control")).toContain("immutable");
+  const body = new Uint8Array(await response.arrayBuffer());
+  expect(body.length).toBeLessThan(script.length / 4);
+  const { brotliDecompressSync } = await import("node:zlib");
+  expect(brotliDecompressSync(body).toString("utf8")).toBe(script);
+
+  const plain = await serveStatic(
+    new Request("https://roamgate.example/assets/app-abc123.js"),
+    dir,
+  );
+  expect(plain.headers.get("content-encoding")).toBeNull();
+  expect(await plain.text()).toBe(script);
 });

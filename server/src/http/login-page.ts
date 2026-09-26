@@ -6,6 +6,7 @@ export const LOGIN_HTML = `<!doctype html>
 <meta name="color-scheme" content="light dark">
 <meta name="referrer" content="no-referrer">
 <title>Roamgate login</title>
+<link rel="icon" type="image/svg+xml" href="/roamgate-icon.svg">
 <link rel="icon" type="image/png" href="/roamgate-icon-192.png">
 <style>
   *{box-sizing:border-box}
@@ -17,7 +18,7 @@ export const LOGIN_HTML = `<!doctype html>
   main{width:100%;max-width:400px}
   .brand{display:flex;align-items:center;justify-content:center;gap:12px;margin-bottom:28px;
     font-size:24px;font-weight:650;letter-spacing:-.7px}
-  .brand img{width:48px;height:48px;border-radius:13px}
+  .brand img{width:48px;height:48px}
   .card{padding:32px;border:1px solid var(--border);border-radius:20px;background:var(--panel);
     box-shadow:0 16px 48px #00000014}
   h1{margin:0 0 8px;font-size:24px;font-weight:650;letter-spacing:-.6px}

@@ -105,6 +105,8 @@ import {
   TerminalEndpointPresentation,
   terminalMouseUsesSelection,
 } from "../terminalEndpointPresentation";
+import { TerminalFrameDecoder } from "../terminalFrameDecoder";
+import { TerminalInputBatcher } from "../terminalInputBatcher";
 import {
   terminalFocusBlockedByOverlay,
   terminalPointerShouldBlurInput,
@@ -176,6 +178,10 @@ import {
   useTerminalVoiceTyping,
 } from "./TerminalVoiceTyping";
 import "./TerminalView.css";
+import {
+  type TerminalFrameParts,
+  terminalFrameText,
+} from "../../../shared/terminalFrame";
 
 function focusTerminalEndpoint(
   client: ConnectionClient,
@@ -215,15 +221,29 @@ function bytesToB64(bytes: Uint8Array): string {
   return btoa(s);
 }
 
+const inputBatchers = new Map<string, TerminalInputBatcher>();
+
 function sendBytes(
   client: ConnectionClient,
   bytes: Uint8Array,
   terminalId: string,
 ) {
-  return client.call("terminal.input", {
-    terminal_id: terminalId,
-    data: bytesToB64(bytes),
-  });
+  // Keyed by connection generation and terminal, not client object: wrapper
+  // clients are recreated across renders and must share one ordered queue.
+  const key = `${client.connectionId}\0${client.generation}\0${terminalId}`;
+  let batcher = inputBatchers.get(key);
+  if (!batcher) {
+    batcher = new TerminalInputBatcher(
+      (batch) =>
+        client.call("terminal.input", {
+          terminal_id: terminalId,
+          data: bytesToB64(batch),
+        }),
+      () => inputBatchers.delete(key),
+    );
+    inputBatchers.set(key, batcher);
+  }
+  batcher.send(bytes);
 }
 
 const CLIPBOARD_READ_TIMEOUT_MS = 2000;
@@ -811,9 +831,7 @@ export function TerminalView({
     if (shouldAvoidVirtualKeyboard()) blurTerminalInput();
     const terminalId = desiredTerminalRef.current ?? pane?.terminal_id;
     if (!terminalId) return;
-    sendBytes(connectionClient, new Uint8Array(bytes), terminalId).catch(
-      () => {},
-    );
+    sendBytes(connectionClient, new Uint8Array(bytes), terminalId);
   };
 
   const scrollPage = useCallback(
@@ -1022,10 +1040,14 @@ export function TerminalView({
         }
       });
     });
+    // Full refreshes only clear hover decorations of links that went stale.
+    // Without a hover pointer there are none, and repainting every row on each
+    // keystroke and frame is what makes typing stutter on phones.
+    const pointerHovers = window.matchMedia("(any-hover: hover)").matches;
     const invalidateLinks = () => {
       retireTouchLink();
       linkRevisionRef.current++;
-      term.refresh(0, term.rows - 1);
+      if (pointerHovers) term.refresh(0, term.rows - 1);
     };
     const fit = new FitAddon();
     const clipboardProvider = createTerminalClipboardProvider({
@@ -1142,7 +1164,7 @@ export function TerminalView({
           connectionClient,
           new TextEncoder().encode(data),
           desiredTerminalRef.current!,
-        ).catch(() => {});
+        );
         return;
       }
       // Replaying a delayed local selection must never synthesize pane input.
@@ -1164,7 +1186,7 @@ export function TerminalView({
       if (!terminalId) return;
       imeKeyEvent.recordXtermData(unsuppressedData);
       const bytes = new TextEncoder().encode(unsuppressedData);
-      sendBytes(connectionClient, bytes, terminalId).catch(() => {});
+      sendBytes(connectionClient, bytes, terminalId);
     });
 
     const endpointPresentation: TerminalEndpointPresentation =
@@ -1173,7 +1195,7 @@ export function TerminalView({
         (text, parsed, linksChanged) =>
           term.write(text, () => {
             parsed();
-            if (!terminalEffectDisposed && linksChanged)
+            if (!terminalEffectDisposed && linksChanged && pointerHovers)
               term.refresh(0, term.rows - 1);
           }),
         () => ({ cols: term.cols, rows: term.rows }),
@@ -1218,6 +1240,7 @@ export function TerminalView({
       term.clearSelection();
       endpointPresentation.cancelSelection();
     });
+    const frameDecoders = new Map<string, TerminalFrameDecoder>();
     const off = bridge.onTerminal((t) => {
       // A mount owns exactly one connection generation. Drop frames from an
       // inactive connection or a prior terminal attach before touching xterm.
@@ -1231,7 +1254,32 @@ export function TerminalView({
       ) {
         return;
       }
-      const text = b64toText(t.bytes);
+      let text: string | null;
+      let parts: TerminalFrameParts | undefined;
+      if (t.frame_seq !== undefined) {
+        let decoder = frameDecoders.get(t.terminal_id);
+        if (!decoder) {
+          decoder = new TerminalFrameDecoder();
+          frameDecoders.set(t.terminal_id, decoder);
+        }
+        const decoded = decoder.decode(t);
+        if (decoded.kind === "none") return;
+        // Acknowledge on receipt: the bridge sends the next frame only once
+        // the window has room, so a slow link skips stale repaints.
+        void connectionClient
+          .call(
+            "terminal.frame_ack",
+            decoded.kind === "resync"
+              ? { terminal_id: t.terminal_id, resync: true }
+              : { terminal_id: t.terminal_id, seq: decoded.seq },
+          )
+          .catch(() => {});
+        if (decoded.kind === "resync") return;
+        parts = decoded.parts;
+        text = terminalFrameText(parts);
+      } else {
+        text = t.bytes === undefined ? null : b64toText(t.bytes);
+      }
       if (text === null) return;
       if (!t.link_frame || t.link_frame !== latestLinkFrame) invalidateLinks();
       linkReadyRef.current = true;
@@ -1254,6 +1302,7 @@ export function TerminalView({
           },
           t.history,
           t.link_frame,
+          parts,
         );
       } else {
         endpointPresentation.updateIncremental(text, () => {
@@ -1408,7 +1457,7 @@ export function TerminalView({
       const terminalId = desiredTerminalRef.current;
       if (!terminalId) return;
       const bytes = new TextEncoder().encode(text);
-      sendBytes(connectionClient, bytes, terminalId).catch(() => {});
+      sendBytes(connectionClient, bytes, terminalId);
     };
     const pasteText = async (
       text: string,
@@ -2821,6 +2870,7 @@ export function TerminalView({
     // the buffer avoids a blank flash plus losing local scrollback.
     if (renderedTerminalRef.current !== terminalId) {
       term.reset();
+      endpointPresentationRef.current?.screenChanged();
       renderedTerminalRef.current = terminalId;
     }
     resizeSyncRef.current?.markAttached({ cols, rows });
@@ -2831,6 +2881,8 @@ export function TerminalView({
         terminal_id: terminalId,
         cols,
         rows,
+        // Receive endpoint frames as acknowledged row updates.
+        frame_delta: true,
         ...(surfaceSize
           ? { surface_cols: surfaceSize.cols, surface_rows: surfaceSize.rows }
           : {}),

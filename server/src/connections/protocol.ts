@@ -224,6 +224,7 @@ export function serializeHerdrEventEnvelope(
 }
 
 const SILENT_LEGACY_RPC_METHODS = new Set([
+  "terminal.frame_ack",
   "terminal.input",
   "terminal.resize",
   "terminal.relay_resize",

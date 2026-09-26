@@ -183,8 +183,14 @@ export interface TerminalPush {
   link_frame?: string;
   /** Absolute rows of a complete endpoint pane viewport. */
   history?: import("./terminalHistorySelection").TerminalHistoryViewport;
-  /** base64-encoded ANSI bytes */
-  bytes: string;
+  /** base64-encoded ANSI bytes; absent on row-update frames. */
+  bytes?: string;
+  /** Row-update frames sent to viewers that attached with `frame_delta`. */
+  frame_seq?: number;
+  rows?: string[];
+  base_seq?: number;
+  changed?: [number, string][];
+  tail?: string;
 }
 
 export interface TerminalClipboardPush {
@@ -376,6 +382,7 @@ export class Bridge {
   private connectTimer: ReturnType<typeof setTimeout> | null = null;
   private heartbeatTimer: ReturnType<typeof setInterval> | null = null;
   private heartbeatInFlight = false;
+  private lastMessageAt = Number.NEGATIVE_INFINITY;
   private reconnectEnabled = true;
   private _status: ConnectionStatus = "disconnected";
   private _activeConnectionId = LEGACY_DEFAULT_CONNECTION_ID;
@@ -546,6 +553,7 @@ export class Bridge {
     };
     ws.onmessage = (ev) => {
       if (this.ws !== ws) return;
+      this.lastMessageAt = performance.now();
       this.onMessage(ev.data);
     };
     ws.onerror = () => {
@@ -599,6 +607,7 @@ export class Bridge {
   private runHeartbeatProbe() {
     if (this.heartbeatInFlight) return;
     this.heartbeatInFlight = true;
+    const probeStartedAt = performance.now();
     this.call("bridge.ping", {}, HEARTBEAT_TIMEOUT_MS).then(
       () => {
         this.heartbeatInFlight = false;
@@ -611,7 +620,13 @@ export class Bridge {
         // handleDisconnect would advance the client generation a second
         // time without a status transition, silently desyncing every
         // generation-scoped client captured at the first transition.
-        if (this._status === "connected") {
+        // On a slow link the pong can sit behind frames still downloading.
+        // Anything received during the probe proves the socket is alive;
+        // reconnecting would only repeat the attach and its full repaints.
+        if (
+          this._status === "connected" &&
+          this.lastMessageAt < probeStartedAt
+        ) {
           this.forceReconnect("bridge heartbeat timed out");
         }
       },
@@ -838,7 +853,8 @@ export class Bridge {
         !Number.isSafeInteger(msg.terminal.height) ||
         msg.terminal.height < 0 ||
         typeof msg.terminal.full !== "boolean" ||
-        typeof msg.terminal.bytes !== "string" ||
+        (typeof msg.terminal.bytes !== "string" &&
+          typeof msg.terminal.frame_seq !== "number") ||
         !this.pushGenerationMatches(
           msg.connection_id,
           msg.connection_generation,

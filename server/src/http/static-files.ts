@@ -1,4 +1,5 @@
 import { join } from "node:path";
+import { brotliCompressSync, constants as zlibConstants } from "node:zlib";
 import {
   decodeStaticPathname,
   isStaticRequestMethod,
@@ -38,14 +39,13 @@ export async function serveStatic(
     if (!filePath) return new Response("not found", { status: 404 });
     const file = Bun.file(filePath);
     if (await file.exists()) {
-      return new Response(file, { headers: responseHeaders(pathname) });
+      return fileResponse(req, file, filePath, pathname);
     }
     if (serveEntry) {
-      const index = Bun.file(join(directory, "index.html"));
+      const indexPath = join(directory, "index.html");
+      const index = Bun.file(indexPath);
       if (await index.exists()) {
-        return new Response(index, {
-          headers: responseHeaders("/index.html"),
-        });
+        return fileResponse(req, index, indexPath, "/index.html");
       }
     }
   }
@@ -53,8 +53,79 @@ export async function serveStatic(
   return new Response("not found", { status: 404 });
 }
 
+// Text assets are sent compressed; on a slow phone link the uncompressed entry
+// chunk alone takes minutes. Each file is compressed once per version.
+const COMPRESSIBLE = /\.(?:js|css|html|json|map|svg|wasm|txt)$/;
+const MIN_COMPRESS_BYTES = 1024;
+const compressedCache = new Map<
+  string,
+  { version: string; encoding: "br" | "gzip"; body: Uint8Array }
+>();
+
+function acceptedEncoding(req: Request): "br" | "gzip" | null {
+  const accept = req.headers.get("accept-encoding") ?? "";
+  if (/\bbr\b/.test(accept)) return "br";
+  if (/\bgzip\b/.test(accept)) return "gzip";
+  return null;
+}
+
+async function fileResponse(
+  req: Request,
+  file: ReturnType<typeof Bun.file>,
+  filePath: string,
+  pathname: string,
+): Promise<Response> {
+  const headers = responseHeaders(pathname);
+  const encoding = acceptedEncoding(req);
+  if (
+    !encoding ||
+    !COMPRESSIBLE.test(pathname) ||
+    file.size < MIN_COMPRESS_BYTES
+  ) {
+    return new Response(file, { headers });
+  }
+  const version = `${file.size}:${file.lastModified}`;
+  const key = `${encoding}:${filePath}`;
+  let cached = compressedCache.get(key);
+  if (cached?.version !== version) {
+    const raw = new Uint8Array(await file.arrayBuffer());
+    const body =
+      encoding === "br"
+        ? new Uint8Array(
+            brotliCompressSync(raw, {
+              params: {
+                [zlibConstants.BROTLI_PARAM_QUALITY]: 9,
+                [zlibConstants.BROTLI_PARAM_SIZE_HINT]: raw.length,
+              },
+            }),
+          )
+        : Bun.gzipSync(raw, { level: 9 });
+    cached = { version, encoding, body };
+    compressedCache.set(key, cached);
+  }
+  return new Response(
+    req.method === "HEAD" ? null : (cached.body as BodyInit),
+    {
+      headers: {
+        ...headers,
+        "content-encoding": cached.encoding,
+        "content-length": String(cached.body.length),
+        vary: "Accept-Encoding",
+      },
+    },
+  );
+}
+
 function responseHeaders(pathname: string): Record<string, string> {
   const headers = { "content-type": contentType(pathname) };
+  if (pathname.startsWith("/assets/")) {
+    // Vite fingerprints everything under /assets, so a URL never changes
+    // content; repeat visits then load the app without touching the network.
+    return {
+      ...headers,
+      "cache-control": "private, max-age=31536000, immutable",
+    };
+  }
   if (pathname === "/index.html") {
     return {
       ...headers,

@@ -94,12 +94,27 @@ Queued attachments reread settings. Configuration closes do not consume takeover
 retries; tasks, legacy sessions, and other runtimes are unaffected. This is a
 shared preference, not an authorization boundary.
 
-These codecs reduce **Herdr-to-bridge** traffic; browsers still receive cropped
-ANSI repaints. Independently, terminal messages of at least 1 KiB use negotiated
-WebSocket compression with per-connection context for WebKit compatibility.
-Inbound decompression is shared with client context takeover disabled. Smaller
-messages, clipboard payloads, and RPC replies stay uncompressed; backpressure
-and generation checks still apply.
+These codecs reduce **Herdr-to-bridge** traffic. On the bridge-to-browser leg,
+a viewer that attaches with `frame_delta: true` receives endpoint repaints as
+row updates (`shared/terminalFrame.ts`, `server/src/bridge/terminal-frame-stream.ts`).
+Each frame carries `frame_seq`. A full frame sends every styled row in `rows`
+plus the cursor `tail`. A row update names its `base_seq` and sends only
+`changed` rows, plus `tail` when the cursor changed. Frames identical to the
+last one sent to that viewer are not sent. The browser acknowledges each frame
+with `terminal.frame_ack { terminal_id, seq }`. At most four frames or 16 KiB
+are unacknowledged per viewer and terminal; newer frames replace the pending
+one, so a slow link skips to the newest screen instead of queueing repaints.
+A missing base makes the browser send `terminal.frame_ack { resync: true }` and
+the bridge answers with a full frame. Attach and resize also restart from a
+full frame, and a 10 s acknowledgement timeout releases the window. Viewers
+that do not opt in, popups, and legacy streams keep base64 `bytes` repaints.
+The browser writes only changed rows into xterm while its viewport is unchanged.
+
+Messages of at least 128 bytes use negotiated WebSocket compression with
+per-connection context for WebKit compatibility, so repeated rows and poll
+replies compress against earlier messages. Clipboard payloads stay
+uncompressed. Inbound decompression is shared with client context takeover
+disabled; backpressure and generation checks still apply.
 
 ### Geometry, input, and selection
 

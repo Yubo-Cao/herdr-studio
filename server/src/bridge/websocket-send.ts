@@ -2,7 +2,11 @@ import { serverLogger } from "../utils/logger";
 
 export const WS_BACKPRESSURE_LIMIT_BYTES = 8 * 1024 * 1024;
 export const WS_COALESCE_LIMIT_BYTES = 1024 * 1024;
-export const WS_COMPRESSION_MIN_BYTES = 1024;
+// The per-connection compressor keeps its dictionary across messages, so even
+// small repeated payloads (row updates, poll replies) shrink substantially.
+export const WS_COMPRESSION_MIN_BYTES = 128;
+// Clipboard payloads can carry secrets; keep them out of the shared dictionary.
+const WS_UNCOMPRESSED_CONTEXTS = new Set(["terminal-clipboard"]);
 // WebKit rejects shared-compressor streams interleaved with plain replies.
 // Keep compression per connection; inbound decompression can still be shared.
 export const WS_PER_MESSAGE_DEFLATE = {
@@ -135,7 +139,7 @@ export function sendWebSocketMessage(
 
     const result = ws.send(
       payload,
-      context === "terminal-frame" &&
+      !WS_UNCOMPRESSED_CONTEXTS.has(context) &&
         Buffer.byteLength(payload) >= WS_COMPRESSION_MIN_BYTES,
     );
     if (result === 0) {
