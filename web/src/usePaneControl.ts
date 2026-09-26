@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import type { ConnectionClient } from "./api";
 import {
@@ -62,7 +63,7 @@ export function usePaneControl(
   );
   const assertInputAllowed = useCallback(() => {
     if (accessRef.current.viewOnly)
-      throw new Error("This pane is view only. Take control to send input.");
+      throw new Error(t("This pane is view only. Take control to send input."));
   }, []);
   const change = useCallback(
     async (viewOnly: boolean) => {
@@ -95,7 +96,9 @@ export function usePaneControl(
           return;
         if (!viewOnly && result?.granted !== true)
           throw new Error(
-            "Layout control is temporarily held by another collaborator. Try again when its protection ends.",
+            t(
+              "Layout control is temporarily held by another collaborator. Try again when its protection ends.",
+            ),
           );
         if (!viewOnly) setViewingScope(null);
         const latest = await client.call("collaboration.list");

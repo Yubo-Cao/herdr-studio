@@ -1,3 +1,5 @@
+import { t } from "./i18n";
+
 const SSH_DESTINATION_MAX_LENGTH = 320;
 const SSH_USER_PATTERN = /^[A-Za-z0-9_][A-Za-z0-9._-]{0,63}$/;
 const SSH_HOST_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,252}$/;
@@ -14,13 +16,17 @@ export function validateSshDestination(value: unknown): string {
     value.includes("://")
   ) {
     throw new Error(
-      "SSH destination must be an OpenSSH alias or user@host. Use an OpenSSH config alias for custom ports.",
+      t(
+        "SSH destination must be an OpenSSH alias or user@host. Use an OpenSSH config alias for custom ports.",
+      ),
     );
   }
   const parts = value.split("@");
   if (parts.length > 2) {
     throw new Error(
-      "SSH destination must be an OpenSSH alias or user@host. Use an OpenSSH config alias for custom ports.",
+      t(
+        "SSH destination must be an OpenSSH alias or user@host. Use an OpenSSH config alias for custom ports.",
+      ),
     );
   }
   const host = parts.length === 2 ? parts[1] : parts[0];
@@ -30,7 +36,9 @@ export function validateSshDestination(value: unknown): string {
     (user !== undefined && !SSH_USER_PATTERN.test(user))
   ) {
     throw new Error(
-      "SSH destination must be an OpenSSH alias or user@host. Use an OpenSSH config alias for custom ports.",
+      t(
+        "SSH destination must be an OpenSSH alias or user@host. Use an OpenSSH config alias for custom ports.",
+      ),
     );
   }
   return value;
@@ -51,7 +59,11 @@ export function validateRemoteSocketPath(
     !/^[\x21-\x7e]+$/.test(value) ||
     /[:\\\s]/.test(value)
   ) {
-    throw new Error(`${field} path must be a short absolute POSIX path.`);
+    throw new Error(
+      t("{field} path must be a short absolute POSIX path.", {
+        field: t(field),
+      }),
+    );
   }
   const segments = value.split("/").slice(1);
   if (
@@ -64,7 +76,11 @@ export function validateRemoteSocketPath(
         !REMOTE_SOCKET_SEGMENT_PATTERN.test(segment),
     )
   ) {
-    throw new Error(`${field} path must be a short absolute POSIX path.`);
+    throw new Error(
+      t("{field} path must be a short absolute POSIX path.", {
+        field: t(field),
+      }),
+    );
   }
   return value;
 }

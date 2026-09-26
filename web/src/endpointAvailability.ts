@@ -1,3 +1,5 @@
+import { t } from "./i18n";
+
 export interface EndpointAdvertisement {
   methods: string[];
   capabilities: string[];
@@ -43,8 +45,10 @@ export function endpointMethodReason(
 ): string | null {
   if (mode === "shared") return null;
   if (!advertisement)
-    return "Endpoint availability is loading. Open the source terminal and wait for it to connect.";
+    return t(
+      "Endpoint availability is loading. Open the source terminal and wait for it to connect.",
+    );
   return advertisement.methods.includes(method)
     ? null
-    : `Herdr endpoint does not advertise ${method}`;
+    : t("Herdr endpoint does not advertise {method}", { method });
 }

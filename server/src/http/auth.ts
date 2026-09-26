@@ -1,6 +1,6 @@
 import { createHmac, randomBytes, timingSafeEqual } from "node:crypto";
 
-import { LOGIN_HTML } from "./login-page";
+import { loginLocale, renderLoginHtml } from "./login-page";
 
 const AUTH_COOKIE = "herdr_auth";
 const AUTH_TOKEN_TTL_SECONDS = 30 * 24 * 60 * 60;
@@ -180,12 +180,14 @@ export function createAuthHandlers(args: {
     });
   }
 
-  function loginPage(): Response {
-    return new Response(LOGIN_HTML, {
+  function loginPage(req?: Request): Response {
+    const locale = loginLocale(req?.headers.get("accept-language"));
+    return new Response(renderLoginHtml(locale), {
       headers: {
         "content-type": "text/html; charset=utf-8",
         "cache-control": "no-store",
         "referrer-policy": "no-referrer",
+        vary: "Accept-Language",
       },
     });
   }

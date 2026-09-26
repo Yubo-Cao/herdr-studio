@@ -1,3 +1,4 @@
+import { msg, t } from "./i18n";
 import {
   validateRemoteSocketPath,
   validateSshDestination,
@@ -92,11 +93,11 @@ export function parseConnectionSummary(
       const destination = validateSshDestination(item.ssh_destination);
       const controlPath = validateRemoteSocketPath(
         item.remote_control_socket_path,
-        "Remote control socket",
+        msg("Remote control socket"),
       );
       const clientPath = validateRemoteSocketPath(
         item.remote_client_socket_path,
-        "Remote render socket",
+        msg("Remote render socket"),
       );
       if (
         (controlPath && clientPath && controlPath === clientPath) ||
@@ -286,7 +287,7 @@ export async function logoutBrowserSession(): Promise<void> {
     credentials: "same-origin",
     headers: { "x-roamgate-logout": "1" },
   });
-  if (!response.ok) throw new Error("Could not log out. Please try again.");
+  if (!response.ok) throw new Error(t("Could not log out. Please try again."));
   location.replace("/login");
 }
 
