@@ -169,4 +169,18 @@ export default {
   "A sync will run now, then every 10 minutes while this workspace remains open.":
     "将立即同步一次，之后在此工作区保持打开期间每 10 分钟同步一次。",
   "Failed to update automatic sync settings": "更新自动同步设置失败",
+  Connected: "已连接",
+  Connecting: "正在连接",
+  Reconnecting: "正在重新连接",
+  Disconnecting: "正在断开连接",
+  Error: "错误",
+  Disconnected: "已断开",
+  "Browser sync paused": "浏览器同步已暂停",
+  "Browser connected to bridge": "浏览器已连接到桥接服务",
+  "Browser connecting to bridge": "浏览器正在连接桥接服务",
+  "Pause other browser": "暂停其他浏览器",
+  "Pause other browsers ({count})": "暂停其他浏览器（{count}）",
+  "Pause browser sync": "暂停浏览器同步",
+  "Resume browser sync": "恢复浏览器同步",
+  "Reconnect browser": "重新连接浏览器",
 } satisfies Record<string, string>;

@@ -44,17 +44,17 @@ export function connectionLifecycleLabel(
 ): string {
   switch (state) {
     case "ready":
-      return "Connected";
+      return t("Connected");
     case "connecting":
-      return "Connecting";
+      return t("Connecting");
     case "reconnecting":
-      return "Reconnecting";
+      return t("Reconnecting");
     case "stopping":
-      return "Disconnecting";
+      return t("Disconnecting");
     case "error":
-      return "Error";
+      return t("Error");
     case "disconnected":
-      return "Disconnected";
+      return t("Disconnected");
   }
 }
 

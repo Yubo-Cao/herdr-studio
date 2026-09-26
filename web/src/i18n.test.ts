@@ -16,7 +16,9 @@ function sourceFiles(directory: string): string[] {
 }
 
 // t("…") and msg("…") literals, allowing a line break after the parenthesis.
-const MESSAGE_CALL = /\b(?:t|msg)\(\s*"((?:[^"\\\n]|\\.)*)"/g;
+// Biome writes text that contains double quotes with single quotes.
+const MESSAGE_CALL =
+  /\b(?:t|msg)\(\s*(?:"((?:[^"\\\n]|\\.)*)"|'((?:[^'\\\n]|\\.)*)')/g;
 const TEMPLATE_CALL = /\b(?:t|msg)\(\s*`/;
 
 function extractMessages() {
@@ -30,7 +32,10 @@ function extractMessages() {
       .join("\n");
     if (TEMPLATE_CALL.test(source)) templates.push(relative(SOURCE_ROOT, file));
     for (const match of source.matchAll(MESSAGE_CALL)) {
-      const text = JSON.parse(`"${match[1]}"`) as string;
+      const text =
+        match[1] !== undefined
+          ? (JSON.parse(`"${match[1]}"`) as string)
+          : match[2].replace(/\\(.)/g, "$1");
       if (!messages.has(text)) messages.set(text, relative(SOURCE_ROOT, file));
     }
   }

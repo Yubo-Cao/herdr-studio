@@ -299,6 +299,10 @@ separate for desktop/mobile. Jump from a diff to its file preview.
   [Web Push setup and revocation](docs/DEPLOYMENT.md#web-push-notifications).
 - Choose light/dark/system appearance, accents, built-in/custom terminal themes,
   and UI text size (80%–150%). Preferences stay in this browser.
+- The interface is available in English and Simplified Chinese. **Language**
+  under **Configuration > Appearance** defaults to **Auto**, which follows the
+  browser's language; changing it reloads the page. The login page follows the
+  browser's `Accept-Language`.
 - **Configuration > Connection > Terminal incremental transport** saves a shared
   per-connection setting on the server. It reduces Herdr-to-Roamgate traffic,
   briefly reconnecting displays without stopping tasks; older servers retain

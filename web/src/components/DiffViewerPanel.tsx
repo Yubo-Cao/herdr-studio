@@ -42,7 +42,7 @@ import {
 } from "../gitDiffSummaryStore";
 import { diffAutoCollapseInfo } from "./diffAutoCollapse";
 import { store } from "../store";
-import { t } from "../i18n";
+import { getLocale, t } from "../i18n";
 import { copyTextFromUserGesture } from "../terminalClipboard";
 import { bumpFileExplorerRefresh } from "../fileExplorerRefresh";
 import {
@@ -1762,7 +1762,9 @@ export const DiffViewerPanel = forwardRef<
                     {t("Working tree")}
                   </span>
                   <span className="diff-scope-label-short" aria-hidden="true">
-                    {t("Working")}
+                    {/* Chinese needs no abbreviation; "Working" and "Main"
+                        mean an agent status and the main worktree elsewhere. */}
+                    {getLocale() === "en" ? "Working" : t("Working tree")}
                   </span>
                 </>
               ),
@@ -1777,7 +1779,7 @@ export const DiffViewerPanel = forwardRef<
                     {t("Against main")}
                   </span>
                   <span className="diff-scope-label-short" aria-hidden="true">
-                    {t("Main")}
+                    {getLocale() === "en" ? "Main" : t("Against main")}
                   </span>
                 </>
               ),

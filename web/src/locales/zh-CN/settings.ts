@@ -313,7 +313,7 @@ export default {
   "Session overview": "会话概览",
   Turns: "轮次",
   Tokens: "Token",
-  Updated: "更新时间",
+  Updated: "已更新",
   "Input {count}": "输入 {count}",
   "Cached {count}": "缓存 {count}",
   "Output {count}": "输出 {count}",
