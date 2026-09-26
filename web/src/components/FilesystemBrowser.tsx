@@ -24,6 +24,7 @@ import {
   parentFilesystemPath,
 } from "../filesystemPaths";
 import { store, useStoreSelector } from "../store";
+import { t } from "../i18n";
 import { Button } from "./ui/Button";
 import { Token } from "./ui/Token";
 import { TextInputDialog } from "./ModalDialogs";
@@ -119,7 +120,7 @@ export function FilesystemBrowser({
         if (cancelled || !client.isCurrent()) return;
         if (result.scope !== "filesystem") {
           throw new Error(
-            "Filesystem browsing requires an updated Studio bridge.",
+            t("Filesystem browsing requires an updated Studio bridge."),
           );
         }
         setList(result);
@@ -192,12 +193,17 @@ export function FilesystemBrowser({
       seen.add(normalized);
       result.push({ key, label, path, title });
     };
-    if (workspaceRoot) add("workspace", "Workspace", workspaceRoot);
+    if (workspaceRoot) add("workspace", t("Workspace"), workspaceRoot);
     for (const cwd of paneCwdKey ? paneCwdKey.split("\n") : []) {
-      add(`cwd:${cwd}`, filesystemBaseName(cwd), cwd, `Pane directory ${cwd}`);
+      add(
+        `cwd:${cwd}`,
+        filesystemBaseName(cwd),
+        cwd,
+        t("Pane directory {path}", { path: cwd }),
+      );
     }
-    add("home", "Home", "~", "Home directory on the connected host");
-    add("root", "/", "/", "Filesystem root");
+    add("home", t("Home"), "~", t("Home directory on the connected host"));
+    add("root", "/", "/", t("Filesystem root"));
     return result;
   }, [paneCwdKey, workspaceRoot]);
 
@@ -245,8 +251,8 @@ export function FilesystemBrowser({
     if (entry.symlink_status === "broken") {
       store.notify({
         kind: "error",
-        message: "Cannot open symlink",
-        detail: "The symlink target does not exist or cannot be resolved.",
+        message: t("Cannot open symlink"),
+        detail: t("The symlink target does not exist or cannot be resolved."),
       });
       return;
     }
@@ -266,7 +272,7 @@ export function FilesystemBrowser({
         if (!client.isCurrent()) return;
         store.notify({
           kind: "error",
-          message: `Upload failed: ${file.name}`,
+          message: t("Upload failed: {name}", { name: file.name }),
           detail: (reason as Error).message,
         });
       } finally {
@@ -278,7 +284,9 @@ export function FilesystemBrowser({
       store.notify({
         kind: "success",
         message:
-          uploaded === 1 ? "File uploaded" : `${uploaded} files uploaded`,
+          uploaded === 1
+            ? t("File uploaded")
+            : t("{count} files uploaded", { count: uploaded }),
         detail: target,
         autoDismissMs: 5000,
       });
@@ -313,7 +321,7 @@ export function FilesystemBrowser({
       store.notify({
         kind: "error",
         message:
-          kind === "file" ? "Cannot create file" : "Cannot create folder",
+          kind === "file" ? t("Cannot create file") : t("Cannot create folder"),
         detail: (reason as Error).message,
       });
     }
@@ -340,8 +348,8 @@ export function FilesystemBrowser({
       <div className="ui-bar filesystem-nav">
         <Button
           icon
-          title="Back"
-          aria-label="Back"
+          title={t("Back")}
+          aria-label={t("Back")}
           disabled={!history.back.length}
           onClick={goBack}
         >
@@ -349,8 +357,8 @@ export function FilesystemBrowser({
         </Button>
         <Button
           icon
-          title="Forward"
-          aria-label="Forward"
+          title={t("Forward")}
+          aria-label={t("Forward")}
           disabled={!history.forward.length}
           onClick={goForward}
         >
@@ -358,8 +366,8 @@ export function FilesystemBrowser({
         </Button>
         <Button
           icon
-          title="Parent directory"
-          aria-label="Parent directory"
+          title={t("Parent directory")}
+          aria-label={t("Parent directory")}
           disabled={atRoot}
           onClick={() => navigate(parent)}
         >
@@ -376,9 +384,9 @@ export function FilesystemBrowser({
             <input
               ref={pathInputRef}
               className="filesystem-path-input"
-              aria-label="Directory path"
+              aria-label={t("Directory path")}
               value={pathInput}
-              placeholder="/absolute/path or ~/path on the connected host"
+              placeholder={t("/absolute/path or ~/path on the connected host")}
               spellCheck={false}
               autoCapitalize="off"
               autoCorrect="off"
@@ -400,8 +408,8 @@ export function FilesystemBrowser({
           <div
             className="filesystem-breadcrumbs"
             role="navigation"
-            aria-label="Directory path"
-            title="Click empty space to type a path"
+            aria-label={t("Directory path")}
+            title={t("Click empty space to type a path")}
             onClick={(event) => {
               if (event.target === event.currentTarget) setEditingPath(true);
             }}
@@ -425,7 +433,9 @@ export function FilesystemBrowser({
                     <button
                       type="button"
                       title={crumb.path}
-                      aria-label={`Show ancestors of ${currentPath}`}
+                      aria-label={t("Show ancestors of {path}", {
+                        path: currentPath,
+                      })}
                       onClick={() => setEditingPath(true)}
                     >
                       ...
@@ -460,22 +470,22 @@ export function FilesystemBrowser({
             <button
               type="button"
               className="filesystem-path-edit"
-              aria-label="Edit path"
-              title="Type a path"
+              aria-label={t("Edit path")}
+              title={t("Type a path")}
               onClick={() => setEditingPath(true)}
             />
           </div>
         )}
         <Button
           icon
-          title="Refresh"
-          aria-label="Refresh files"
+          title={t("Refresh")}
+          aria-label={t("Refresh files")}
           onClick={() => setRefresh((value) => value + 1)}
         >
           <RefreshCw size={14} className={loading ? "is-spinning" : ""} />
         </Button>
       </div>
-      <div className="filesystem-places" aria-label="Locations">
+      <div className="filesystem-places" aria-label={t("Locations")}>
         {places.map((place) => (
           <button
             type="button"
@@ -510,14 +520,16 @@ export function FilesystemBrowser({
                 ?.querySelector<HTMLButtonElement>("button[data-file-path]")
                 ?.focus();
             }}
-            placeholder="Filter"
-            aria-label="Filter loaded entries"
+            placeholder={t("Filter")}
+            aria-label={t("Filter loaded entries")}
             maxLength={512}
-            title="Filter loaded names or paths. Globs: r*md, ?.txt, **/*.md, *.{md,txt}"
+            title={t(
+              "Filter loaded names or paths. Globs: r*md, ?.txt, **/*.md, *.{md,txt}",
+            )}
           />
         </label>
         {list ? (
-          <Token title={`${list.entries.length} entries`}>
+          <Token title={t("{count} entries", { count: list.entries.length })}>
             {search ? `${entries.length}/` : ""}
             {list.entries.length}
           </Token>
@@ -525,16 +537,16 @@ export function FilesystemBrowser({
         <Button
           icon
           aria-pressed={showHidden}
-          title={showHidden ? "Hide hidden files" : "Show hidden files"}
-          aria-label="Show hidden files"
+          title={showHidden ? t("Hide hidden files") : t("Show hidden files")}
+          aria-label={t("Show hidden files")}
           onClick={() => onShowHiddenChange(!showHidden)}
         >
           {showHidden ? <Eye size={14} /> : <EyeOff size={14} />}
         </Button>
         <Button
           icon
-          title="New file"
-          aria-label="New file"
+          title={t("New file")}
+          aria-label={t("New file")}
           disabled={!list}
           onClick={() => setCreating("file")}
         >
@@ -542,8 +554,8 @@ export function FilesystemBrowser({
         </Button>
         <Button
           icon
-          title="New folder"
-          aria-label="New folder"
+          title={t("New folder")}
+          aria-label={t("New folder")}
           disabled={!list}
           onClick={() => setCreating("directory")}
         >
@@ -551,8 +563,8 @@ export function FilesystemBrowser({
         </Button>
         <Button
           icon
-          title="Upload files here"
-          aria-label="Upload files"
+          title={t("Upload files here")}
+          aria-label={t("Upload files")}
           disabled={!list}
           onClick={() => uploadInputRef.current?.click()}
         >
@@ -577,20 +589,24 @@ export function FilesystemBrowser({
       ) : null}
       {list?.truncated ? (
         <p className="filesystem-message">
-          Showing the first {list.entries.length} entries.
+          {t("Showing the first {count} entries.", {
+            count: list.entries.length,
+          })}
         </p>
       ) : null}
       {uploading ? (
         <p className="filesystem-message" role="status">
-          <span className="row-spinner" /> Uploading {uploading} file
-          {uploading === 1 ? "" : "s"}
+          <span className="row-spinner" />{" "}
+          {uploading === 1
+            ? t("Uploading 1 file")
+            : t("Uploading {count} files", { count: uploading })}
         </p>
       ) : null}
       <div
         ref={listRef}
         className={`filesystem-list ${dropActive ? "is-drop-target" : ""}`}
         role="list"
-        aria-label="Filesystem entries"
+        aria-label={t("Filesystem entries")}
         aria-busy={loading}
         onDragOver={(event) => {
           if (!event.dataTransfer.types.includes("Files") || !list) return;
@@ -612,17 +628,18 @@ export function FilesystemBrowser({
       >
         {dropActive ? (
           <div className="filesystem-message" role="status">
-            <Upload size={13} /> Drop to upload to {currentPath}
+            <Upload size={13} />{" "}
+            {t("Drop to upload to {path}", { path: currentPath })}
           </div>
         ) : null}
         {loading && !list ? (
           <div className="filesystem-message" role="status">
-            Loading directory...
+            {t("Loading directory...")}
           </div>
         ) : null}
         {!loading && !error && !entries.length ? (
           <div className="filesystem-message">
-            {search ? "No loaded entries match." : "Empty directory"}
+            {search ? t("No loaded entries match.") : t("Empty directory")}
           </div>
         ) : null}
         {entries.map((entry) => {
@@ -693,8 +710,8 @@ export function FilesystemBrowser({
               <button
                 type="button"
                 className="filesystem-entry-action"
-                aria-label={`Actions for ${entry.name}`}
-                title={`Actions for ${entry.name}`}
+                aria-label={t("Actions for {name}", { name: entry.name })}
+                title={t("Actions for {name}", { name: entry.name })}
                 onClick={(event) => {
                   const rect = event.currentTarget.getBoundingClientRect();
                   onMenu(entry, rect.right, rect.bottom);
@@ -708,10 +725,10 @@ export function FilesystemBrowser({
       </div>
       <TextInputDialog
         open={creating !== null}
-        title={creating === "directory" ? "New Folder" : "New File"}
-        label={`Name inside ${currentPath}`}
+        title={creating === "directory" ? t("New Folder") : t("New File")}
+        label={t("Name inside {path}", { path: currentPath })}
         placeholder={creating === "directory" ? "folder-name" : "file.txt"}
-        submitLabel="Create"
+        submitLabel={t("Create")}
         onClose={() => setCreating(null)}
         onSubmit={(value) => {
           const kind = creating;

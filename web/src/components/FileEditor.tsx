@@ -1,5 +1,6 @@
 import { useEffect, useRef } from "react";
 import { terminalFontOptions, TERMINAL_FONT_FAMILY } from "../appearance";
+import { t } from "../i18n";
 import { monacoLanguageForPath } from "../monacoLanguages";
 import { applyMonacoTheme, monaco } from "../monacoSetup";
 import "./FileEditor.css";
@@ -88,7 +89,7 @@ export function FileEditor({
       ref={containerRef}
       className="file-editor"
       role="region"
-      aria-label={`Editor for ${path}`}
+      aria-label={t("Editor for {path}", { path })}
     />
   );
 }

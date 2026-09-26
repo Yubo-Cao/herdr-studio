@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { t } from "../i18n";
 import {
   loadMermaidModule,
   normalizeMermaidSource,
@@ -75,23 +76,23 @@ export function MermaidDiagram({
         aria-live="polite"
       >
         <span className="file-loading-spinner" />
-        Rendering diagram
+        {t("Rendering diagram")}
       </div>
     );
   }
   if (state.kind === "empty") {
     return (
       <div className={`mermaid-diagram is-empty ${className}`.trim()}>
-        Empty diagram
+        {t("Empty diagram")}
       </div>
     );
   }
   if (state.kind === "error") {
     return (
       <div className={`mermaid-diagram-error ${className}`.trim()} role="alert">
-        Mermaid render failed: {state.error}
+        {t("Mermaid render failed: {error}", { error: state.error })}
         <details>
-          <summary>Show diagram source</summary>
+          <summary>{t("Show diagram source")}</summary>
           <pre>
             <code>{code}</code>
           </pre>
@@ -103,13 +104,13 @@ export function MermaidDiagram({
     <ZoomablePreview
       key={code}
       dimensions={state}
-      label="Mermaid diagram"
+      label={t("Mermaid diagram")}
       className={`mermaid-diagram ${className}`.trim()}
     >
       <div
         className="mermaid-svg"
         role="img"
-        aria-label="Mermaid diagram"
+        aria-label={t("Mermaid diagram")}
         // Renderer labels are escaped, styles are scoped, and IDs are unique.
         dangerouslySetInnerHTML={{ __html: state.svg }}
       />

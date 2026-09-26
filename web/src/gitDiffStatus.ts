@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { GitDiffEntry } from "./types";
 
 export type GitDiffCode = "U" | "A" | "M" | "D" | "C";
@@ -23,16 +24,16 @@ export function gitDiffCode(
 export function gitDiffCodeLabel(code: GitDiffCode): string {
   switch (code) {
     case "U":
-      return "Untracked";
+      return t("Untracked");
     case "C":
-      return "Conflict";
+      return t("Conflict");
     case "A":
-      return "Added";
+      return t("Added");
     case "D":
-      return "Deleted";
+      return t("Deleted");
     case "M":
-      return "Modified";
+      return t("Modified");
     default:
-      return "Unknown";
+      return t("Unknown");
   }
 }

@@ -1,3 +1,4 @@
+import { t } from "../i18n";
 import type { GitDiffEntry, GitDiffFile } from "../types";
 
 export const LARGE_DIFF_CHANGED_LINES = 1000;
@@ -16,16 +17,18 @@ export function diffAutoCollapseInfo(
   file?: GitDiffFile | null,
 ): DiffAutoCollapseInfo | null {
   if (entry.generated) {
-    return { reason: "generated", label: "generated file" };
+    return { reason: "generated", label: t("generated file") };
   }
   if (file?.truncated) {
-    return { reason: "truncated", label: "large diff" };
+    return { reason: "truncated", label: t("large diff") };
   }
   const changedLines = diffChangedLineCount(entry);
   if (changedLines >= LARGE_DIFF_CHANGED_LINES) {
     return {
       reason: "large",
-      label: `${changedLines.toLocaleString("en-US")} changed lines`,
+      label: t("{count} changed lines", {
+        count: changedLines.toLocaleString("en-US"),
+      }),
     };
   }
   return null;

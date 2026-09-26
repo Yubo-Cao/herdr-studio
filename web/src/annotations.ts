@@ -1,4 +1,5 @@
 import { connectionStorageKey } from "./connectionStorage";
+import { t } from "./i18n";
 import type { GitDiffKind, Pane } from "./types";
 import { resourceOwnerKey, type ResourceScope } from "./workspaceResource";
 
@@ -671,6 +672,43 @@ export function reanchorDiffReviewAnnotations(
 
 function normalizedSearchText(value: string) {
   return value.replace(/\s+/g, " ").trim();
+}
+
+/** Localized diff line label for display; the English form goes to agents. */
+export function diffReviewLineDisplayLabel(
+  annotation: Pick<
+    DiffReviewAnnotation,
+    "side" | "line" | "endSide" | "endLine"
+  >,
+) {
+  const values = { line: annotation.line, end: annotation.endLine ?? 0 };
+  if (annotation.endLine === undefined) {
+    return annotation.side === "old"
+      ? t("old line {line}", values)
+      : t("new line {line}", values);
+  }
+  const endSide = annotation.endSide ?? annotation.side;
+  if (endSide === annotation.side) {
+    return annotation.side === "old"
+      ? t("old lines {line}–{end}", values)
+      : t("new lines {line}–{end}", values);
+  }
+  return annotation.side === "old"
+    ? t("old line {line} → new line {end}", values)
+    : t("new line {line} → old line {end}", values);
+}
+
+/** Localized file line label for display; the English form goes to agents. */
+export function fileReviewLineDisplayLabel(
+  annotation: Pick<FileLineReviewAnnotation, "line" | "endLine">,
+) {
+  return annotation.endLine !== undefined &&
+    annotation.endLine !== annotation.line
+    ? t("lines {line}-{end}", {
+        line: annotation.line,
+        end: annotation.endLine,
+      })
+    : t("line {line}", { line: annotation.line });
 }
 
 export function fileReviewLineLabel(

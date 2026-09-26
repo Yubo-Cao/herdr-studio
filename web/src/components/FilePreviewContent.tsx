@@ -26,7 +26,8 @@ import {
   Save,
   X,
 } from "lucide-react";
-import { fileReviewLineLabel, MAX_QUOTE_LENGTH } from "../annotations";
+import { fileReviewLineDisplayLabel, MAX_QUOTE_LENGTH } from "../annotations";
+import { t } from "../i18n";
 import {
   FileAnnotationDrag,
   type FileAnnotationRequest,
@@ -52,6 +53,7 @@ import {
 import { MermaidDiagram } from "./MermaidDiagram";
 import { ImagePreview } from "./ImagePreview";
 import {
+  codeMirrorSearchPhrases,
   handlePreviewEditorCopy,
   isEditablePreviewTarget,
   isPreviewKeyboardTarget,
@@ -403,10 +405,12 @@ export function FilePreviewContent({
           y: pendingAnnotation.y,
           title:
             pendingAnnotation.kind === "line"
-              ? `${pendingAnnotation.path} · ${fileReviewLineLabel(pendingAnnotation)}`
+              ? `${pendingAnnotation.path} · ${fileReviewLineDisplayLabel(pendingAnnotation)}`
               : pendingAnnotation.section.length
                 ? `${pendingAnnotation.path} · ${pendingAnnotation.section.join(" › ")}`
-                : `${pendingAnnotation.path} · selected passage`,
+                : t("{path} · selected passage", {
+                    path: pendingAnnotation.path,
+                  }),
           quote: pendingAnnotation.quote,
         }
       : null;
@@ -448,7 +452,9 @@ export function FilePreviewContent({
     if (
       dirty &&
       !window.confirm(
-        `Discard unsaved changes to ${entry?.name ?? previewPath}?`,
+        t("Discard unsaved changes to {name}?", {
+          name: entry?.name ?? previewPath,
+        }),
       )
     )
       return;
@@ -468,8 +474,10 @@ export function FilePreviewContent({
     if (new TextEncoder().encode(current.text).length > FILE_WRITE_MAX_BYTES) {
       store.notify({
         kind: "error",
-        message: "File is too large to save",
-        detail: `The editor saves files up to ${FILE_WRITE_MAX_BYTES / 1024 / 1024} MiB.`,
+        message: t("File is too large to save"),
+        detail: t("The editor saves files up to {size} MiB.", {
+          size: FILE_WRITE_MAX_BYTES / 1024 / 1024,
+        }),
       });
       return;
     }
@@ -502,7 +510,7 @@ export function FilePreviewContent({
       onRefresh?.();
       store.notify({
         kind: "success",
-        message: "File saved",
+        message: t("File saved"),
         detail: previewPath,
         autoDismissMs: 3000,
       });
@@ -513,7 +521,7 @@ export function FilePreviewContent({
       } else {
         store.notify({
           kind: "error",
-          message: "Failed to save file",
+          message: t("Failed to save file"),
           detail: message,
         });
       }
@@ -525,7 +533,7 @@ export function FilePreviewContent({
   const reloadAfterConflict = () => {
     if (
       dirty &&
-      !window.confirm("Discard your edits and reload the file from disk?")
+      !window.confirm(t("Discard your edits and reload the file from disk?"))
     )
       return;
     setSaveConflict(null);
@@ -640,14 +648,14 @@ export function FilePreviewContent({
       await copyTextFromUserGesture(previewText);
       store.notify({
         kind: "success",
-        message: "File content copied",
+        message: t("File content copied"),
         detail: previewPath,
         autoDismissMs: 3000,
       });
     } catch (copyError) {
       store.notify({
         kind: "error",
-        message: "Failed to copy file content",
+        message: t("Failed to copy file content"),
         detail: (copyError as Error).message,
       });
     }
@@ -657,7 +665,7 @@ export function FilePreviewContent({
     <section
       ref={previewSectionRef}
       className="file-preview"
-      aria-label="File preview"
+      aria-label={t("File preview")}
       tabIndex={-1}
       onKeyDownCapture={(e) => {
         if (shortcutMatches(e.nativeEvent, "preview.search")) {
@@ -682,15 +690,15 @@ export function FilePreviewContent({
             </button>
           ) : null}
           <div className="file-preview-title" title={entry?.name}>
-            {entry?.name ?? "Preview"}
+            {entry?.name ?? t("Preview")}
           </div>
           <div className="file-preview-head-actions">
             {!showingChanges && showDirectoryWorkspaceAction ? (
               <button
                 type="button"
                 className="file-preview-refresh"
-                title="New workspace with this directory as CWD"
-                aria-label="New workspace with this directory as CWD"
+                title={t("New workspace with this directory as CWD")}
+                aria-label={t("New workspace with this directory as CWD")}
                 onClick={() => setWorkspaceDialogOpen(true)}
               >
                 <FolderPlus size={13} aria-hidden="true" />
@@ -700,8 +708,8 @@ export function FilePreviewContent({
               <button
                 type="button"
                 className="file-preview-refresh"
-                title="Refresh preview"
-                aria-label="Refresh preview"
+                title={t("Refresh preview")}
+                aria-label={t("Refresh preview")}
                 disabled={loading}
                 onClick={onRefresh}
               >
@@ -716,8 +724,8 @@ export function FilePreviewContent({
               <button
                 type="button"
                 className="file-preview-refresh"
-                title="Edit file"
-                aria-label="Edit file"
+                title={t("Edit file")}
+                aria-label={t("Edit file")}
                 onClick={startEditing}
               >
                 <Pencil size={13} aria-hidden="true" />
@@ -727,24 +735,24 @@ export function FilePreviewContent({
               <button
                 type="button"
                 className="file-preview-copy"
-                title="Copy entire file content"
+                title={t("Copy entire file content")}
                 onClick={() => void copyPreviewText()}
               >
-                Copy
+                {t("Copy")}
               </button>
             ) : null}
             {!showingChanges && hasRichPreview && !editing ? (
               <SegmentedControl
                 className="file-preview-mode-toggle"
-                aria-label="Preview mode"
+                aria-label={t("Preview mode")}
                 value={previewMode}
                 onChange={setPreviewMode}
                 options={[
                   {
                     value: "rendered",
-                    label: hasMermaidPreview ? "Diagram" : "Preview",
+                    label: hasMermaidPreview ? t("Diagram") : t("Preview"),
                   },
-                  { value: "raw", label: "Source" },
+                  { value: "raw", label: t("Source") },
                 ]}
               />
             ) : null}
@@ -753,12 +761,14 @@ export function FilePreviewContent({
                 type="button"
                 className="file-preview-changes-toggle"
                 aria-pressed={showingChanges}
-                title={showingChanges ? "Show file preview" : "Show changes"}
+                title={
+                  showingChanges ? t("Show file preview") : t("Show changes")
+                }
                 onClick={() =>
                   setDetailTab(showingChanges ? "file" : "changes")
                 }
               >
-                Changes
+                {t("Changes")}
               </button>
             ) : null}
           </div>
@@ -770,35 +780,35 @@ export function FilePreviewContent({
         <div
           className="file-preview-file-content file-editor-shell"
           role="region"
-          aria-label={`Editing ${entry?.name ?? previewPath}`}
+          aria-label={t("Editing {name}", { name: entry?.name ?? previewPath })}
         >
           <div className="ui-bar file-editor-bar">
-            <span className="ui-bar-title">Editing</span>
+            <span className="ui-bar-title">{t("Editing")}</span>
             <Token tone={dirty ? "warning" : "neutral"}>
-              {saving ? "Saving" : dirty ? "Unsaved" : "Saved"}
+              {saving ? t("Saving") : dirty ? t("Unsaved") : t("Saved")}
             </Token>
             <span className="ui-bar-spacer" />
             <Button
               variant="primary"
               disabled={!dirty || saving}
-              title="Save (Ctrl+S / Cmd+S)"
+              title={t("Save (Ctrl+S / Cmd+S)")}
               onClick={() => void saveDraft()}
             >
               <Save size={13} aria-hidden="true" />
-              Save
+              {t("Save")}
             </Button>
             <Button
               disabled={!dirty || saving}
-              title="Revert to the last loaded or saved content"
+              title={t("Revert to the last loaded or saved content")}
               onClick={revertDraft}
             >
               <RotateCcw size={13} aria-hidden="true" />
-              Revert
+              {t("Revert")}
             </Button>
             <Button
               icon
-              title="Close editor"
-              aria-label="Close editor"
+              title={t("Close editor")}
+              aria-label={t("Close editor")}
               onClick={stopEditing}
             >
               <X size={14} aria-hidden="true" />
@@ -809,20 +819,22 @@ export function FilePreviewContent({
               {saveConflict}.
               <span className="file-editor-conflict-actions">
                 <Button variant="outline" onClick={reloadAfterConflict}>
-                  Reload
+                  {t("Reload")}
                 </Button>
                 <Button
                   variant="outline"
                   disabled={saving}
                   onClick={() => void saveDraft(true)}
                 >
-                  Overwrite
+                  {t("Overwrite")}
                 </Button>
               </span>
             </div>
           ) : null}
           <Suspense
-            fallback={<div className="file-editor-loading">Loading editor</div>}
+            fallback={
+              <div className="file-editor-loading">{t("Loading editor")}</div>
+            }
           >
             <FileEditor
               path={previewPath}
@@ -844,7 +856,11 @@ export function FilePreviewContent({
         <div
           className="file-preview-changes"
           role="region"
-          aria-label={`Changes for ${entry?.name ?? "selected file"}`}
+          aria-label={
+            entry?.name
+              ? t("Changes for {name}", { name: entry.name })
+              : t("Changes for selected file")
+          }
         >
           {changesContent}
         </div>
@@ -853,17 +869,21 @@ export function FilePreviewContent({
           ref={previewContentRef}
           className="file-preview-file-content"
           role="region"
-          aria-label={`Preview of ${entry?.name ?? "selected file"}`}
+          aria-label={
+            entry?.name
+              ? t("Preview of {name}", { name: entry.name })
+              : t("Preview of selected file")
+          }
         >
           {!entry ? (
             <div className="file-preview-state">
-              Select a text file to preview.
+              {t("Select a text file to preview.")}
             </div>
           ) : null}
           {loading ? (
             <div className="file-preview-state">
               <span className="file-loading-spinner" />
-              Loading preview
+              {t("Loading preview")}
             </div>
           ) : null}
           {error ? (
@@ -871,7 +891,7 @@ export function FilePreviewContent({
           ) : null}
           {!loading && !error && directoryPath ? (
             <div className="file-preview-state">
-              Directories cannot be previewed.
+              {t("Directories cannot be previewed.")}
             </div>
           ) : null}
           {!loading && !error && preview?.image_data_url ? (
@@ -889,12 +909,16 @@ export function FilePreviewContent({
             <iframe
               className="file-preview-pdf"
               src={inlinePreviewUrl}
-              title={`PDF preview: ${entry?.name ?? previewPath}`}
+              title={t("PDF preview: {name}", {
+                name: entry?.name ?? previewPath,
+              })}
             />
           ) : null}
           {!loading && !error && pdfTooLarge ? (
             <div className="file-preview-state">
-              PDF is too large to preview. Use Download from the file menu.
+              {t(
+                "PDF is too large to preview. Use Download from the file menu.",
+              )}
             </div>
           ) : null}
           {!loading &&
@@ -903,20 +927,22 @@ export function FilePreviewContent({
           !preview.image_data_url &&
           !hasPdfPreview ? (
             <div className="file-preview-state">
-              Binary file cannot be previewed.
+              {t("Binary file cannot be previewed.")}
             </div>
           ) : null}
           {!loading && !error && hasHtmlPreview && renderRichPreview ? (
             htmlTooLarge ? (
               <div className="file-preview-state">
-                HTML is too large to render. Use Source or Download from the
-                file menu.
+                {t(
+                  "HTML is too large to render. Use Source or Download from the file menu.",
+                )}
               </div>
             ) : inlinePreviewUrl ? (
               <>
                 <div className="file-preview-banner">
-                  Static HTML preview. Scripts are blocked; HTTPS stylesheets
-                  can access the network.
+                  {t(
+                    "Static HTML preview. Scripts are blocked; HTTPS stylesheets can access the network.",
+                  )}
                 </div>
                 <iframe
                   key={inlinePreviewUrl}
@@ -924,7 +950,9 @@ export function FilePreviewContent({
                   sandbox=""
                   referrerPolicy="no-referrer"
                   src={inlinePreviewUrl}
-                  aria-label={`HTML preview: ${entry?.name ?? previewPath}`}
+                  aria-label={t("HTML preview: {name}", {
+                    name: entry?.name ?? previewPath,
+                  })}
                 />
               </>
             ) : null
@@ -935,7 +963,7 @@ export function FilePreviewContent({
           !hasPdfPreview &&
           !(hasHtmlPreview && renderRichPreview) ? (
             <div className="file-preview-banner">
-              Preview truncated at 512 KB.
+              {t("Preview truncated at 512 KB.")}
             </div>
           ) : null}
           {!loading && !error && hasMarkdownPreview && renderRichPreview ? (
@@ -1019,7 +1047,7 @@ export function FilePreviewContent({
                 setMarkdownSelection(null);
               }}
             >
-              Annotate selection
+              {t("Annotate selection")}
             </button>,
             document.body,
           )
@@ -1091,7 +1119,10 @@ function codeMirrorAnnotationExtensions(
         this.stale ? "is-stale" : ""
       }`;
       marker.textContent = String(this.count);
-      marker.title = `${this.count} review comment${this.count === 1 ? "" : "s"}`;
+      marker.title =
+        this.count === 1
+          ? t("1 review comment")
+          : t("{count} review comments", { count: this.count });
       return marker;
     }
   }
@@ -1104,8 +1135,11 @@ function codeMirrorAnnotationExtensions(
         () =>
           store.notify({
             kind: "info",
-            message: "Select fewer lines to annotate",
-            detail: `The selected text exceeds the ${MAX_QUOTE_LENGTH.toLocaleString("en-US")}-character annotation limit.`,
+            message: t("Select fewer lines to annotate"),
+            detail: t(
+              "The selected text exceeds the {limit}-character annotation limit.",
+              { limit: MAX_QUOTE_LENGTH.toLocaleString("en-US") },
+            ),
           }),
       ),
   );
@@ -1209,6 +1243,7 @@ function CodeMirrorPreview({
             deps.configuredShortcutGuard,
             deps.search({ top: true }),
             deps.keymap.of(deps.searchKeymap),
+            deps.EditorState.phrases.of(codeMirrorSearchPhrases()),
             deps.EditorState.readOnly.of(true),
             deps.EditorView.editable.of(false),
             deps.EditorView.contentAttributes.of({ tabindex: "0" }),

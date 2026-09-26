@@ -3,6 +3,7 @@ import { useEffect, useRef } from "react";
 import {
   handlePreviewEditorCopy,
   isEditablePreviewTarget,
+  codeMirrorSearchPhrases,
   isPreviewKeyboardTarget,
   selectAllInPreviewEditor,
 } from "./previewSelection";
@@ -30,17 +31,32 @@ async function importCodePreviewDeps() {
     import("@lezer/highlight"),
     import("@codemirror/lang-json"),
   ]);
-  const t = highlight.tags;
+  const tags = highlight.tags;
   const highlightStyle = language.HighlightStyle.define([
-    { tag: t.comment, color: "var(--syntax-comment)", fontStyle: "italic" },
-    { tag: [t.keyword, t.controlKeyword], color: "var(--syntax-keyword)" },
-    { tag: [t.string, t.special(t.string)], color: "var(--syntax-string)" },
-    { tag: [t.number, t.bool, t.null, t.atom], color: "var(--syntax-number)" },
-    { tag: [t.propertyName, t.attributeName], color: "var(--syntax-property)" },
-    { tag: [t.variableName], color: "var(--syntax-variable)" },
-    { tag: [t.operator, t.compareOperator], color: "var(--syntax-operator)" },
+    { tag: tags.comment, color: "var(--syntax-comment)", fontStyle: "italic" },
     {
-      tag: [t.punctuation, t.separator, t.bracket],
+      tag: [tags.keyword, tags.controlKeyword],
+      color: "var(--syntax-keyword)",
+    },
+    {
+      tag: [tags.string, tags.special(tags.string)],
+      color: "var(--syntax-string)",
+    },
+    {
+      tag: [tags.number, tags.bool, tags.null, tags.atom],
+      color: "var(--syntax-number)",
+    },
+    {
+      tag: [tags.propertyName, tags.attributeName],
+      color: "var(--syntax-property)",
+    },
+    { tag: [tags.variableName], color: "var(--syntax-variable)" },
+    {
+      tag: [tags.operator, tags.compareOperator],
+      color: "var(--syntax-operator)",
+    },
+    {
+      tag: [tags.punctuation, tags.separator, tags.bracket],
       color: "var(--syntax-punctuation)",
     },
   ]);
@@ -100,6 +116,7 @@ export function CodePreview({
             ...(searchable
               ? [deps.search({ top: true }), deps.keymap.of(deps.searchKeymap)]
               : []),
+            deps.EditorState.phrases.of(codeMirrorSearchPhrases()),
             deps.EditorState.readOnly.of(true),
             deps.EditorView.editable.of(false),
             deps.EditorView.contentAttributes.of({ tabindex: "0" }),

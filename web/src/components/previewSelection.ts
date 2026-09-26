@@ -1,4 +1,22 @@
 import type { EditorView } from "@codemirror/view";
+import { t } from "../i18n";
+
+/** CodeMirror's built-in search panel text, keyed by its English phrase. */
+export function codeMirrorSearchPhrases(): Record<string, string> {
+  return {
+    Find: t("Find"),
+    Replace: t("Replace"),
+    next: t("next"),
+    previous: t("previous"),
+    all: t("all"),
+    "match case": t("match case"),
+    regexp: t("regexp"),
+    "by word": t("by word"),
+    replace: t("replace"),
+    "replace all": t("replace all"),
+    close: t("close"),
+  };
+}
 
 /**
  * True when a keyboard or clipboard event targets a native editable element

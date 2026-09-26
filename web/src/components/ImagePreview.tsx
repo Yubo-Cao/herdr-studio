@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { t } from "../i18n";
 import { ZoomablePreview, type PreviewDimensions } from "./ZoomablePreview";
 
 export function ImagePreview({ src, name }: { src: string; name: string }) {
@@ -31,21 +32,22 @@ export function ImagePreview({ src, name }: { src: string; name: string }) {
   if (state?.src !== src)
     return (
       <div className="file-preview-state" role="status">
-        Loading image
+        {t("Loading image")}
       </div>
     );
   if (state.error || !state.dimensions)
     return (
       <div className="file-preview-state is-error" role="alert">
-        This image could not be decoded by your browser. Use Download from the
-        file menu.
+        {t(
+          "This image could not be decoded by your browser. Use Download from the file menu.",
+        )}
       </div>
     );
   return (
     <ZoomablePreview
       key={src}
       dimensions={state.dimensions}
-      label={`Image: ${name}`}
+      label={t("Image: {name}", { name })}
       className="file-preview-visual"
     >
       <img src={src} alt={name} draggable={false} />
