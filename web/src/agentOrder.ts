@@ -1,3 +1,4 @@
+import { msg, t } from "./i18n";
 import type { Pane } from "./types";
 
 export const AGENT_ORDER_STORAGE_KEY = "agentOrder.v1";
@@ -108,6 +109,20 @@ const ATTENTION_STATUSES = [
   "idle",
   "unknown",
 ] as const;
+
+const AGENT_STATUS_TEXT: Record<string, string> = {
+  blocked: msg("blocked"),
+  done: msg("done"),
+  working: msg("working"),
+  idle: msg("idle"),
+  unknown: msg("unknown"),
+};
+
+/** The status Herdr reports, translated when it is a known agent state. */
+export function agentStatusText(status: string): string {
+  const text = AGENT_STATUS_TEXT[status.toLowerCase()];
+  return text ? t(text) : status;
+}
 
 export function agentAttentionPriority(status: string): number {
   const index = ATTENTION_STATUSES.indexOf(
@@ -224,16 +239,16 @@ export function groupOrderedAgentPanes<
       grouping === "workspace"
         ? (workspaceLabels.get(key) ?? key)
         : grouping === "agent"
-          ? pane.agent?.trim() || "Unknown agent"
+          ? pane.agent?.trim() || t("Unknown agent")
           : grouping === "status"
             ? {
-                blocked: "Blocked",
-                done: "Done",
-                idle: "Idle",
-                working: "Working",
-                unknown: "Unknown",
+                blocked: t("Blocked"),
+                done: t("Done"),
+                idle: t("Idle"),
+                working: t("Working"),
+                unknown: t("Unknown"),
               }[status]
-            : "All agents";
+            : t("All agents");
     const group = groups.get(key);
     if (group) group.panes.push(pane);
     else groups.set(key, { key, label, panes: [pane] });

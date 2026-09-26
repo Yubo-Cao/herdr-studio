@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import { normalizeSearchText } from "./searchText";
 import { shortId } from "./utils";
 import type { Pane, PaneLayout, Tab, Workspace } from "./types";
@@ -151,12 +152,12 @@ function paneJumpEntry(
   const tabLabel = tab
     ? tab.label && tab.label !== String(tab.number)
       ? tab.label
-      : `Tab ${tab.number}`
+      : t("Tab {number}", { number: tab.number })
     : pane.tab_id;
 
   return {
     paneId: pane.pane_id,
-    paneLabel: `Pane ${shortId(pane.pane_id)}`,
+    paneLabel: t("Pane {pane}", { pane: shortId(pane.pane_id) }),
     title: workspaceLabel,
     tabLabel,
     cwd,

@@ -1,4 +1,5 @@
 import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { t } from "../i18n";
 import type { Workspace } from "../types";
 import { store, useStoreSelector } from "../store";
 import {
@@ -111,13 +112,13 @@ export function ContextMenu({
       onClose();
     };
     // Defer so the triggering contextmenu event doesn't immediately close it.
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       window.addEventListener("mousedown", onDown);
       window.addEventListener("keydown", onKey);
       window.addEventListener("scroll", onScroll, true);
     }, 0);
     return () => {
-      clearTimeout(t);
+      clearTimeout(timer);
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("scroll", onScroll, true);
@@ -137,11 +138,11 @@ export function ContextMenu({
     <>
       <TextInputDialog
         open={dialog?.type === "new-worktree"}
-        title="New Worktree"
-        label="Branch"
+        title={t("New Worktree")}
+        label={t("Branch")}
         initialValue={dialog?.type === "new-worktree" ? dialog.branch : ""}
-        placeholder="Branch name"
-        submitLabel="Create"
+        placeholder={t("Branch name")}
+        submitLabel={t("Create")}
         onClose={() => setDialog(null)}
         onSubmit={(branch) => {
           const value = branch.trim();
@@ -153,10 +154,10 @@ export function ContextMenu({
       />
       <TextInputDialog
         open={dialog?.type === "rename-workspace"}
-        title="Rename Workspace"
-        label="Name"
+        title={t("Rename Workspace")}
+        label={t("Name")}
         initialValue={dialog?.type === "rename-workspace" ? dialog.label : ""}
-        submitLabel="Rename"
+        submitLabel={t("Rename")}
         onClose={() => setDialog(null)}
         onSubmit={(label) => {
           const value = label.trim();
@@ -170,13 +171,13 @@ export function ContextMenu({
       />
       <ConfirmDialog
         open={dialog?.type === "remove-worktree"}
-        title="Remove Worktree"
+        title={t("Remove Worktree")}
         message={
           dialog?.type === "remove-worktree"
-            ? `Remove worktree "${dialog.label}"?`
+            ? t('Remove worktree "{name}"?', { name: dialog.label })
             : ""
         }
-        confirmLabel="Remove"
+        confirmLabel={t("Remove")}
         danger
         onClose={() => setDialog(null)}
         onConfirm={() => {
@@ -187,21 +188,26 @@ export function ContextMenu({
       />
       <ConfirmDialog
         open={dialog?.type === "close-workspace"}
-        title="Close Workspace"
+        title={t("Close Workspace")}
         message={
           dialog?.type === "close-workspace"
-            ? `Close workspace "${dialog.label}"?${terminalComposerCloseWarning(
-                terminalComposerDraftPaneIds(
-                  activeConnectionId,
-                  connectionGeneration,
-                  panes
-                    .filter((pane) => pane.workspace_id === dialog.workspaceId)
-                    .map((pane) => pane.pane_id),
-                ).length,
-              )}`
+            ? t('Close workspace "{name}"?{warning}', {
+                name: dialog.label,
+                warning: terminalComposerCloseWarning(
+                  terminalComposerDraftPaneIds(
+                    activeConnectionId,
+                    connectionGeneration,
+                    panes
+                      .filter(
+                        (pane) => pane.workspace_id === dialog.workspaceId,
+                      )
+                      .map((pane) => pane.pane_id),
+                  ).length,
+                ),
+              })
             : ""
         }
-        confirmLabel="Close"
+        confirmLabel={t("Close")}
         danger
         onClose={() => setDialog(null)}
         onConfirm={() => {
@@ -270,21 +276,28 @@ export function ContextMenu({
 
   const inspectItems: Item[] = [
     {
-      label: "Browse files",
+      label: t("Browse files"),
       action: () => onBrowseFiles?.(w),
     },
     {
-      label: "Review changes",
+      label: t("Review changes"),
       action: () => onReviewChanges?.(w),
     },
   ];
+  const pinLabel = pinned
+    ? isLinked
+      ? t("Unpin worktree")
+      : t("Unpin workspace")
+    : isLinked
+      ? t("Pin worktree")
+      : t("Pin workspace");
   const organizeItems: Item[] = [
     {
-      label: `${pinned ? "Unpin" : "Pin"} ${isLinked ? "worktree" : "workspace"}`,
+      label: pinLabel,
       action: () => onPinnedChange(w, !pinned),
     },
     {
-      label: "Rename workspace…",
+      label: t("Rename workspace…"),
       action: () => {
         setDialog({
           type: "rename-workspace",
@@ -297,7 +310,7 @@ export function ContextMenu({
   const worktreeItems: Item[] = [];
   if (w.worktree) {
     organizeItems.push({
-      label: "Copy checkout path",
+      label: t("Copy checkout path"),
       action: () => {
         const path = w.worktree?.checkout_path;
         if (!path) return;
@@ -305,14 +318,14 @@ export function ContextMenu({
           () =>
             store.notify({
               kind: "success",
-              message: "Checkout path copied",
+              message: t("Checkout path copied"),
               detail: path,
               autoDismissMs: 5000,
             }),
           (error) =>
             store.notify({
               kind: "error",
-              message: "Failed to copy checkout path",
+              message: t("Failed to copy checkout path"),
               detail: error instanceof Error ? error.message : String(error),
             }),
         );
@@ -320,22 +333,22 @@ export function ContextMenu({
     });
     worktreeItems.push(
       {
-        label: "Open worktree…",
+        label: t("Open worktree…"),
         action: () => setOpenWorktreeWorkspaceId(w.workspace_id),
       },
       {
-        label: "Worktree lifecycle…",
+        label: t("Worktree lifecycle…"),
         action: () => setLifecycleWorkspaceId(w.workspace_id),
       },
       {
-        label: "Configure worktree hooks…",
+        label: t("Configure worktree hooks…"),
         action: () => setWorktreeHooksWorkspaceId(w.workspace_id),
       },
     );
   }
   if (creationSource) {
     worktreeItems.unshift({
-      label: "New worktree…",
+      label: t("New worktree…"),
       action: () => {
         setDialog({
           type: "new-worktree",
@@ -347,20 +360,20 @@ export function ContextMenu({
   }
   const sourceControlItems: Item[] = [
     {
-      label: "Pull from Git",
+      label: t("Pull from Git"),
       action: () => {
         void store.gitPullWorkspace(w.workspace_id);
       },
     },
     {
-      label: "Configure branch auto-update…",
+      label: t("Configure branch auto-update…"),
       action: () => setAutoSyncWorkspaceId(w.workspace_id),
     },
   ];
   const closeItems: Item[] = [];
   if (isLinked) {
     closeItems.push({
-      label: "Remove worktree",
+      label: t("Remove worktree"),
       danger: true,
       action: () => {
         setDialog({
@@ -372,7 +385,7 @@ export function ContextMenu({
     });
   }
   closeItems.push({
-    label: "Close workspace",
+    label: t("Close workspace"),
     danger: true,
     action: () => {
       setDialog({
@@ -383,11 +396,11 @@ export function ContextMenu({
     },
   });
   const groups: ItemGroup[] = [
-    { label: "Inspect", items: inspectItems },
-    { label: "Organize", items: organizeItems },
-    { label: "Worktrees", items: worktreeItems },
-    { label: "Source control", items: sourceControlItems },
-    { label: "Close", items: closeItems, danger: true },
+    { label: t("Inspect"), items: inspectItems },
+    { label: t("Organize"), items: organizeItems },
+    { label: t("Worktrees"), items: worktreeItems },
+    { label: t("Source control"), items: sourceControlItems },
+    { label: t("Close"), items: closeItems, danger: true },
   ].filter((group) => group.items.length > 0);
 
   const style: React.CSSProperties = {
@@ -405,14 +418,14 @@ export function ContextMenu({
         style={style}
       >
         <div className="context-menu-header">
-          <span>Workspace</span>
+          <span>{t("Workspace")}</span>
           <strong title={displayName}>{displayName}</strong>
           <small>
             {isLinked
-              ? "Linked worktree"
+              ? t("Linked worktree")
               : w.worktree
-                ? "Git workspace"
-                : "Workspace"}
+                ? t("Git workspace")
+                : t("Workspace")}
           </small>
         </div>
         {groups.map((group) => (

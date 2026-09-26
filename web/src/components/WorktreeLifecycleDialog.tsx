@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { FolderOpen, GitBranch, RefreshCw, Settings } from "lucide-react";
+import { t } from "../i18n";
 import { luckyWorktreeBranchName } from "../luckyName";
 import { useConnectionClient } from "../useConnectionClient";
 import { store, useStoreSelector } from "../store";
@@ -295,7 +296,8 @@ export function WorktreeLifecycleDialog({
           key,
           label,
           status: "failed",
-          detail: store.get().error ?? `${label} failed`,
+          detail:
+            store.get().error ?? t("{operation} failed", { operation: label }),
         });
         return;
       }
@@ -340,14 +342,14 @@ export function WorktreeLifecycleDialog({
     const value = branch.trim();
     if (!value || !actionSourceWorkspaceId) return;
     setNewWorktreeOpen(false);
-    void runOperation("create", `Creating ${value}`, () =>
+    void runOperation("create", t("Creating {branch}", { branch: value }), () =>
       store.createWorktree(actionSourceWorkspaceId, value),
     );
   };
 
   const setHooksEnabled = (enabled: boolean) => {
     if (!hooks?.key) return;
-    void runOperation("hooks", "Updating hook policy", () =>
+    void runOperation("hooks", t("Updating hook policy"), () =>
       store.setRepoWorktreeHooksEnabled(hooks.key!, enabled),
     );
   };
@@ -365,7 +367,7 @@ export function WorktreeLifecycleDialog({
       );
     }
     if (!openSource?.cwd) {
-      throw new Error("The repository root is unavailable.");
+      throw new Error(t("The repository root is unavailable."));
     }
     return store.openWorktreeFromCwd(openSource.cwd, row.worktree.path, focus);
   };
@@ -378,7 +380,7 @@ export function WorktreeLifecycleDialog({
     const targetWorkspaceId = lifecycleOpenedWorkspaceId(result);
     if (!targetWorkspaceId) {
       throw new Error(
-        "Herdr opened the checkout without returning a workspace ID.",
+        t("Herdr opened the checkout without returning a workspace ID."),
       );
     }
     window.dispatchEvent(
@@ -407,7 +409,7 @@ export function WorktreeLifecycleDialog({
       targetWorkspaceId = lifecycleOpenedWorkspaceId(opened);
       if (!targetWorkspaceId) {
         throw new Error(
-          "Herdr opened the checkout without returning a workspace ID.",
+          t("Herdr opened the checkout without returning a workspace ID."),
         );
       }
       workspaceHint = removalWorkspaceHint(
@@ -427,7 +429,9 @@ export function WorktreeLifecycleDialog({
       close: async (workspaceId) => {
         if (!connectionClient.isCurrent()) {
           throw new Error(
-            "Connection changed before the temporary workspace could be closed.",
+            t(
+              "Connection changed before the temporary workspace could be closed.",
+            ),
           );
         }
         await store.closeWorkspace(workspaceId);
@@ -443,18 +447,20 @@ export function WorktreeLifecycleDialog({
           className="modal worktree-lifecycle-modal"
           role="dialog"
           aria-modal="true"
-          aria-label="Worktree lifecycle"
+          aria-label={t("Worktree lifecycle")}
           tabIndex={-1}
           onMouseDown={(event) => event.stopPropagation()}
         >
           <div className="modal-head lifecycle-head">
             <div>
-              <span className="lifecycle-kicker">Repository operations</span>
-              <h2>Worktree Lifecycle</h2>
+              <span className="lifecycle-kicker">
+                {t("Repository operations")}
+              </span>
+              <h2>{t("Worktree Lifecycle")}</h2>
               <p>
                 {list?.source.repo_name ??
                   selectedWorkspace?.worktree?.repo_name ??
-                  "Repository"}
+                  t("Repository")}
                 <code title={list?.source.repo_root}>
                   {list?.source.repo_root ??
                     selectedWorkspace?.worktree?.repo_root ??
@@ -466,8 +472,8 @@ export function WorktreeLifecycleDialog({
               <button
                 type="button"
                 className="ghost lifecycle-icon-button"
-                aria-label="Refresh lifecycle status"
-                title="Refresh"
+                aria-label={t("Refresh lifecycle status")}
+                title={t("Refresh")}
                 disabled={repositoryLoading || operationRunning}
                 onClick={() => void load(true, true)}
               >
@@ -485,8 +491,10 @@ export function WorktreeLifecycleDialog({
               type="button"
               title={
                 actionSourceWorkspaceId
-                  ? "Create a linked worktree"
-                  : "Open this repository's main checkout before creating a worktree"
+                  ? t("Create a linked worktree")
+                  : t(
+                      "Open this repository's main checkout before creating a worktree",
+                    )
               }
               disabled={!actionSourceWorkspaceId || operationRunning}
               onClick={() => {
@@ -495,17 +503,17 @@ export function WorktreeLifecycleDialog({
               }}
             >
               <GitBranch size={15} />
-              New worktree
+              {t("New worktree")}
             </button>
             <button
               type="button"
               className="ghost"
-              title="Open an existing checkout"
+              title={t("Open an existing checkout")}
               disabled={!repositoryWorkspaceId || operationRunning}
               onClick={() => setOpenWorktreeOpen(true)}
             >
               <FolderOpen size={15} />
-              Open existing
+              {t("Open existing")}
             </button>
             <button
               type="button"
@@ -514,7 +522,7 @@ export function WorktreeLifecycleDialog({
               onClick={() => setHooksOpen(true)}
             >
               <Settings size={15} />
-              Hook details
+              {t("Hook details")}
             </button>
           </div>
 
@@ -533,10 +541,10 @@ export function WorktreeLifecycleDialog({
                 <span>
                   {operation.detail ??
                     (operation.status === "running"
-                      ? "Waiting for Herdr and repository hooks."
+                      ? t("Waiting for Herdr and repository hooks.")
                       : operation.status === "succeeded"
-                        ? "Repository state refreshed."
-                        : "Operation failed.")}
+                        ? t("Repository state refreshed.")
+                        : t("Operation failed."))}
                 </span>
               </div>
             </div>
@@ -545,33 +553,33 @@ export function WorktreeLifecycleDialog({
           {repositoryLoading && !list ? (
             <div className="lifecycle-loading" role="status">
               <span className="hook-loading-mark" />
-              <span>Loading repository lifecycle...</span>
+              <span>{t("Loading repository lifecycle...")}</span>
             </div>
           ) : error && !list ? (
             <div className="lifecycle-empty is-error">
-              <strong>Repository lifecycle unavailable</strong>
+              <strong>{t("Repository lifecycle unavailable")}</strong>
               <span>{error}</span>
               <button type="button" onClick={() => void load(true, true)}>
-                Retry
+                {t("Retry")}
               </button>
             </div>
           ) : (
             <div className="lifecycle-content">
               <div
                 className="lifecycle-overview"
-                aria-label="Repository summary"
+                aria-label={t("Repository summary")}
               >
                 <div>
                   <strong>{rows.length}</strong>
-                  <span>Checkouts</span>
+                  <span>{t("Checkouts")}</span>
                 </div>
                 <div>
                   <strong>{openCount}</strong>
-                  <span>Open</span>
+                  <span>{t("Open")}</span>
                 </div>
                 <div>
                   <strong>{changedCount}</strong>
-                  <span>With changes</span>
+                  <span>{t("With changes")}</span>
                 </div>
               </div>
 
@@ -581,20 +589,22 @@ export function WorktreeLifecycleDialog({
                     <Settings size={16} />
                   </span>
                   <div>
-                    <strong>Repository hooks</strong>
+                    <strong>{t("Repository hooks")}</strong>
                     <span>
                       {hooks?.error
                         ? hooks.error
                         : hooks?.paseo_path
-                          ? `${configuredHooks} configured in paseo.json`
-                          : "No paseo.json worktree hooks found"}
+                          ? t("{count} configured in paseo.json", {
+                              count: configuredHooks,
+                            })
+                          : t("No paseo.json worktree hooks found")}
                     </span>
                   </div>
                 </div>
                 <button
                   type="button"
                   role="switch"
-                  aria-label="Enable worktree hooks for this repository"
+                  aria-label={t("Enable worktree hooks for this repository")}
                   aria-checked={hooks?.enabled ?? true}
                   className={`settings-switch ${hooks?.enabled ? "is-on" : ""}`}
                   disabled={!hooks?.key || operationRunning}
@@ -643,11 +653,11 @@ export function WorktreeLifecycleDialog({
 
       <TextInputDialog
         open={newWorktreeOpen}
-        title="New Worktree"
-        label="Branch"
+        title={t("New Worktree")}
+        label={t("Branch")}
         initialValue={newWorktreeBranch}
-        placeholder="Branch name"
-        submitLabel="Create"
+        placeholder={t("Branch name")}
+        submitLabel={t("Create")}
         onClose={() => setNewWorktreeOpen(false)}
         onSubmit={createWorktree}
       />
@@ -671,22 +681,28 @@ export function WorktreeLifecycleDialog({
       />
       <ConfirmDialog
         open={!!removeRow}
-        title="Remove Worktree"
+        title={t("Remove Worktree")}
         message={
           removeRow
             ? removeRow.workspace
-              ? `Remove worktree "${lifecycleWorktreeTitle(removeRow.worktree)}"? The teardown hook will run before removal.`
-              : `Remove closed worktree "${lifecycleWorktreeTitle(removeRow.worktree)}"? It will be opened in the background so Herdr can run the teardown and removed hooks.`
-            : "Remove this worktree?"
+              ? t(
+                  'Remove worktree "{name}"? The teardown hook will run before removal.',
+                  { name: lifecycleWorktreeTitle(removeRow.worktree) },
+                )
+              : t(
+                  'Remove closed worktree "{name}"? It will be opened in the background so Herdr can run the teardown and removed hooks.',
+                  { name: lifecycleWorktreeTitle(removeRow.worktree) },
+                )
+            : t("Remove this worktree?")
         }
-        confirmLabel="Remove"
+        confirmLabel={t("Remove")}
         danger
         onClose={() => setRemoveRow(null)}
         onConfirm={() => {
           const row = removeRow;
           setRemoveRow(null);
           if (!row) return;
-          void runOperation(row.worktree.path, "Removing worktree", () =>
+          void runOperation(row.worktree.path, t("Removing worktree"), () =>
             removeWorktree(row),
           );
         }}
