@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "../i18n";
 import { store } from "../store";
 import { UI_LOCALE } from "../uiLocale";
 import { useConnectionClient } from "../useConnectionClient";
@@ -128,14 +129,14 @@ export function AutoSyncRepositoriesDialog({
         className="modal auto-sync-repositories-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="Automatic branch update repositories"
+        aria-label={t("Automatic branch update repositories")}
         tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="modal-head">
           <div>
-            <h2>Automatic Branch Updates</h2>
-            <p>Saved configurations run when their workspace is open</p>
+            <h2>{t("Automatic Branch Updates")}</h2>
+            <p>{t("Saved configurations run when their workspace is open")}</p>
           </div>
           <CloseButton onClick={onClose} />
         </div>
@@ -143,7 +144,7 @@ export function AutoSyncRepositoriesDialog({
         {loading ? (
           <div className="auto-sync-config-loading" role="status">
             <span className="hook-loading-mark" />
-            <span>Loading repository configurations...</span>
+            <span>{t("Loading repository configurations...")}</span>
           </div>
         ) : (
           <div className="auto-sync-config-content">
@@ -166,7 +167,7 @@ export function AutoSyncRepositoriesDialog({
                             }
                           >
                             {config.running
-                              ? "Syncing"
+                              ? t("Syncing")
                               : statusLabel(config.last_status)}
                           </span>
                         </div>
@@ -174,10 +175,18 @@ export function AutoSyncRepositoriesDialog({
                           {configLocation(config)}
                         </code>
                         <div className="auto-sync-config-meta">
-                          <span>Every {config.interval_minutes} min</span>
+                          <span>
+                            {t("Every {minutes} min", {
+                              minutes: config.interval_minutes,
+                            })}
+                          </span>
                           <span>{formatLastRun(config.last_run_at)}</span>
                           {config.last_branch ? (
-                            <span>Branch {config.last_branch}</span>
+                            <span>
+                              {t("Branch {branch}", {
+                                branch: config.last_branch,
+                              })}
+                            </span>
                           ) : null}
                         </div>
                         {config.last_message ? (
@@ -189,9 +198,9 @@ export function AutoSyncRepositoriesDialog({
                       <button
                         type="button"
                         role="switch"
-                        aria-label={
-                          "Automatic updates for " + configName(config)
-                        }
+                        aria-label={t("Automatic updates for {name}", {
+                          name: configName(config),
+                        })}
                         aria-checked={config.enabled}
                         className={
                           "settings-switch" + (config.enabled ? " is-on" : "")
@@ -207,15 +216,17 @@ export function AutoSyncRepositoriesDialog({
               </div>
             ) : error ? null : (
               <div className="auto-sync-config-empty">
-                <strong>No saved repositories</strong>
+                <strong>{t("No saved repositories")}</strong>
                 <span>
-                  Enable automatic updates from a Workspace context menu first.
+                  {t(
+                    "Enable automatic updates from a Workspace context menu first.",
+                  )}
                 </span>
               </div>
             )}
             {data?.path ? (
               <div className="auto-sync-config-store">
-                <span>Settings</span>
+                <span>{t("Settings")}</span>
                 <code title={data.path}>{data.path}</code>
               </div>
             ) : null}
@@ -244,22 +255,22 @@ function configLocation(config: AutoSyncConfig) {
 function statusLabel(status?: AutoSyncStatus) {
   switch (status) {
     case "updated":
-      return "Updated";
+      return t("Updated");
     case "up_to_date":
-      return "Up to date";
+      return t("Up to date");
     case "skipped":
-      return "Skipped";
+      return t("Skipped");
     case "failed":
-      return "Failed";
+      return t("Failed");
     default:
-      return "Not run";
+      return t("Not run");
   }
 }
 
 function formatLastRun(value?: string) {
-  if (!value) return "Never run";
+  if (!value) return t("Never run");
   const date = new Date(value);
   return Number.isNaN(date.valueOf())
     ? value
-    : "Last run " + date.toLocaleString(UI_LOCALE);
+    : t("Last run {time}", { time: date.toLocaleString(UI_LOCALE) });
 }

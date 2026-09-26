@@ -2,6 +2,7 @@ import { roamgateLocalStorage } from "../browserStorage";
 import { shallowEqual, store, useStoreSelector } from "../store";
 import type { GitStatusSummary, Pane, Workspace } from "../types";
 import { shortId } from "../utils";
+import { t } from "../i18n";
 import {
   clearTerminalComposerDrafts,
   terminalComposerCloseWarning,
@@ -102,16 +103,23 @@ function gitChangedCount(status: GitStatusSummary) {
 
 function gitStatusTitle(status?: GitStatusSummary) {
   if (!status) return "";
-  if (status.error) return `git status unavailable: ${status.error}`;
+  if (status.error)
+    return t("git status unavailable: {error}", { error: status.error });
   const parts = [
-    status.branch ? `branch: ${status.branch}` : null,
-    status.upstream ? `upstream: ${status.upstream}` : null,
-    status.ahead ? `ahead: ${status.ahead}` : null,
-    status.behind ? `behind: ${status.behind}` : null,
-    status.staged ? `staged: ${status.staged}` : null,
-    status.unstaged ? `unstaged: ${status.unstaged}` : null,
-    status.untracked ? `untracked: ${status.untracked}` : null,
-    status.conflicted ? `conflicted: ${status.conflicted}` : null,
+    status.branch ? t("branch: {branch}", { branch: status.branch }) : null,
+    status.upstream
+      ? t("upstream: {upstream}", { upstream: status.upstream })
+      : null,
+    status.ahead ? t("ahead: {count}", { count: status.ahead }) : null,
+    status.behind ? t("behind: {count}", { count: status.behind }) : null,
+    status.staged ? t("staged: {count}", { count: status.staged }) : null,
+    status.unstaged ? t("unstaged: {count}", { count: status.unstaged }) : null,
+    status.untracked
+      ? t("untracked: {count}", { count: status.untracked })
+      : null,
+    status.conflicted
+      ? t("conflicted: {count}", { count: status.conflicted })
+      : null,
   ].filter(Boolean);
   return parts.join(" · ");
 }
@@ -125,15 +133,15 @@ function AgentLayoutControl({
 }) {
   return (
     <div className="workspace-agent-layout-control">
-      <span>Agents</span>
+      <span>{t("Agents")}</span>
       <SegmentedControl
-        aria-label="Agent list layout"
+        aria-label={t("Agent list layout")}
         value={value}
         onChange={onChange}
         options={[
-          { value: "compact", label: "Compact" },
-          { value: "nested", label: "Nested" },
-          { value: "separate", label: "Separate" },
+          { value: "compact", label: t("Compact") },
+          { value: "nested", label: t("Nested") },
+          { value: "separate", label: t("Separate") },
         ]}
       />
     </div>
@@ -531,10 +539,10 @@ export function WorkspaceTree({
           tabIndex={-1}
         >
           <div className="panel-head">
-            <h2>Workspaces</h2>
+            <h2>{t("Workspaces")}</h2>
             <button
               className="panel-add"
-              title="New workspace"
+              title={t("New workspace")}
               onClick={() => setCreateOpen(true)}
             >
               +
@@ -543,8 +551,8 @@ export function WorkspaceTree({
           <div className="workspace-tree-content">
             <p className="muted">
               {s.status === "connected"
-                ? "No workspaces."
-                : "Connect to the bridge to load workspaces."}
+                ? t("No workspaces.")
+                : t("Connect to the bridge to load workspaces.")}
             </p>
           </div>
           <AgentLayoutControl value={agentLayout} onChange={setAgentLayout} />
@@ -572,14 +580,14 @@ export function WorkspaceTree({
       tabIndex={-1}
     >
       <div className="panel-head">
-        <h2>Workspaces</h2>
+        <h2>{t("Workspaces")}</h2>
         <div className="panel-actions">
           {focusedRepoWorkspace ? (
             <button
               type="button"
               className="panel-add panel-action-icon"
-              title="Worktree lifecycle"
-              aria-label="Open worktree lifecycle"
+              title={t("Worktree lifecycle")}
+              aria-label={t("Open worktree lifecycle")}
               onClick={() =>
                 setLifecycleWorkspaceId(focusedRepoWorkspace.workspace_id)
               }
@@ -589,7 +597,7 @@ export function WorkspaceTree({
           ) : null}
           <button
             className="panel-add"
-            title="New workspace"
+            title={t("New workspace")}
             onClick={() => setCreateOpen(true)}
           >
             +
@@ -599,7 +607,7 @@ export function WorkspaceTree({
       <div
         className="workspace-tree-content"
         role="tree"
-        aria-label="Workspaces and agents"
+        aria-label={t("Workspaces and agents")}
       >
         {topLevel.map((w) => (
           <WorkspaceRow
@@ -639,23 +647,36 @@ export function WorkspaceTree({
       <AgentLayoutControl value={agentLayout} onChange={setAgentLayout} />
     </div>
   );
+  const agentSortLabels: Record<AgentSort, string> = {
+    attention: t("Attention first"),
+    workspace: t("Workspace order"),
+    manual: t("Manual order"),
+  };
+  const agentGroupingLabels: Record<AgentGrouping, string> = {
+    none: t("No grouping"),
+    status: t("Status"),
+    workspace: t("Workspace"),
+    agent: t("Agent type"),
+  };
   const agentsPanel =
     agentLayout === "separate" ? (
       <div key="agents" className="panel agents-panel">
         <div className="panel-head">
-          <h2>Agents</h2>
+          <h2>{t("Agents")}</h2>
           <div className="panel-actions agent-list-controls">
             <ThemedSelect
               className="agent-list-control"
               icon={<ArrowDownWideNarrow size={15} aria-hidden="true" />}
               align="end"
-              aria-label="Agent sort order"
-              title={`Sort agents: ${{ attention: "Attention first", workspace: "Workspace order", manual: "Manual order" }[agentListPreferences.sort]}`}
+              aria-label={t("Agent sort order")}
+              title={t("Sort agents: {order}", {
+                order: agentSortLabels[agentListPreferences.sort],
+              })}
               value={agentListPreferences.sort}
               options={[
-                { value: "attention", label: "Attention first" },
-                { value: "workspace", label: "Workspace order" },
-                { value: "manual", label: "Manual order" },
+                { value: "attention", label: agentSortLabels.attention },
+                { value: "workspace", label: agentSortLabels.workspace },
+                { value: "manual", label: agentSortLabels.manual },
               ]}
               onChange={(sort) => {
                 clearAgentDrag();
@@ -669,14 +690,16 @@ export function WorkspaceTree({
               className={`agent-list-control ${agentListPreferences.grouping !== "none" ? "is-active" : ""}`}
               icon={<Layers size={15} aria-hidden="true" />}
               align="end"
-              aria-label="Agent grouping"
-              title={`Group agents: ${{ none: "No grouping", status: "Status", workspace: "Workspace", agent: "Agent type" }[agentListPreferences.grouping]}`}
+              aria-label={t("Agent grouping")}
+              title={t("Group agents: {grouping}", {
+                grouping: agentGroupingLabels[agentListPreferences.grouping],
+              })}
               value={agentListPreferences.grouping}
               options={[
-                { value: "none", label: "No grouping" },
-                { value: "status", label: "Status" },
-                { value: "workspace", label: "Workspace" },
-                { value: "agent", label: "Agent type" },
+                { value: "none", label: agentGroupingLabels.none },
+                { value: "status", label: agentGroupingLabels.status },
+                { value: "workspace", label: agentGroupingLabels.workspace },
+                { value: "agent", label: agentGroupingLabels.agent },
               ]}
               onChange={(grouping) => {
                 clearAgentDrag();
@@ -766,7 +789,7 @@ export function WorkspaceTree({
               );
             })
           ) : (
-            <p className="muted">No agent sessions.</p>
+            <p className="muted">{t("No agent sessions.")}</p>
           )}
         </div>
       </div>
@@ -801,19 +824,22 @@ export function WorkspaceTree({
       />
       <ConfirmDialog
         open={!!pendingClosePane}
-        title="Close Agent Pane"
+        title={t("Close Agent Pane")}
         message={
           pendingClosePane
-            ? `Close pane "${shortId(pendingClosePane.pane_id)}"?${terminalComposerCloseWarning(
-                terminalComposerDraftPaneIds(
-                  s.activeConnectionId,
-                  s.connectionGeneration,
-                  [pendingClosePane.pane_id],
-                ).length,
-              )}`
-            : "Close this pane?"
+            ? t('Close pane "{pane}"?{warning}', {
+                pane: shortId(pendingClosePane.pane_id),
+                warning: terminalComposerCloseWarning(
+                  terminalComposerDraftPaneIds(
+                    s.activeConnectionId,
+                    s.connectionGeneration,
+                    [pendingClosePane.pane_id],
+                  ).length,
+                ),
+              })
+            : t("Close this pane?")
         }
-        confirmLabel="Close"
+        confirmLabel={t("Close")}
         danger
         onClose={() => setPendingClosePane(null)}
         onConfirm={() => {
@@ -1111,8 +1137,10 @@ function WorkspaceRow({
             type="button"
             className="workspace-group-toggle"
             tabIndex={-1}
-            title={collapsed ? "Expand workspace" : "Collapse workspace"}
-            aria-label={collapsed ? "Expand workspace" : "Collapse workspace"}
+            title={collapsed ? t("Expand workspace") : t("Collapse workspace")}
+            aria-label={
+              collapsed ? t("Expand workspace") : t("Collapse workspace")
+            }
             aria-expanded={!collapsed}
             onPointerDown={(event) => event.stopPropagation()}
             onPointerMove={(event) => event.stopPropagation()}
@@ -1140,8 +1168,8 @@ function WorkspaceRow({
         {tabCountVisible ? (
           <span
             className="workspace-tab-count"
-            title={`${tabCount} tabs`}
-            aria-label={`${tabCount} tabs`}
+            title={t("{count} tabs", { count: tabCount })}
+            aria-label={t("{count} tabs", { count: tabCount })}
           >
             {tabCount}
           </span>
@@ -1151,11 +1179,11 @@ function WorkspaceRow({
             className="workspace-pin"
             size={11}
             fill="currentColor"
-            aria-label="Pinned"
+            aria-label={t("Pinned")}
           />
         ) : null}
         {isPendingFocus ? (
-          <span className="row-spinner" aria-label="Loading workspace" />
+          <span className="row-spinner" aria-label={t("Loading workspace")} />
         ) : null}
         {w.worktree ? (
           <GitStatusBadges
@@ -1190,7 +1218,10 @@ function WorkspaceRow({
                 key={group.tabId}
                 className={`tab-group ${tabFocused && w.focused ? "is-current" : ""}`}
                 role="group"
-                aria-label={`${group.label}, ${group.paneCount} panes`}
+                aria-label={t("{tab}, {count} panes", {
+                  tab: group.label,
+                  count: group.paneCount,
+                })}
               >
                 <div
                   className="tab-group-head"
@@ -1205,7 +1236,11 @@ function WorkspaceRow({
                   ) : null}
                   <span className="tab-group-label">{group.label}</span>
                   {group.paneCount > 1 ? (
-                    <Token title={`${group.paneCount} panes in this tab`}>
+                    <Token
+                      title={t("{count} panes in this tab", {
+                        count: group.paneCount,
+                      })}
+                    >
                       {group.paneCount}
                     </Token>
                   ) : null}

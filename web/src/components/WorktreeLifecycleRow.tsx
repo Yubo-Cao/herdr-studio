@@ -8,6 +8,7 @@ import {
   RefreshCw,
   Trash2,
 } from "lucide-react";
+import { t } from "../i18n";
 import { store } from "../store";
 import type { InspectorView } from "../workspaceResource";
 import {
@@ -56,12 +57,12 @@ export function WorktreeLifecycleRow({
           <GitBranch size={16} />
           <strong>{title}</strong>
           <span className="badge">
-            {row.worktree.is_linked_worktree ? "Linked" : "Main"}
+            {row.worktree.is_linked_worktree ? t("Linked") : t("Main")}
           </span>
           <span
             className={`lifecycle-open-state ${workspace ? "is-open" : ""}`}
           >
-            {workspace ? "Open" : "Closed"}
+            {workspace ? t("Open") : t("Closed")}
           </span>
         </div>
         <code title={row.worktree.path}>{row.worktree.path}</code>
@@ -82,7 +83,7 @@ export function WorktreeLifecycleRow({
             </span>
           ) : null}
           {row.worktree.is_prunable ? (
-            <span className="lifecycle-prunable">Prunable</span>
+            <span className="lifecycle-prunable">{t("Prunable")}</span>
           ) : null}
         </div>
       </div>
@@ -96,20 +97,20 @@ export function WorktreeLifecycleRow({
             onClick={() => onFocus(workspace.workspace_id)}
           >
             <FocusIcon size={14} />
-            Focus
+            {t("Focus")}
           </button>
         ) : (
           <button
             type="button"
             className="ghost"
-            title="Open worktree"
+            title={t("Open worktree")}
             disabled={operationRunning}
             onClick={() =>
-              runOperation(rowKey, "Opening worktree", () => onOpen(row))
+              runOperation(rowKey, t("Opening worktree"), () => onOpen(row))
             }
           >
             <FolderOpen size={14} />
-            Open
+            {t("Open")}
           </button>
         )}
         {!workspace && !row.worktree.is_prunable ? (
@@ -117,30 +118,30 @@ export function WorktreeLifecycleRow({
             <button
               type="button"
               className="ghost"
-              title="Open workspace and browse files"
+              title={t("Open workspace and browse files")}
               disabled={operationRunning}
               onClick={() =>
-                runOperation(rowKey, "Opening Files", () =>
+                runOperation(rowKey, t("Opening Files"), () =>
                   onOpenResource(row, "files"),
                 )
               }
             >
               <FolderTree size={14} />
-              Files
+              {t("Files")}
             </button>
             <button
               type="button"
               className="ghost"
-              title="Open workspace and review changes"
+              title={t("Open workspace and review changes")}
               disabled={operationRunning}
               onClick={() =>
-                runOperation(rowKey, "Opening Changes", () =>
+                runOperation(rowKey, t("Opening Changes"), () =>
                   onOpenResource(row, "changes"),
                 )
               }
             >
               <FileDiff size={14} />
-              Changes
+              {t("Changes")}
             </button>
           </>
         ) : null}
@@ -148,35 +149,41 @@ export function WorktreeLifecycleRow({
           <button
             type="button"
             className="ghost lifecycle-pull-button"
-            aria-label={`Pull ${title}`}
-            title="Git pull"
+            aria-label={t("Pull {name}", { name: title })}
+            title={t("Git pull")}
             disabled={operationRunning}
             onClick={() =>
-              runOperation(rowKey, "Pulling current branch", () =>
+              runOperation(rowKey, t("Pulling current branch"), () =>
                 store.gitPullWorkspace(workspace.workspace_id),
               )
             }
           >
             <GitMerge size={14} />
-            Pull
+            {t("Pull")}
           </button>
         ) : null}
         {workspace ? (
           <button
             type="button"
-            aria-label={`Auto-sync origin's default branch into ${title}`}
+            aria-label={t("Auto-sync origin's default branch into {name}", {
+              name: title,
+            })}
             aria-pressed={syncInfo?.enabled ?? false}
             title={
               syncInfo?.enabled
-                ? "Auto sync from origin's default branch is enabled. Click to disable."
-                : "Auto sync from origin's default branch into this branch. Click to enable."
+                ? t(
+                    "Auto sync from origin's default branch is enabled. Click to disable.",
+                  )
+                : t(
+                    "Auto sync from origin's default branch into this branch. Click to enable.",
+                  )
             }
             className={`ghost lifecycle-sync-toggle ${
               syncInfo?.enabled ? "is-active" : ""
             }`}
             disabled={!syncInfo || operationRunning}
             onClick={() =>
-              runOperation(rowKey, "Updating auto-sync policy", () =>
+              runOperation(rowKey, t("Updating auto-sync policy"), () =>
                 store.setWorkspaceAutoSyncEnabled(
                   workspace.workspace_id,
                   !(syncInfo?.enabled ?? false),
@@ -185,15 +192,15 @@ export function WorktreeLifecycleRow({
             }
           >
             <RefreshCw size={13} />
-            Sync
+            {t("Sync")}
           </button>
         ) : null}
         {row.worktree.is_linked_worktree && !row.worktree.is_prunable ? (
           <button
             type="button"
             className="ghost lifecycle-remove-button"
-            aria-label={`Remove ${title}`}
-            title="Remove worktree"
+            aria-label={t("Remove {name}", { name: title })}
+            title={t("Remove worktree")}
             disabled={operationRunning}
             onClick={() => onRemove(row)}
           >
@@ -202,7 +209,7 @@ export function WorktreeLifecycleRow({
             ) : (
               <Trash2 size={15} />
             )}
-            Remove
+            {t("Remove")}
           </button>
         ) : null}
       </div>

@@ -1,4 +1,5 @@
 import { useEffect, useRef, useState } from "react";
+import { t } from "../i18n";
 import { luckyWorkspaceName } from "../luckyName";
 import { store, useEndpointCreationReason } from "../store";
 import { CloseButton } from "./CloseButton";
@@ -53,22 +54,22 @@ export function CreateWorkspaceDialog({
         className="modal compact-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="Create workspace"
+        aria-label={t("Create workspace")}
         onSubmit={submit}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="modal-head">
-          <h2>Create Workspace</h2>
+          <h2>{t("Create Workspace")}</h2>
           <CloseButton onClick={onClose} />
         </div>
 
         <label className="form-field">
-          <span>Name</span>
+          <span>{t("Name")}</span>
           <input
             ref={labelRef}
             value={label}
             onChange={(e) => setLabel(e.currentTarget.value)}
-            placeholder="Optional"
+            placeholder={t("Optional")}
           />
         </label>
 
@@ -77,21 +78,21 @@ export function CreateWorkspaceDialog({
           <input
             value={cwd}
             onChange={(e) => setCwd(e.currentTarget.value)}
-            placeholder="Optional path"
+            placeholder={t("Optional path")}
           />
         </label>
 
         {createReason ? <p role="status">{createReason}</p> : null}
         <div className="modal-actions">
           <button type="button" className="ghost" onClick={onClose}>
-            Cancel
+            {t("Cancel")}
           </button>
           <button
             type="submit"
             disabled={!!createReason}
             title={createReason ?? undefined}
           >
-            Create
+            {t("Create")}
           </button>
         </div>
       </form>

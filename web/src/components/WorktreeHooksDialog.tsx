@@ -1,14 +1,15 @@
 import { useEffect, useRef, useState } from "react";
+import { msg, t } from "../i18n";
 import { store } from "../store";
 import { useConnectionClient } from "../useConnectionClient";
 import { CloseButton } from "./CloseButton";
 import "./WorktreeHooksDialog.css";
 
 const HOOKS = [
-  ["setup", "Setup"],
-  ["opened", "Opened"],
-  ["teardown", "Teardown"],
-  ["removed", "Removed"],
+  ["setup", msg("Setup")],
+  ["opened", msg("Opened")],
+  ["teardown", msg("Teardown")],
+  ["removed", msg("Removed")],
 ] as const;
 
 type HookName = (typeof HOOKS)[number][0];
@@ -110,7 +111,7 @@ export function WorktreeHooksDialog({
       if (!requestIsCurrent()) return;
       if (result === undefined) {
         setError(
-          store.get().error || "Unable to update worktree hook settings",
+          store.get().error || t("Unable to update worktree hook settings"),
         );
         return;
       }
@@ -130,29 +131,33 @@ export function WorktreeHooksDialog({
         className="modal worktree-hooks-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="Worktree hooks"
+        aria-label={t("Worktree hooks")}
         onMouseDown={(e) => e.stopPropagation()}
       >
         <div className="modal-head">
-          <h2>Worktree Hooks</h2>
+          <h2>{t("Worktree Hooks")}</h2>
           <CloseButton onClick={onClose} />
         </div>
         <p className="hook-doc-note">
-          Hooks are loaded from the current repository's <code>paseo.json</code>{" "}
-          <code>worktree</code> config.{" "}
+          {withCode(
+            t(
+              "Hooks are loaded from the current repository's {file} {key} config.",
+            ),
+            { file: "paseo.json", key: "worktree" },
+          )}{" "}
           <a
             href="https://paseo.sh/docs/worktrees"
             target="_blank"
             rel="noreferrer"
           >
-            View docs
+            {t("View docs")}
           </a>
         </p>
 
         {loading ? (
           <div className="hook-loading" role="status">
             <span className="hook-loading-mark" />
-            <span>Loading worktree hooks...</span>
+            <span>{t("Loading worktree hooks...")}</span>
           </div>
         ) : (
           <>
@@ -161,10 +166,13 @@ export function WorktreeHooksDialog({
             ) : null}
 
             <div className="hook-summary">
-              <SummaryRow label="Repo" value={info?.repo_name ?? "-"} />
-              <SummaryRow label="Store key" value={info?.key ?? "-"} />
+              <SummaryRow label={t("Repo")} value={info?.repo_name ?? "-"} />
+              <SummaryRow label={t("Store key")} value={info?.key ?? "-"} />
               <SummaryRow label="paseo.json" value={info?.paseo_path ?? "-"} />
-              <SummaryRow label="Checkout" value={info?.checkout_path ?? "-"} />
+              <SummaryRow
+                label={t("Checkout")}
+                value={info?.checkout_path ?? "-"}
+              />
             </div>
 
             <label className="check-row">
@@ -175,7 +183,9 @@ export function WorktreeHooksDialog({
                 onChange={(e) => void setEnabled(e.currentTarget.checked)}
               />
               <span>
-                {saving ? "Saving..." : "Enable worktree hooks for this repo"}
+                {saving
+                  ? t("Saving...")
+                  : t("Enable worktree hooks for this repo")}
               </span>
             </label>
 
@@ -184,9 +194,9 @@ export function WorktreeHooksDialog({
                 const value = info?.hooks?.[name] ?? "";
                 return (
                   <section key={name} className="hook-field">
-                    <span>{label}</span>
+                    <span>{t(label)}</span>
                     <pre className={value ? "" : "is-empty"}>
-                      <code>{value || "Not configured"}</code>
+                      <code>{value || t("Not configured")}</code>
                     </pre>
                   </section>
                 );
@@ -197,6 +207,18 @@ export function WorktreeHooksDialog({
       </div>
     </div>
   );
+}
+
+/** Fill {name} placeholders in translated text with inline code elements. */
+function withCode(text: string, values: Record<string, string>) {
+  return text.split(/(\{\w+\})/).map((part, index) => {
+    const name = /^\{(\w+)\}$/.exec(part)?.[1];
+    return name && name in values ? (
+      <code key={index}>{values[name]}</code>
+    ) : (
+      part
+    );
+  });
 }
 
 function SummaryRow({ label, value }: { label: string; value: string }) {

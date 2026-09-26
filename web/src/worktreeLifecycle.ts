@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type {
   ExistingWorktree,
   GitStatusSummary,
@@ -49,19 +50,21 @@ function normalizedCheckoutPath(path: string): string {
 
 export function lifecycleWorktreeTitle(worktree: ExistingWorktree): string {
   if (worktree.branch) return worktree.branch;
-  if (worktree.is_detached) return "Detached HEAD";
-  if (worktree.is_bare) return "Bare repository";
+  if (worktree.is_detached) return t("Detached HEAD");
+  if (worktree.is_bare) return t("Bare repository");
   return worktree.label || worktree.path;
 }
 
 export function lifecycleGitSummary(status?: GitStatusSummary): string {
-  if (!status) return "Open this checkout to load Git status and use Git pull.";
-  if (status.error) return `Git status unavailable: ${status.error}`;
+  if (!status)
+    return t("Open this checkout to load Git status and use Git pull.");
+  if (status.error)
+    return t("Git status unavailable: {error}", { error: status.error });
   const changed = lifecycleGitChangeCount(status);
   const parts = [
-    changed ? `${changed} changed` : "No local changes",
-    status.ahead ? `${status.ahead} ahead` : null,
-    status.behind ? `${status.behind} behind` : null,
+    changed ? t("{count} changed", { count: changed }) : t("No local changes"),
+    status.ahead ? t("{count} ahead", { count: status.ahead }) : null,
+    status.behind ? t("{count} behind", { count: status.behind }) : null,
   ].filter(Boolean);
   return parts.join(" · ");
 }
@@ -112,7 +115,10 @@ export async function removeTemporaryWorkspaceSafely<T>({
             ? cleanupError.message
             : String(cleanupError);
         throw new Error(
-          `${message}\nTemporary workspace cleanup failed: ${cleanupMessage}`,
+          t("{message}\nTemporary workspace cleanup failed: {cleanup}", {
+            message,
+            cleanup: cleanupMessage,
+          }),
           { cause: cleanupError },
         );
       }
@@ -125,25 +131,27 @@ export async function removeTemporaryWorkspaceSafely<T>({
     await close(workspaceId);
   }
   if (incomplete) {
-    throw new Error("Worktree removal did not complete.");
+    throw new Error(t("Worktree removal did not complete."));
   }
   return result;
 }
 
 export function lifecycleAutoSyncLabel(info?: WorkspaceAutoSyncInfo): string {
-  if (!info?.enabled) return "Default branch auto-sync off";
-  if (info.running) return "Syncing origin's default branch";
+  if (!info?.enabled) return t("Default branch auto-sync off");
+  if (info.running) return t("Syncing origin's default branch");
   switch (info.last_status) {
     case "updated":
-      return "Synced with origin's default branch";
+      return t("Synced with origin's default branch");
     case "up_to_date":
-      return "Up to date with origin's default branch";
+      return t("Up to date with origin's default branch");
     case "skipped":
-      return "Last sync skipped";
+      return t("Last sync skipped");
     case "failed":
-      return "Last sync failed";
+      return t("Last sync failed");
     default:
-      return `Sync origin's default branch every ${info.interval_minutes} min`;
+      return t("Sync origin's default branch every {minutes} min", {
+        minutes: info.interval_minutes,
+      });
   }
 }
 
@@ -157,10 +165,10 @@ export function lifecycleActionError(result: unknown): string | undefined {
     value.removed_hook,
   ].find((hook) => hook?.status === "failed");
   if (failedHook) {
-    return failedHook.error || failedHook.stderr || "Repository hook failed";
+    return failedHook.error || failedHook.stderr || t("Repository hook failed");
   }
   if (value.skipped_remove) {
-    return "Removal was stopped before deleting the checkout.";
+    return t("Removal was stopped before deleting the checkout.");
   }
   return undefined;
 }

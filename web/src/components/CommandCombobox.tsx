@@ -7,6 +7,8 @@ import {
 } from "../shortcutPreferences";
 import { SHORTCUT_NUMBERS, type ShortcutNumber } from "../shortcutBindings";
 import { endpointCreationReason } from "../store";
+import { agentStatusText } from "../agentOrder";
+import { msg, t } from "../i18n";
 import { normalizeSearchText } from "../searchText";
 import { useEffect, useMemo, useState } from "react";
 import {
@@ -63,7 +65,9 @@ type TextAction =
 type ActionDefinition = {
   key: string;
   icon: React.ReactNode;
+  /** English source text marked with msg(); rendered through actionTitle(). */
   title: string;
+  titleValues?: Record<string, string | number>;
   detail?: string;
   shortcut?: string;
   keywords?: string[];
@@ -87,7 +91,7 @@ function tabName(tab?: Tab) {
   if (!tab) return "";
   return tab.label && tab.label !== String(tab.number)
     ? tab.label
-    : `Tab ${tab.number}`;
+    : t("Tab {number}", { number: tab.number });
 }
 
 function workspaceName(workspace?: Workspace) {
@@ -130,8 +134,29 @@ export function commandFilter(
   return 0;
 }
 
+/** The action title in the interface language. */
+function actionTitle(action: ActionDefinition) {
+  return t(action.title, action.titleValues);
+}
+
+/** The English action title, so English queries keep matching. */
+function actionSourceTitle(action: ActionDefinition) {
+  const values = action.titleValues;
+  if (!values) return action.title;
+  return action.title.replace(/\{(\w+)\}/g, (match, name: string) =>
+    name in values ? String(values[name]) : match,
+  );
+}
+
 function actionSearchValue(action: ActionDefinition) {
-  return [action.title, action.detail, action.shortcut]
+  const title = actionTitle(action);
+  const sourceTitle = actionSourceTitle(action);
+  return [
+    title,
+    sourceTitle === title ? "" : sourceTitle,
+    action.detail,
+    action.shortcut,
+  ]
     .filter(Boolean)
     .join(" ");
 }
@@ -139,7 +164,7 @@ function actionSearchValue(action: ActionDefinition) {
 function actionDisplaySignature(action: ActionDefinition) {
   return normalizeSearchText(
     [
-      action.title,
+      actionTitle(action),
       action.detail,
       action.shortcut,
       action.danger ? "danger" : "",
@@ -150,7 +175,7 @@ function actionDisplaySignature(action: ActionDefinition) {
 }
 
 function actionCommandValue(action: ActionDefinition) {
-  return [action.title, action.detail, action.shortcut, action.key]
+  return [actionTitle(action), action.detail, action.shortcut, action.key]
     .filter(Boolean)
     .join(" ");
 }
@@ -288,8 +313,8 @@ export function CommandCombobox({
 
   const focusedWorkspace = s.workspaces.find((w) => w.focused);
   const activeTab =
-    s.tabs.find((t) => t.tab_id === focusedWorkspace?.active_tab_id) ??
-    s.tabs.find((t) => t.focused);
+    s.tabs.find((tab) => tab.tab_id === focusedWorkspace?.active_tab_id) ??
+    s.tabs.find((tab) => tab.focused);
   const activePane =
     s.panes.find((p) => p.pane_id === s.selectedPaneId) ??
     s.panes.find((p) => p.pane_id === s.layout?.focused_pane_id) ??
@@ -381,25 +406,25 @@ export function CommandCombobox({
   const textDialogProps =
     textAction?.type === "rename-workspace"
       ? {
-          title: "Rename Workspace",
-          label: "Name",
+          title: t("Rename Workspace"),
+          label: t("Name"),
           initialValue: workspaceName(textAction.workspace),
-          submitLabel: "Rename",
+          submitLabel: t("Rename"),
         }
       : textAction?.type === "rename-tab"
         ? {
-            title: "Rename Tab",
-            label: "Name",
+            title: t("Rename Tab"),
+            label: t("Name"),
             initialValue: tabName(textAction.tab),
-            submitLabel: "Rename",
+            submitLabel: t("Rename"),
           }
         : textAction?.type === "create-worktree"
           ? {
-              title: "New Worktree",
-              label: "Branch",
+              title: t("New Worktree"),
+              label: t("Branch"),
               initialValue: textAction.branch,
               placeholder: "my-branch",
-              submitLabel: "Create",
+              submitLabel: t("Create"),
             }
           : null;
 
@@ -415,7 +440,7 @@ export function CommandCombobox({
     currentActions.push({
       key: "current-new-worktree",
       icon: <GitBranch size={15} />,
-      title: "New worktree",
+      title: msg("New worktree"),
       detail:
         focusedWorktreeSource.worktree?.checkout_path ??
         workspaceName(focusedWorktreeSource),
@@ -439,7 +464,7 @@ export function CommandCombobox({
     currentActions.push({
       key: "current-file-explorer",
       icon: <FolderOpen size={15} />,
-      title: "Open file explorer",
+      title: msg("Open file explorer"),
       detail:
         focusedWorkspace.worktree?.checkout_path ??
         focusedWorkspace.cwd ??
@@ -456,7 +481,7 @@ export function CommandCombobox({
     currentActions.push({
       key: "current-diff-viewer",
       icon: <FileDiff size={15} />,
-      title: "Open Diff Viewer",
+      title: msg("Open Diff Viewer"),
       detail:
         focusedWorkspace.worktree?.checkout_path ??
         focusedWorkspace.cwd ??
@@ -476,7 +501,7 @@ export function CommandCombobox({
     currentActions.push({
       key: "current-worktree-lifecycle",
       icon: <GitCommitHorizontal size={15} />,
-      title: "Open worktree lifecycle",
+      title: msg("Open worktree lifecycle"),
       detail: focusedWorkspace.worktree.repo_name,
       keywords: [
         "worktree center",
@@ -490,7 +515,7 @@ export function CommandCombobox({
     currentActions.push({
       key: "current-open-worktree",
       icon: <FolderOpen size={15} />,
-      title: "Open worktree",
+      title: msg("Open worktree"),
       detail: workspaceName(focusedWorkspace),
       keywords: ["existing worktree", "open existing", "checkout", "branch"],
       run: () => setOpenWorktreeWorkspaceId(focusedWorkspace.workspace_id),
@@ -498,7 +523,7 @@ export function CommandCombobox({
     currentActions.push({
       key: "current-worktree-hooks",
       icon: <GitBranch size={15} />,
-      title: "Worktree hooks",
+      title: msg("Worktree hooks"),
       detail: focusedWorkspace.worktree.repo_name,
       keywords: ["hook config", "hooks config", "paseo", "setup teardown"],
       run: () => setWorktreeHooksWorkspaceId(focusedWorkspace.workspace_id),
@@ -507,7 +532,7 @@ export function CommandCombobox({
       currentActions.push({
         key: "current-remove-worktree",
         icon: <X size={15} />,
-        title: "Remove worktree",
+        title: msg("Remove worktree"),
         detail: focusedWorkspace.worktree.checkout_path,
         keywords: [
           "delete worktree",
@@ -526,7 +551,7 @@ export function CommandCombobox({
     currentActions.push({
       key: "current-create-tab",
       icon: <PanelTop size={15} />,
-      title: "Create tab",
+      title: msg("Create tab"),
       detail: workspaceName(focusedWorkspace),
       keywords: ["new tab", "add tab", "open tab"],
       disabledReason: endpointCreationReason(
@@ -541,7 +566,7 @@ export function CommandCombobox({
     currentActions.push({
       key: "current-toggle-pane-zoom",
       icon: <Maximize2 size={15} />,
-      title: "Toggle pane zoom",
+      title: msg("Toggle pane zoom"),
       detail: shortId(activePane.pane_id),
       keywords: ["maximize pane", "unmaximize pane", "zoom pane", "full pane"],
       run: () => store.zoomPane(activePane.pane_id),
@@ -555,7 +580,8 @@ export function CommandCombobox({
           {
             key: `quick-open-path-${focusedWorkspace.workspace_id}-${directPathQuery}`,
             icon: <FileText size={15} />,
-            title: `Open path: ${pathLeaf(directPathQuery)}`,
+            title: msg("Open path: {name}"),
+            titleValues: { name: pathLeaf(directPathQuery) },
             detail: directPathQuery,
             keywords: [
               "quick open",
@@ -583,8 +609,8 @@ export function CommandCombobox({
     {
       key: "create-workspace",
       icon: <FolderPlus size={15} />,
-      title: "Create workspace",
-      detail: "Open a new Herdr workspace",
+      title: msg("Create workspace"),
+      detail: t("Open a new Herdr workspace"),
       keywords: ["new workspace", "add workspace", "open workspace"],
       run: () => setCreateWorkspaceOpen(true),
     },
@@ -593,7 +619,7 @@ export function CommandCombobox({
           {
             key: "rename-workspace",
             icon: <PanelTop size={15} />,
-            title: "Rename workspace",
+            title: msg("Rename workspace"),
             detail: workspaceName(focusedWorkspace),
             keywords: ["edit workspace", "workspace name"],
             run: () =>
@@ -605,7 +631,7 @@ export function CommandCombobox({
           {
             key: "close-workspace",
             icon: <X size={15} />,
-            title: "Close workspace",
+            title: msg("Close workspace"),
             detail: workspaceName(focusedWorkspace),
             keywords: [
               "delete workspace",
@@ -620,7 +646,8 @@ export function CommandCombobox({
     ...otherWorkspaces.map((workspace) => ({
       key: `focus-workspace-${workspace.workspace_id}`,
       icon: <PanelTop size={15} />,
-      title: `Focus workspace: ${workspaceName(workspace)}`,
+      title: msg("Focus workspace: {name}"),
+      titleValues: { name: workspaceName(workspace) },
       detail: workspace.workspace_id,
       keywords: [
         "switch workspace",
@@ -641,8 +668,9 @@ export function CommandCombobox({
       icon: <GitBranch size={15} />,
       title:
         workspace.workspace_id === focusedWorkspace?.workspace_id
-          ? "New worktree"
-          : `New worktree: ${workspaceName(workspace)}`,
+          ? msg("New worktree")
+          : msg("New worktree: {name}"),
+      titleValues: { name: workspaceName(workspace) },
       detail: workspace.worktree?.checkout_path,
       keywords: [
         "create worktree",
@@ -670,8 +698,9 @@ export function CommandCombobox({
       icon: <FolderOpen size={15} />,
       title:
         workspace.workspace_id === focusedWorkspace?.workspace_id
-          ? "Open worktree"
-          : `Open worktree: ${workspaceName(workspace)}`,
+          ? msg("Open worktree")
+          : msg("Open worktree: {name}"),
+      titleValues: { name: workspaceName(workspace) },
       detail: workspace.worktree?.checkout_path,
       keywords: [
         "existing worktree",
@@ -688,8 +717,9 @@ export function CommandCombobox({
       icon: <GitBranch size={15} />,
       title:
         workspace.workspace_id === focusedWorkspace?.workspace_id
-          ? "Worktree hooks"
-          : `Worktree hooks: ${workspaceName(workspace)}`,
+          ? msg("Worktree hooks")
+          : msg("Worktree hooks: {name}"),
+      titleValues: { name: workspaceName(workspace) },
       detail: workspace.worktree?.repo_name,
       keywords: [
         "hook config",
@@ -706,7 +736,7 @@ export function CommandCombobox({
     tabActions.push({
       key: "create-tab",
       icon: <PanelTop size={15} />,
-      title: "Create tab",
+      title: msg("Create tab"),
       detail: workspaceName(focusedWorkspace),
       keywords: ["new tab", "add tab", "open tab"],
       disabledReason: endpointCreationReason(
@@ -720,7 +750,8 @@ export function CommandCombobox({
       tabActions.push({
         key: `create-tab-${workspace.workspace_id}`,
         icon: <PanelTop size={15} />,
-        title: `Create tab: ${workspaceName(workspace)}`,
+        title: msg("Create tab: {name}"),
+        titleValues: { name: workspaceName(workspace) },
         detail: workspace.workspace_id,
         keywords: ["new tab", "add tab", "open tab", workspaceName(workspace)],
         disabledReason: endpointCreationReason(
@@ -737,7 +768,7 @@ export function CommandCombobox({
       {
         key: "rename-tab",
         icon: <PanelTop size={15} />,
-        title: "Rename tab",
+        title: msg("Rename tab"),
         detail: tabName(activeTab),
         keywords: ["edit tab", "tab name"],
         run: () => setTextAction({ type: "rename-tab", tab: activeTab }),
@@ -745,7 +776,7 @@ export function CommandCombobox({
       {
         key: "close-active-tab",
         icon: <X size={15} />,
-        title: "Close active tab",
+        title: msg("Close active tab"),
         detail: tabName(activeTab),
         keywords: ["delete tab", "remove tab"],
         danger: true,
@@ -757,7 +788,8 @@ export function CommandCombobox({
     tabActions.push({
       key: `focus-tab-${tab.tab_id}`,
       icon: <PanelTop size={15} />,
-      title: `Focus tab: ${tabName(tab)}`,
+      title: msg("Focus tab: {name}"),
+      titleValues: { name: tabName(tab) },
       detail: tab.tab_id,
       keywords: ["switch tab", "open tab", "go tab", tabName(tab)],
       run: () => store.focusTab(tab.tab_id),
@@ -769,7 +801,8 @@ export function CommandCombobox({
     tabActions.push({
       key: `close-tab-${tab.tab_id}`,
       icon: <X size={15} />,
-      title: `Close tab: ${tabName(tab)}`,
+      title: msg("Close tab: {name}"),
+      titleValues: { name: tabName(tab) },
       detail: tab.tab_id,
       keywords: ["delete tab", "remove tab", tabName(tab)],
       danger: true,
@@ -782,7 +815,7 @@ export function CommandCombobox({
         {
           key: "focus-pane-left",
           icon: <ArrowLeft size={15} />,
-          title: "Focus pane left",
+          title: msg("Focus pane left"),
           detail: shortId(activePane.pane_id),
           keywords: ["switch pane left", "select pane left", "move pane left"],
           run: () => store.focusPaneDirection(activePane.pane_id, "left"),
@@ -790,7 +823,7 @@ export function CommandCombobox({
         {
           key: "focus-pane-right",
           icon: <ArrowRight size={15} />,
-          title: "Focus pane right",
+          title: msg("Focus pane right"),
           detail: shortId(activePane.pane_id),
           keywords: [
             "switch pane right",
@@ -802,7 +835,7 @@ export function CommandCombobox({
         {
           key: "focus-pane-up",
           icon: <ArrowUp size={15} />,
-          title: "Focus pane up",
+          title: msg("Focus pane up"),
           detail: shortId(activePane.pane_id),
           keywords: ["switch pane up", "select pane up", "move pane up"],
           run: () => store.focusPaneDirection(activePane.pane_id, "up"),
@@ -810,7 +843,7 @@ export function CommandCombobox({
         {
           key: "focus-pane-down",
           icon: <ArrowDown size={15} />,
-          title: "Focus pane down",
+          title: msg("Focus pane down"),
           detail: shortId(activePane.pane_id),
           keywords: ["switch pane down", "select pane down", "move pane down"],
           run: () => store.focusPaneDirection(activePane.pane_id, "down"),
@@ -818,7 +851,7 @@ export function CommandCombobox({
         {
           key: "split-pane-right",
           icon: <SplitSquareHorizontal size={15} />,
-          title: "Split pane right",
+          title: msg("Split pane right"),
           detail: shortId(activePane.pane_id),
           keywords: ["new pane right", "create pane right", "vertical split"],
           run: () => store.splitPane(activePane.pane_id, "right"),
@@ -826,7 +859,7 @@ export function CommandCombobox({
         {
           key: "split-pane-down",
           icon: <SplitSquareVertical size={15} />,
-          title: "Split pane down",
+          title: msg("Split pane down"),
           detail: shortId(activePane.pane_id),
           keywords: ["new pane down", "create pane down", "horizontal split"],
           run: () => store.splitPane(activePane.pane_id, "down"),
@@ -834,7 +867,7 @@ export function CommandCombobox({
         {
           key: "toggle-pane-zoom",
           icon: <Maximize2 size={15} />,
-          title: "Toggle pane zoom",
+          title: msg("Toggle pane zoom"),
           detail: shortId(activePane.pane_id),
           keywords: [
             "maximize pane",
@@ -847,7 +880,7 @@ export function CommandCombobox({
         {
           key: "close-pane",
           icon: <X size={15} />,
-          title: "Close pane",
+          title: msg("Close pane"),
           detail: shortId(activePane.pane_id),
           keywords: ["delete pane", "remove pane"],
           danger: true,
@@ -861,7 +894,7 @@ export function CommandCombobox({
     agentActions.push({
       key: "close-active-agent-pane",
       icon: <X size={15} />,
-      title: "Close active agent pane",
+      title: msg("Close active agent pane"),
       detail: agentName(activeAgent),
       keywords: ["close agent", "delete agent", "remove agent", "close pane"],
       danger: true,
@@ -872,8 +905,9 @@ export function CommandCombobox({
     agentActions.push({
       key: `focus-agent-${pane.pane_id}`,
       icon: <AgentIcon agent={pane.agent} compact />,
-      title: `Focus agent: ${agentName(pane)}`,
-      detail: pane.agent_status,
+      title: msg("Focus agent: {name}"),
+      titleValues: { name: agentName(pane) },
+      detail: agentStatusText(pane.agent_status),
       keywords: [
         "switch agent",
         "open agent",
@@ -885,13 +919,13 @@ export function CommandCombobox({
   }
 
   const actionGroups: ActionGroupDefinition[] = [
-    { heading: "Current", actions: currentActions },
-    { heading: "Files", actions: fileActions },
-    { heading: "Workspaces", actions: workspaceActions },
-    { heading: "Worktrees", actions: worktreeActions },
-    { heading: "Tabs", actions: tabActions },
-    { heading: "Panes", actions: paneActions },
-    { heading: "Agents", actions: agentActions },
+    { heading: t("Current"), actions: currentActions },
+    { heading: t("Files"), actions: fileActions },
+    { heading: t("Workspaces"), actions: workspaceActions },
+    { heading: t("Worktrees"), actions: worktreeActions },
+    { heading: t("Tabs"), actions: tabActions },
+    { heading: t("Panes"), actions: paneActions },
+    { heading: t("Agents"), actions: agentActions },
   ].filter((group) => group.actions.length > 0);
 
   const normalizedSearch = normalizeSearchText(search);
@@ -911,7 +945,7 @@ export function CommandCombobox({
             (a, b) =>
               b.score - a.score ||
               a.group.localeCompare(b.group) ||
-              a.action.title.localeCompare(b.action.title),
+              actionTitle(a.action).localeCompare(actionTitle(b.action)),
           )
           .filter((entry) => {
             const signature = actionDisplaySignature(entry.action);
@@ -930,7 +964,8 @@ export function CommandCombobox({
     ...(rankedActions.length > 0
       ? [
           {
-            heading: rankedActions.length === 1 ? "Top result" : "Top results",
+            heading:
+              rankedActions.length === 1 ? t("Top result") : t("Top results"),
             actions: rankedActions.map((entry) => entry.action),
           },
         ]
@@ -991,11 +1026,11 @@ export function CommandCombobox({
           <button
             type="button"
             className={`topbar-button command-trigger ${open ? "is-active" : ""}`}
-            aria-label="Open command menu"
-            title={shortcutTitle("Open command menu", "command.menu")}
+            aria-label={t("Open command menu")}
+            title={shortcutTitle(t("Open command menu"), "command.menu")}
           >
             <Keyboard size={15} />
-            <span>Actions</span>
+            <span>{t("Actions")}</span>
             <ChevronsUpDown size={14} />
           </button>
         </PopoverTrigger>
@@ -1022,10 +1057,10 @@ export function CommandCombobox({
             <CommandInput
               value={search}
               onValueChange={setSearch}
-              placeholder="Search actions or enter file path..."
+              placeholder={t("Search actions or enter file path...")}
             />
             <CommandList>
-              <CommandEmpty>No actions found.</CommandEmpty>
+              <CommandEmpty>{t("No actions found.")}</CommandEmpty>
               {displayedActionGroups.map((group) => (
                 <CommandGroup key={group.heading} heading={group.heading}>
                   {group.actions.map((action) => (
@@ -1033,7 +1068,7 @@ export function CommandCombobox({
                       key={action.key}
                       value={actionCommandValue(action)}
                       icon={action.icon}
-                      title={action.title}
+                      title={actionTitle(action)}
                       detail={action.detail}
                       shortcut={action.shortcut}
                       numberShortcutIndex={numberShortcutIndexByKey.get(
@@ -1075,20 +1110,24 @@ export function CommandCombobox({
       />
       <ConfirmDialog
         open={!!pendingCloseWorkspace}
-        title="Close Workspace"
+        title={t("Close Workspace")}
         message={
           pendingCloseWorkspace
-            ? `Close workspace "${workspaceName(pendingCloseWorkspace)}"?${composerDraftWarningFor(
-                s.panes
-                  .filter(
-                    (pane) =>
-                      pane.workspace_id === pendingCloseWorkspace.workspace_id,
-                  )
-                  .map((pane) => pane.pane_id),
-              )}`
-            : "Close this workspace?"
+            ? t('Close workspace "{name}"?{warning}', {
+                name: workspaceName(pendingCloseWorkspace),
+                warning: composerDraftWarningFor(
+                  s.panes
+                    .filter(
+                      (pane) =>
+                        pane.workspace_id ===
+                        pendingCloseWorkspace.workspace_id,
+                    )
+                    .map((pane) => pane.pane_id),
+                ),
+              })
+            : t("Close this workspace?")
         }
-        confirmLabel="Close"
+        confirmLabel={t("Close")}
         danger
         onClose={() => setPendingCloseWorkspace(null)}
         onConfirm={() => {
@@ -1107,17 +1146,20 @@ export function CommandCombobox({
       />
       <ConfirmDialog
         open={!!pendingCloseTab}
-        title="Close Tab"
+        title={t("Close Tab")}
         message={
           pendingCloseTab
-            ? `Close "${tabName(pendingCloseTab)}"?${composerDraftWarningFor(
-                s.panes
-                  .filter((pane) => pane.tab_id === pendingCloseTab.tab_id)
-                  .map((pane) => pane.pane_id),
-              )}`
-            : "Close this tab?"
+            ? t('Close "{name}"?{warning}', {
+                name: tabName(pendingCloseTab),
+                warning: composerDraftWarningFor(
+                  s.panes
+                    .filter((pane) => pane.tab_id === pendingCloseTab.tab_id)
+                    .map((pane) => pane.pane_id),
+                ),
+              })
+            : t("Close this tab?")
         }
-        confirmLabel="Close"
+        confirmLabel={t("Close")}
         danger
         onClose={() => setPendingCloseTab(null)}
         onConfirm={() => {
@@ -1133,15 +1175,16 @@ export function CommandCombobox({
       />
       <ConfirmDialog
         open={!!pendingClosePane}
-        title="Close Pane"
+        title={t("Close Pane")}
         message={
           pendingClosePane
-            ? `Close pane "${shortId(pendingClosePane.pane_id)}"?${composerDraftWarningFor(
-                [pendingClosePane.pane_id],
-              )}`
-            : "Close this pane?"
+            ? t('Close pane "{pane}"?{warning}', {
+                pane: shortId(pendingClosePane.pane_id),
+                warning: composerDraftWarningFor([pendingClosePane.pane_id]),
+              })
+            : t("Close this pane?")
         }
-        confirmLabel="Close"
+        confirmLabel={t("Close")}
         danger
         onClose={() => setPendingClosePane(null)}
         onConfirm={() => {
@@ -1153,13 +1196,15 @@ export function CommandCombobox({
       />
       <ConfirmDialog
         open={!!pendingRemoveWorktree}
-        title="Remove Worktree"
+        title={t("Remove Worktree")}
         message={
           pendingRemoveWorktree
-            ? `Remove worktree "${workspaceName(pendingRemoveWorktree)}"?`
-            : "Remove this worktree?"
+            ? t('Remove worktree "{name}"?', {
+                name: workspaceName(pendingRemoveWorktree),
+              })
+            : t("Remove this worktree?")
         }
-        confirmLabel="Remove"
+        confirmLabel={t("Remove")}
         danger
         onClose={() => setPendingRemoveWorktree(null)}
         onConfirm={() => {

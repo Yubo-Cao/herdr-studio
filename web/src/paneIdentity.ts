@@ -1,3 +1,4 @@
+import { t } from "./i18n";
 import type { Pane, Tab } from "./types";
 import { basename, shortId } from "./utils";
 
@@ -53,7 +54,7 @@ export function groupPanesByTab<T extends Pick<Pane, "tab_id">>(
         tabId: pane.tab_id,
         label:
           customTabLabel(tab?.label) ||
-          `Tab ${tab?.number ?? shortId(pane.tab_id)}`,
+          t("Tab {number}", { number: tab?.number ?? shortId(pane.tab_id) }),
         number: tab?.number ?? Number.MAX_SAFE_INTEGER,
         paneCount: tab?.pane_count ?? 0,
         panes: [],

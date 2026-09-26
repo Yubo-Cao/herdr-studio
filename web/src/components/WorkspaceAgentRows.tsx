@@ -7,6 +7,8 @@ import {
 import { store, useStoreSelector } from "../store";
 import type { Pane } from "../types";
 import { agentClass, formatMemoryLimit, shortId } from "../utils";
+import { agentStatusText } from "../agentOrder";
+import { t } from "../i18n";
 import {
   customTabLabel,
   paneDisplayName,
@@ -203,7 +205,22 @@ export function AgentRow({
       title={[name, agentName, pane.pane_id, tabLabel, pane.cwd]
         .filter(Boolean)
         .join(" · ")}
-      aria-label={`${name}, ${agentName} pane ${pane.pane_id}${tabLabel ? `, tab ${tabLabel}` : ""}, status ${pane.agent_status}`}
+      aria-label={
+        tabLabel
+          ? t("{name}, {agent} pane {pane}, tab {tab}, status {status}", {
+              name,
+              agent: agentName,
+              pane: pane.pane_id,
+              tab: tabLabel,
+              status: agentStatusText(pane.agent_status),
+            })
+          : t("{name}, {agent} pane {pane}, status {status}", {
+              name,
+              agent: agentName,
+              pane: pane.pane_id,
+              status: agentStatusText(pane.agent_status),
+            })
+      }
     >
       <AgentStatusIcon agent={pane.agent} status={pane.agent_status} />
       <div className="agent-info">
@@ -214,20 +231,36 @@ export function AgentRow({
           {pane.memory_incident ? (
             <span
               className="badge badge-blocked agent-row-status"
-              title={`The kernel killed ${pane.memory_incident.processes} process${
-                pane.memory_incident.processes === 1 ? "" : "es"
-              } in this pane at its ${formatMemoryLimit(
-                pane.memory_incident.limit_bytes,
-              )} memory limit`}
+              title={
+                pane.memory_incident.processes === 1
+                  ? t(
+                      "The kernel killed {count} process in this pane at its {limit} memory limit",
+                      {
+                        count: pane.memory_incident.processes,
+                        limit: formatMemoryLimit(
+                          pane.memory_incident.limit_bytes,
+                        ),
+                      },
+                    )
+                  : t(
+                      "The kernel killed {count} processes in this pane at its {limit} memory limit",
+                      {
+                        count: pane.memory_incident.processes,
+                        limit: formatMemoryLimit(
+                          pane.memory_incident.limit_bytes,
+                        ),
+                      },
+                    )
+              }
             >
-              killed
+              {t("killed")}
             </span>
           ) : null}
           {showStatus ? (
             <span
               className={`${agentClass(pane.agent_status)} agent-row-status`}
             >
-              {pane.agent_status}
+              {agentStatusText(pane.agent_status)}
             </span>
           ) : null}
           {showPaneId ? (
@@ -286,13 +319,13 @@ export function AgentContextMenu({
       if (target instanceof Node && ref.current?.contains(target)) return;
       onClose();
     };
-    const t = setTimeout(() => {
+    const timer = setTimeout(() => {
       window.addEventListener("mousedown", onDown);
       window.addEventListener("keydown", onKey);
       window.addEventListener("scroll", onScroll, true);
     }, 0);
     return () => {
-      clearTimeout(t);
+      clearTimeout(timer);
       window.removeEventListener("mousedown", onDown);
       window.removeEventListener("keydown", onKey);
       window.removeEventListener("scroll", onScroll, true);
@@ -312,38 +345,38 @@ export function AgentContextMenu({
 
   const groups: AgentContextMenuGroup[] = [
     {
-      label: "Open",
+      label: t("Open"),
       items: [
-        { label: "Open terminal", action: () => onFocus(state.pane) },
+        { label: t("Open terminal"), action: () => onFocus(state.pane) },
         {
-          label: "Browse files at agent CWD",
+          label: t("Browse files at agent CWD"),
           action: () => onBrowseFiles?.(state.pane),
         },
         {
-          label: "Review workspace changes",
+          label: t("Review workspace changes"),
           action: () => onReviewChanges?.(state.pane),
         },
       ],
     },
     {
-      label: "Session",
+      label: t("Session"),
       items: [
         {
-          label: "View agent history",
+          label: t("View agent history"),
           action: () => onViewHistory?.(state.pane),
         },
         {
-          label: "Export session",
+          label: t("Export session"),
           action: () => onExportSession(state.pane),
         },
       ],
     },
     {
-      label: "Pane",
+      label: t("Pane"),
       danger: true,
       items: [
         {
-          label: "Close pane",
+          label: t("Close pane"),
           danger: true,
           action: () => onClosePane(state.pane),
         },
@@ -366,7 +399,8 @@ export function AgentContextMenu({
         <span>{agentName}</span>
         <strong title={paneName}>{paneName}</strong>
         <small>
-          <code>{state.pane.pane_id}</code> · {state.pane.agent_status}
+          <code>{state.pane.pane_id}</code> ·{" "}
+          {agentStatusText(state.pane.agent_status)}
           {locationName && locationName !== paneName
             ? ` · ${locationName}`
             : ""}

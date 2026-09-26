@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "../i18n";
 import { store } from "../store";
 import { UI_LOCALE } from "../uiLocale";
 import { useConnectionClient } from "../useConnectionClient";
@@ -118,27 +119,32 @@ export function WorkspaceAutoSyncDialog({
         className="modal compact-modal workspace-auto-sync-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="Automatic branch updates"
+        aria-label={t("Automatic branch updates")}
         tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
       >
         <div className="modal-head">
-          <h2>Automatic Branch Updates</h2>
+          <h2>{t("Automatic Branch Updates")}</h2>
           <CloseButton onClick={onClose} />
         </div>
 
         <p className="auto-sync-description">
-          Every {info?.interval_minutes ?? 10} minutes, fetch{" "}
-          <code>origin</code>&apos;s default branch and merge it into this
-          workspace&apos;s current branch. A dirty workspace is skipped, and
-          conflicting merges are aborted automatically. Updates run only while
-          this workspace is open in the current Roamgate connection.
+          {t(
+            "Every {minutes} minutes, fetch {remote}'s default branch and merge it into this workspace's current branch. A dirty workspace is skipped, and conflicting merges are aborted automatically. Updates run only while this workspace is open in the current Roamgate connection.",
+            { minutes: info?.interval_minutes ?? 10 },
+          )
+            .split("{remote}")
+            .flatMap((part, index) =>
+              index === 0
+                ? [part]
+                : [<code key={`remote-${index}`}>origin</code>, part],
+            )}
         </p>
 
         {loading ? (
           <div className="auto-sync-loading" role="status">
             <span className="hook-loading-mark" />
-            <span>Loading automatic update settings...</span>
+            <span>{t("Loading automatic update settings...")}</span>
           </div>
         ) : (
           <>
@@ -146,23 +152,29 @@ export function WorkspaceAutoSyncDialog({
 
             <div className="auto-sync-summary">
               <SummaryRow
-                label="Workspace"
+                label={t("Workspace")}
                 value={info?.workspace_label ?? "-"}
               />
-              <SummaryRow label="Checkout" value={info?.checkout_path ?? "-"} />
-              <SummaryRow label="Branch" value={info?.last_branch ?? "-"} />
               <SummaryRow
-                label="Last run"
+                label={t("Checkout")}
+                value={info?.checkout_path ?? "-"}
+              />
+              <SummaryRow
+                label={t("Branch")}
+                value={info?.last_branch ?? "-"}
+              />
+              <SummaryRow
+                label={t("Last run")}
                 value={formatLastRun(info?.last_run_at)}
               />
             </div>
 
             <div className="auto-sync-toggle-row">
               <div>
-                <strong>Keep branch updated</strong>
+                <strong>{t("Keep branch updated")}</strong>
                 <span>
                   {info?.running
-                    ? "Syncing origin's default branch now..."
+                    ? t("Syncing origin's default branch now...")
                     : statusLabel(info?.last_status)}
                 </span>
               </div>
@@ -205,7 +217,7 @@ function SummaryRow({ label, value }: { label: string; value: string }) {
 }
 
 function formatLastRun(value?: string) {
-  if (!value) return "Not run yet";
+  if (!value) return t("Not run yet");
   const date = new Date(value);
   return Number.isNaN(date.valueOf()) ? value : date.toLocaleString(UI_LOCALE);
 }
@@ -213,14 +225,14 @@ function formatLastRun(value?: string) {
 function statusLabel(status?: AutoSyncStatus) {
   switch (status) {
     case "updated":
-      return "Updated from origin's default branch";
+      return t("Updated from origin's default branch");
     case "up_to_date":
-      return "Already up to date";
+      return t("Already up to date");
     case "skipped":
-      return "Last run was skipped";
+      return t("Last run was skipped");
     case "failed":
-      return "Last run failed";
+      return t("Last run failed");
     default:
-      return "No sync has run yet";
+      return t("No sync has run yet");
   }
 }
