@@ -11,7 +11,8 @@ import {
 } from "lucide-react";
 import { useStoreSelector } from "../store";
 import type { Pane } from "../types";
-import { UI_LOCALE } from "../uiLocale";
+import { t } from "../i18n";
+import { uiIntlLocale } from "../uiLocale";
 import { copyTextWithFeedback } from "../copyText";
 import { useConnectionClient } from "../useConnectionClient";
 import { shortId } from "../utils";
@@ -39,7 +40,7 @@ function formatStepTime(timestamp?: string) {
   if (!timestamp) return "";
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return timestamp;
-  return date.toLocaleTimeString(UI_LOCALE, {
+  return date.toLocaleTimeString(uiIntlLocale(), {
     hour: "2-digit",
     minute: "2-digit",
   });
@@ -49,7 +50,7 @@ function formatSessionTime(timestamp?: string) {
   if (!timestamp) return "-";
   const date = new Date(timestamp);
   if (Number.isNaN(date.getTime())) return timestamp;
-  return date.toLocaleString(UI_LOCALE, {
+  return date.toLocaleString(uiIntlLocale(), {
     dateStyle: "medium",
     timeStyle: "short",
   });
@@ -71,13 +72,19 @@ function stepMetricText(steps: AgentSessionTrajectoryStep[]) {
   }
   return [
     latest.prompt_tokens !== undefined
-      ? `Input ${formatOptionalCompact(latest.prompt_tokens)}`
+      ? t("Input {count}", {
+          count: formatOptionalCompact(latest.prompt_tokens),
+        })
       : "",
     latest.cached_tokens !== undefined
-      ? `Cached ${formatOptionalCompact(latest.cached_tokens)}`
+      ? t("Cached {count}", {
+          count: formatOptionalCompact(latest.cached_tokens),
+        })
       : "",
     latest.completion_tokens !== undefined
-      ? `Output ${formatOptionalCompact(latest.completion_tokens)}`
+      ? t("Output {count}", {
+          count: formatOptionalCompact(latest.completion_tokens),
+        })
       : "",
   ]
     .filter(Boolean)
@@ -143,7 +150,7 @@ export function AgentSessionPreviewDialog({
   const unavailableDetail =
     error ||
     summary?.detail ||
-    "No readable session transcript was reported for this agent.";
+    t("No readable session transcript was reported for this agent.");
 
   // Render at the document root for the same reason as AgentMessageDialog:
   // on mobile the transformed .app box and the inspector slot's stacking
@@ -155,7 +162,7 @@ export function AgentSessionPreviewDialog({
         className="modal agent-session-modal"
         role="dialog"
         aria-modal="true"
-        aria-label="Session Inspector"
+        aria-label={t("Session Inspector")}
         tabIndex={-1}
         onMouseDown={(event) => event.stopPropagation()}
       >
@@ -163,62 +170,71 @@ export function AgentSessionPreviewDialog({
           <div className="agent-session-identity">
             <AgentIcon agent={pane.agent} />
             <div>
-              <h3>Session Inspector</h3>
+              <h3>{t("Session Inspector")}</h3>
               <span>
-                {workspaceLabel} · {pane.agent ?? "Agent"} ·{" "}
+                {workspaceLabel} · {pane.agent ?? t("Agent")} ·{" "}
                 {shortId(pane.pane_id)}
               </span>
             </div>
           </div>
-          <CloseButton label="Close Session Inspector" onClick={onClose} />
+          <CloseButton label={t("Close Session Inspector")} onClick={onClose} />
         </div>
 
         {summary?.status === "ok" ? (
           <>
             <section
               className="agent-session-overview"
-              aria-label="Session overview"
+              aria-label={t("Session overview")}
             >
               <div>
                 <strong>{formatCount(summary.stats.turns)}</strong>
-                <span>Turns</span>
+                <span>{t("Turns")}</span>
               </div>
               <div>
                 <strong>{formatTokenTotal(summary)}</strong>
-                <span>Total tokens</span>
+                <span>{t("Total tokens")}</span>
               </div>
               <div>
                 <strong title={formatSessionTime(summary.updated_at)}>
                   {formatSessionTime(summary.updated_at)}
                 </strong>
-                <span>Updated</span>
+                <span>{t("Updated")}</span>
               </div>
               <p>
-                Input {formatOptionalCompact(usage?.input_tokens)}
+                {t("Input {count}", {
+                  count: formatOptionalCompact(usage?.input_tokens),
+                })}
                 <span>·</span>
-                Cached {formatOptionalCompact(usage?.cached_input_tokens)}
+                {t("Cached {count}", {
+                  count: formatOptionalCompact(usage?.cached_input_tokens),
+                })}
                 <span>·</span>
-                Output {formatOptionalCompact(usage?.output_tokens)}
+                {t("Output {count}", {
+                  count: formatOptionalCompact(usage?.output_tokens),
+                })}
                 <span>·</span>
-                Reasoning{" "}
-                {formatOptionalCompact(usage?.reasoning_output_tokens)}
+                {t("Reasoning {count}", {
+                  count: formatOptionalCompact(usage?.reasoning_output_tokens),
+                })}
               </p>
             </section>
             <div className="agent-session-file-row">
               <div>
-                <span>Session file</span>
+                <span>{t("Session file")}</span>
                 <code title={summary.path}>{summary.path}</code>
               </div>
               <span>
-                {formatCount(summary.stats.records)} records ·{" "}
-                {formatBytes(summary.file?.size)}
+                {t("{records} records · {size}", {
+                  records: formatCount(summary.stats.records),
+                  size: formatBytes(summary.file?.size),
+                })}
               </span>
               <button
                 type="button"
                 className="agent-history-icon"
                 onClick={() => void copyTextWithFeedback(summary.path)}
-                aria-label="Copy session file path"
-                title="Copy path"
+                aria-label={t("Copy session file path")}
+                title={t("Copy path")}
               >
                 <Copy size={13} />
               </button>
@@ -229,11 +245,11 @@ export function AgentSessionPreviewDialog({
         {loading ? (
           <div className="agent-session-state">
             <span className="terminal-loading-dot" />
-            Loading session
+            {t("Loading session")}
           </div>
         ) : summary?.status !== "ok" || error ? (
           <div className="agent-session-state is-error">
-            <strong>Session unavailable</strong>
+            <strong>{t("Session unavailable")}</strong>
             <span>{unavailableDetail}</span>
             {summary?.command ? <code>{summary.command}</code> : null}
           </div>
@@ -243,7 +259,7 @@ export function AgentSessionPreviewDialog({
               <div
                 className="agent-session-mode-switch"
                 role="tablist"
-                aria-label="Session Inspector view"
+                aria-label={t("Session Inspector view")}
               >
                 <button
                   type="button"
@@ -252,7 +268,7 @@ export function AgentSessionPreviewDialog({
                   role="tab"
                   aria-selected={mode === "timeline"}
                 >
-                  Timeline
+                  {t("Timeline")}
                 </button>
                 <button
                   type="button"
@@ -270,13 +286,13 @@ export function AgentSessionPreviewDialog({
                   role="tab"
                   aria-selected={mode === "raw"}
                 >
-                  Raw
+                  {t("Raw")}
                 </button>
               </div>
               <details className="agent-session-export-menu">
                 <summary>
                   <Download size={14} />
-                  Export
+                  {t("Export")}
                 </summary>
                 <div>
                   <button
@@ -289,20 +305,22 @@ export function AgentSessionPreviewDialog({
                       )
                     }
                   >
-                    Export ATIF
+                    {t("Export ATIF")}
                   </button>
                   <button
                     type="button"
                     onClick={() => downloadSession(pane, connectionClient)}
                   >
-                    Export raw
+                    {t("Export raw")}
                   </button>
                 </div>
               </details>
             </div>
             {summary.truncated ? (
               <div className="file-preview-banner">
-                Preview truncated. Export raw to get the full session file.
+                {t(
+                  "Preview truncated. Export raw to get the full session file.",
+                )}
               </div>
             ) : null}
             <div className="agent-session-content">
@@ -313,7 +331,7 @@ export function AgentSessionPreviewDialog({
                   <CodePreview text={atifText} searchable />
                 ) : (
                   <div className="agent-session-state">
-                    No ATIF trajectory available.
+                    {t("No ATIF trajectory available.")}
                   </div>
                 )
               ) : (
@@ -332,7 +350,7 @@ function SessionTimeline({ turns }: { turns: AgentSessionTurn[] }) {
   if (turns.length === 0) {
     return (
       <div className="agent-session-state">
-        No timeline items. Switch to Raw to inspect the session file.
+        {t("No timeline items. Switch to Raw to inspect the session file.")}
       </div>
     );
   }
@@ -370,14 +388,18 @@ const SessionTurn = memo(function SessionTurn({
       <header>
         <div>
           <strong>
-            {turn.number === null ? "Session setup" : `Turn ${turn.number}`}
+            {turn.number === null
+              ? t("Session setup")
+              : t("Turn {number}", { number: turn.number })}
           </strong>
           {firstTimestamp ? (
             <time>{formatStepTime(firstTimestamp)}</time>
           ) : null}
         </div>
         <span>
-          {turn.steps.length} {turn.steps.length === 1 ? "event" : "events"}
+          {turn.steps.length === 1
+            ? t("1 event")
+            : t("{count} events", { count: turn.steps.length })}
         </span>
       </header>
       <div className="agent-session-turn-body">
@@ -417,7 +439,7 @@ function SessionStepRows({
           <summary>
             <ChevronRight size={12} className="agent-session-details-icon" />
             <Brain size={12} />
-            <span>Reasoning</span>
+            <span>{t("Reasoning")}</span>
             <small>{firstLinePreview(reasoning)}</small>
           </summary>
           <pre>{reasoning}</pre>
@@ -425,13 +447,13 @@ function SessionStepRows({
       ) : null}
       {step.source === "user" && message ? (
         <section className="agent-session-exchange is-user">
-          <span>Prompt</span>
+          <span>{t("Prompt")}</span>
           <pre>{message}</pre>
         </section>
       ) : null}
       {step.source === "agent" && message ? (
         <section className="agent-session-exchange is-agent">
-          <span>Response</span>
+          <span>{t("Response")}</span>
           <pre>{message}</pre>
         </section>
       ) : null}
@@ -469,7 +491,7 @@ function SessionStepRows({
             <span>
               {(result.source_call_id &&
                 toolNameById.get(result.source_call_id)) ||
-                "Tool output"}
+                t("Tool output")}
             </span>
             <small>{firstLinePreview(result.content ?? "")}</small>
           </summary>
@@ -483,7 +505,7 @@ function SessionStepRows({
           <summary>
             <ChevronRight size={12} className="agent-session-details-icon" />
             <Info size={12} />
-            <span>System</span>
+            <span>{t("System")}</span>
             <small>{firstLinePreview(message)}</small>
           </summary>
           <pre>{message}</pre>

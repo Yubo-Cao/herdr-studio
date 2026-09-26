@@ -1,6 +1,7 @@
 import type { ConnectionClient } from "../api";
 import { connectionHttpPath } from "../connectionHttp";
 import { downloadFileFromUrl } from "../downloadFile";
+import { t } from "../i18n";
 import { store } from "../store";
 import type { Pane } from "../types";
 
@@ -366,7 +367,7 @@ export async function exportSessionForConnection(
     if (summary.status !== "ok") {
       store.notify({
         kind: "error",
-        message: "Session unavailable",
+        message: t("Session unavailable"),
         detail: summary.command
           ? `${summary.detail ?? summary.status} (${summary.command})`
           : (summary.detail ?? summary.status),
@@ -376,7 +377,7 @@ export async function exportSessionForConnection(
     downloadSession(pane, client);
     store.notify({
       kind: "info",
-      message: "Session export started",
+      message: t("Session export started"),
       detail: summary.path,
       autoDismissMs: 5000,
     });
@@ -384,7 +385,7 @@ export async function exportSessionForConnection(
     if (!client.isCurrent()) return;
     store.notify({
       kind: "error",
-      message: "Failed to export session",
+      message: t("Failed to export session"),
       detail: e instanceof Error ? e.message : String(e),
     });
   }

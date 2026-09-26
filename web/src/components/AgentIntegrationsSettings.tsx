@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { ArrowRight, Info, RefreshCw, Trash2 } from "lucide-react";
+import { msg, t } from "../i18n";
 import { AgentIcon } from "./AgentIcon";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import {
@@ -46,7 +47,7 @@ export function parseAgentIntegrations(result: unknown): AgentIntegration[] {
       return true;
     })
   )
-    throw new Error("Invalid integration list received from Herdr.");
+    throw new Error(t("Invalid integration list received from Herdr."));
   return items;
 }
 
@@ -57,17 +58,58 @@ type IntegrationChangeOutcome = { messages: string[]; error: string | null };
 const pendingChanges = new Map<string, Promise<IntegrationChangeOutcome>>();
 
 const stateLabels = {
-  not_installed: "Ready to install",
-  current: "Up to date",
-  outdated: "Update available",
+  not_installed: msg("Ready to install"),
+  current: msg("Up to date"),
+  outdated: msg("Update available"),
 };
 
-const INTEGRATION_DESCRIPTION =
-  "Changes apply to the Herdr server user's configuration, shared across its sessions. " +
-  "Integrations do not install agent applications. Start a new agent session after installation if reporting has not started. " +
-  "Versions refer to Herdr integration scripts, not agent applications. Missing API versions are supplemented by `herdr integration status` on the selected server's machine when the CLI matches the running Herdr version and integration state. " +
-  "The bridge or SSH account must use the same agent configuration as the Herdr server. Unavailable version information stays unknown. " +
-  "Available versions are bundled with that server, not checked online.";
+const INTEGRATION_DESCRIPTION = msg(
+  "Changes apply to the Herdr server user's configuration, shared across its sessions. Integrations do not install agent applications. Start a new agent session after installation if reporting has not started. Versions refer to Herdr integration scripts, not agent applications. Missing API versions are supplemented by `herdr integration status` on the selected server's machine when the CLI matches the running Herdr version and integration state. The bridge or SSH account must use the same agent configuration as the Herdr server. Unavailable version information stays unknown. Available versions are bundled with that server, not checked online.",
+);
+
+type IntegrationChange = "install" | "update" | "uninstall";
+
+function changeConfirmation(
+  change: IntegrationChange,
+  integration: string,
+  destination: string,
+) {
+  const values = { integration, destination };
+  const question =
+    change === "uninstall"
+      ? t("Uninstall the {integration} integration on {destination}?", values)
+      : change === "update"
+        ? t("Update the {integration} integration on {destination}?", values)
+        : t("Install the {integration} integration on {destination}?", values);
+  return `${question}\n\n${t(
+    "This changes the Herdr server user's agent configuration, shared across its sessions. It does not install or uninstall the agent application. Existing agent sessions may need to be restarted for the change to take effect.",
+  )}`;
+}
+
+function changeCompleted(change: IntegrationChange, integration: string) {
+  return change === "uninstall"
+    ? t("Uninstall completed for {integration}.", { integration })
+    : change === "update"
+      ? t("Update completed for {integration}.", { integration })
+      : t("Install completed for {integration}.", { integration });
+}
+
+function changeUnconfirmed(change: IntegrationChange, error: string) {
+  return change === "uninstall"
+    ? t(
+        "Uninstall could not be confirmed: {error} Refresh status before trying again.",
+        { error },
+      )
+    : change === "update"
+      ? t(
+          "Update could not be confirmed: {error} Refresh status before trying again.",
+          { error },
+        )
+      : t(
+          "Install could not be confirmed: {error} Refresh status before trying again.",
+          { error },
+        );
+}
 
 export function AgentIntegrationsSettings({
   connectionLabel,
@@ -129,7 +171,9 @@ export function AgentIntegrationsSettings({
         setError(
           [
             outcome?.error,
-            `Could not load integrations: ${(e as Error).message}`,
+            t("Could not load integrations: {error}", {
+              error: (e as Error).message,
+            }),
           ]
             .filter(Boolean)
             .join(" "),
@@ -170,19 +214,14 @@ export function AgentIntegrationsSettings({
       (action === "install" && !item.available)
     )
       return;
-    const verb =
+    const kind: IntegrationChange =
       action === "uninstall"
-        ? "Uninstall"
+        ? "uninstall"
         : item.state === "outdated"
-          ? "Update"
-          : "Install";
+          ? "update"
+          : "install";
     if (
-      !window.confirm(
-        `${verb} the ${item.label} integration on ${destination}?\n\n` +
-          "This changes the Herdr server user's agent configuration, shared across its sessions. " +
-          "It does not install or uninstall the agent application. " +
-          "Existing agent sessions may need to be restarted for the change to take effect.",
-      ) ||
+      !window.confirm(changeConfirmation(kind, item.label, destination)) ||
       !client.isCurrent()
     )
       return;
@@ -197,10 +236,10 @@ export function AgentIntegrationsSettings({
             (message: unknown) => typeof message === "string",
           )
         )
-          throw new Error("Invalid integration result received from Herdr.");
+          throw new Error(t("Invalid integration result received from Herdr."));
         return {
           messages: [
-            `${verb} completed for ${item.label}.`,
+            changeCompleted(kind, item.label),
             ...result.details.messages,
           ],
           error: null,
@@ -208,7 +247,7 @@ export function AgentIntegrationsSettings({
       })
       .catch((e: Error) => ({
         messages: [],
-        error: `${verb} could not be confirmed: ${e.message} Refresh status before trying again.`,
+        error: changeUnconfirmed(kind, e.message),
       }));
     pendingChanges.set(scope, operation);
     void operation.then(() => {
@@ -263,19 +302,21 @@ export function AgentIntegrationsSettings({
                   <span
                     title={
                       item.installed_version === undefined
-                        ? "Version metadata is unavailable from the server API and CLI. Run `herdr integration status` on the server using the bridge or SSH account to inspect it."
-                        : "Installed integration version"
+                        ? t(
+                            "Version metadata is unavailable from the server API and CLI. Run `herdr integration status` on the server using the bridge or SSH account to inspect it.",
+                          )
+                        : t("Installed integration version")
                     }
                   >
                     {item.installed_version === undefined
-                      ? "Version unavailable"
+                      ? t("Version unavailable")
                       : `v${item.installed_version}`}
                   </span>
                   {item.state === "outdated" &&
                   item.available_version !== undefined ? (
                     <>
-                      <ArrowRight size={12} aria-label="update to" />
-                      <span title="Available integration version">
+                      <ArrowRight size={12} aria-label={t("update to")} />
+                      <span title={t("Available integration version")}>
                         v{item.available_version}
                       </span>
                     </>
@@ -287,16 +328,18 @@ export function AgentIntegrationsSettings({
                 data-state={item.state}
               >
                 {!item.available && item.state === "not_installed"
-                  ? "Agent not detected"
-                  : stateLabels[item.state]}
+                  ? t("Agent not detected")
+                  : t(stateLabels[item.state])}
               </span>
             </div>
             {!item.available && item.state !== "not_installed" ? (
               <span
                 className="agent-integrations-missing"
-                title={`Command not found: ${item.command}`}
+                title={t("Command not found: {command}", {
+                  command: item.command,
+                })}
               >
-                Agent not on PATH
+                {t("Agent not on PATH")}
               </span>
             ) : null}
           </div>
@@ -307,24 +350,38 @@ export function AgentIntegrationsSettings({
                 className={
                   item.state === "outdated" ? "agent-integrations-update" : ""
                 }
-                aria-label={`${item.state === "outdated" ? "Update" : "Install"} ${item.label} integration`}
+                aria-label={
+                  item.state === "outdated"
+                    ? t("Update {integration} integration", {
+                        integration: item.label,
+                      })
+                    : t("Install {integration} integration", {
+                        integration: item.label,
+                      })
+                }
                 aria-disabled={disabled || !item.available}
                 title={
                   !item.available
-                    ? `Command not found: ${item.command}`
+                    ? t("Command not found: {command}", {
+                        command: item.command,
+                      })
                     : undefined
                 }
                 onClick={() => void change(item, "install")}
               >
-                {item.state === "outdated" ? "Update" : "Install"}
+                {item.state === "outdated" ? t("Update") : t("Install")}
               </button>
             ) : null}
             {item.state !== "not_installed" ? (
               <button
                 type="button"
                 className="agent-integrations-icon-button agent-integrations-uninstall"
-                aria-label={`Uninstall ${item.label} integration`}
-                title={`Uninstall ${item.label} integration`}
+                aria-label={t("Uninstall {integration} integration", {
+                  integration: item.label,
+                })}
+                title={t("Uninstall {integration} integration", {
+                  integration: item.label,
+                })}
                 aria-disabled={disabled}
                 onClick={() => void change(item, "uninstall")}
               >
@@ -341,33 +398,33 @@ export function AgentIntegrationsSettings({
       <div className="agent-integrations-toolbar">
         <div className="agent-integrations-heading">
           <strong>{destination}</strong>
-          <span>Agent integrations</span>
+          <span>{t("Agent integrations")}</span>
         </div>
         <Popover>
           <PopoverTrigger asChild>
             <button
               type="button"
               className="agent-integrations-icon-button"
-              aria-label="About agent integrations"
-              title="About agent integrations"
+              aria-label={t("About agent integrations")}
+              title={t("About agent integrations")}
             >
               <Info size={16} aria-hidden="true" />
             </button>
           </PopoverTrigger>
           <PopoverContent
             className="configuration-help-content"
-            aria-label="About agent integrations"
+            aria-label={t("About agent integrations")}
             collisionPadding={12}
           >
-            {INTEGRATION_DESCRIPTION}
+            {t(INTEGRATION_DESCRIPTION)}
           </PopoverContent>
         </Popover>
         <button
           ref={refreshButton}
           type="button"
           className="agent-integrations-icon-button"
-          aria-label="Refresh integrations"
-          title="Refresh integrations"
+          aria-label={t("Refresh integrations")}
+          title={t("Refresh integrations")}
           aria-disabled={disabled}
           onClick={() => {
             if (!pendingChanges.has(scope) && !disabled) void load();
@@ -378,9 +435,9 @@ export function AgentIntegrationsSettings({
       </div>
       <div role="status" className="agent-integrations-status">
         {busy
-          ? "Applying integration change..."
+          ? t("Applying integration change...")
           : loading
-            ? "Loading integrations..."
+            ? t("Loading integrations...")
             : null}
         {messages.map((message, index) => (
           <div key={index}>{message}</div>
@@ -389,21 +446,23 @@ export function AgentIntegrationsSettings({
       {error ? (
         <div className="configuration-error" role="alert">
           <span>
-            {error} If this Herdr server does not support integration
-            management, update Herdr.
+            {t(
+              "{error} If this Herdr server does not support integration management, update Herdr.",
+              { error },
+            )}
           </span>
         </div>
       ) : null}
       {items?.length === 0 ? (
         <p className="configuration-scope">
-          No agent integrations reported by Herdr.
+          {t("No agent integrations reported by Herdr.")}
         </p>
       ) : null}
       {visible.length > 0 ? renderList(visible) : null}
       {unavailable.length > 0 ? (
         <details className="agent-integrations-unavailable">
           <summary>
-            Other agents <span>{unavailable.length}</span>
+            {t("Other agents")} <span>{unavailable.length}</span>
           </summary>
           {renderList(unavailable)}
         </details>
