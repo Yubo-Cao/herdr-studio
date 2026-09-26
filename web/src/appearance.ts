@@ -13,7 +13,7 @@ export type AccentColor = (typeof ACCENT_OPTIONS)[number]["value"];
 export const TERMINAL_FONT_STORAGE_KEY = "terminalFontFamily";
 
 const TERMINAL_FONT_PRESETS = [
-  ["", "Default (JetBrains Mono)", ""],
+  ["", "Default (Maple Mono NF CN)", ""],
   ["jetbrains-mono", "JetBrains Mono", '"JetBrains Mono"'],
   ["fira-code", "Fira Code", '"Fira Code"'],
   ["cascadia-mono", "Cascadia Mono", '"Cascadia Mono"'],
@@ -118,8 +118,9 @@ export function normalizeUiScale(value: string | null): number {
 
 // The terminal surface cancels page zoom so xterm's mouse coordinates, cell
 // measurements, and IME overlay share CSS pixels. Scale its font explicitly.
-// Every xterm surface shares this stack. The bundled Roamgate Mono (JetBrains
-// Mono) comes first so phones and desktops share metrics and ligatures. The
+// Every xterm surface shares this stack. The bundled Roamgate Mono (Maple Mono
+// NF CN: ligatures, Nerd Font icons, CJK at exactly two cells) comes first so
+// phones and desktops share metrics. The
 // Nerd Font families carry the powerline and icon glyphs prompts draw with,
 // and dropping any of them shows tofu boxes wherever earlier fonts lack one.
 export const TERMINAL_FONT_FAMILY =

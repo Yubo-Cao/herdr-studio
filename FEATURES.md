@@ -55,7 +55,9 @@ the first pane a jump can reach.
   re-reads on focus; restart it if it keeps the old scheme.
 - Terminals render on the GPU (WebGL2) when available, with pixel-exact box
   drawing and Powerline glyphs and programming ligatures in the bundled
-  JetBrains Mono; they fall back to the DOM renderer otherwise.
+  Maple Mono NF CN (Nerd Font icons, CJK at exactly two cells); they fall back
+  to the DOM renderer otherwise. The font is sliced by unicode-range, so a page
+  downloads only the chunks for characters it shows.
 - Mouse-aware apps receive pane-local clicks/drags/wheels. Select browser text
   with Option-drag (macOS) or Shift-drag (elsewhere); ordinary output needs no
   modifier. Releasing a selection copies it, as in Herdr. Selection freezes

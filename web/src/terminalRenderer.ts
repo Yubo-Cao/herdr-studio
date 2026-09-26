@@ -1,4 +1,5 @@
 import type { Terminal } from "@xterm/xterm";
+import { TERMINAL_FONT_STYLESHEET } from "./terminalFontStylesheet";
 
 // Programming ligatures drawn as one glyph when the GPU renderer is active.
 // Taken from Iosevka's default "calt" set, which @xterm/addon-ligatures also
@@ -110,6 +111,36 @@ export function terminalLigatureRanges(text: string): [number, number][] {
 
 export const TERMINAL_WEB_FONT_FAMILY = "Roamgate Mono";
 
+/**
+ * Add the bundled font's unicode-range stylesheet once, without blocking: the
+ * terminal paints with fallback fonts until the chunks it needs arrive.
+ */
+export function ensureTerminalFontStylesheet(): void {
+  if (typeof document === "undefined") return;
+  if (document.querySelector("link[data-terminal-font]")) return;
+  const link = document.createElement("link");
+  link.rel = "stylesheet";
+  link.href = TERMINAL_FONT_STYLESHEET;
+  link.dataset.terminalFont = "";
+  document.head.append(link);
+}
+
+// Characters whose font chunk this page has already requested.
+const requestedGlyphs = new Set<string>();
+
+/** New non-ASCII characters in the visible rows, requested at most once. */
+export function unrequestedGlyphs(lines: Iterable<string>): string {
+  let found = "";
+  for (const line of lines) {
+    for (const char of line) {
+      if (char.charCodeAt(0) < 0x80 || requestedGlyphs.has(char)) continue;
+      requestedGlyphs.add(char);
+      found += char;
+    }
+  }
+  return found;
+}
+
 // iOS drops WebGL contexts of backgrounded pages; recover a few times per
 // terminal, then keep the DOM renderer rather than flap.
 const MAX_WEBGL_RECOVERIES = 3;
@@ -185,25 +216,69 @@ export function attachTerminalRenderer(term: Terminal): () => void {
     term.options.fontFamily = family;
     addon?.clearTextureAtlas();
   };
-  const size = term.options.fontSize ?? 13;
-  if (
-    typeof document !== "undefined" &&
-    document.fonts &&
-    !document.fonts.check(`${size}px "${TERMINAL_WEB_FONT_FAMILY}"`)
-  ) {
-    void document.fonts
-      .load(`${size}px "${TERMINAL_WEB_FONT_FAMILY}"`)
-      .then((faces) => {
-        if (faces.length > 0) remeasure();
+  const fontSpec = () =>
+    `${term.options.fontSize ?? 13}px "${TERMINAL_WEB_FONT_FAMILY}"`;
+  ensureTerminalFontStylesheet();
+  const fonts = typeof document === "undefined" ? undefined : document.fonts;
+  if (fonts && !fonts.check(fontSpec())) {
+    // Both weights' Latin chunks (~14 KB each) carry the ligature features;
+    // bold output would otherwise draw with a fallback face.
+    void Promise.all([fonts.load(fontSpec()), fonts.load(`bold ${fontSpec()}`)])
+      // Wait for both: WebKit may cache bold glyphs from a fallback face and
+      // does not always fire loadingdone for loads started here.
+      .then(([regular, bold]) => {
+        if (regular.length > 0 || bold.length > 0) remeasure();
       })
       .catch(() => {});
   }
+  // The GPU renderer caches glyphs drawn with fallback fonts; once a CJK or
+  // icon chunk arrives, rebuild the atlas so those cells use the real face.
+  let atlasTimer: ReturnType<typeof setTimeout> | null = null;
+  const onFontsLoaded = () => {
+    if (disposed || atlasTimer) return;
+    atlasTimer = setTimeout(() => {
+      atlasTimer = null;
+      if (disposed) return;
+      addon?.clearTextureAtlas();
+      term.refresh(0, term.rows - 1);
+    }, 120);
+  };
+  fonts?.addEventListener("loadingdone", onFontsLoaded);
+  // Canvas text does not reliably trigger unicode-range downloads, so ask for
+  // the chunks of characters that appear on screen.
+  let scanQueued = false;
+  const scanGlyphs = () => {
+    scanQueued = false;
+    if (disposed || !fonts) return;
+    const buffer = term.buffer.active;
+    const lines: string[] = [];
+    for (let y = 0; y < term.rows; y++)
+      lines.push(
+        buffer.getLine(buffer.viewportY + y)?.translateToString() ?? "",
+      );
+    const glyphs = unrequestedGlyphs(lines);
+    if (glyphs)
+      void fonts
+        .load(fontSpec(), glyphs)
+        .then((faces) => {
+          if (faces.length > 0) onFontsLoaded();
+        })
+        .catch(() => {});
+  };
+  const written = term.onWriteParsed(() => {
+    if (scanQueued) return;
+    scanQueued = true;
+    requestAnimationFrame(scanGlyphs);
+  });
 
   load();
   document.addEventListener("visibilitychange", onVisible);
   return () => {
     disposed = true;
     document.removeEventListener("visibilitychange", onVisible);
+    fonts?.removeEventListener("loadingdone", onFontsLoaded);
+    written.dispose();
+    if (atlasTimer) clearTimeout(atlasTimer);
     if (joiner !== null) {
       try {
         term.deregisterCharacterJoiner(joiner);

@@ -11,6 +11,11 @@ const maxTotalBytes = 16 * 1024 * 1024;
 const maxInitialJsBytes = 660 * 1024;
 const maxInitialJsGzipBytes = 200 * 1024;
 const maxInitialCssBytes = 196 * 1024;
+// The bundled terminal font is sliced into many small unicode-range chunks that
+// load on demand (scripts/build-terminal-font.ts); budget it on its own.
+const fontDirectory = "assets/fonts";
+const maxFontFileCount = 640;
+const maxFontBytes = 24 * 1024 * 1024;
 
 /** Follow eager imports only, from app entries or explicitly selected features. */
 export function initialAssetFiles(
@@ -56,7 +61,7 @@ export function assertLazyGrammarAssets(manifest) {
   }
 }
 
-async function collectAssetStats(root) {
+async function collectAssetStats(root, skip = null) {
   const directories = [root];
   let fileCount = 0;
   let totalBytes = 0;
@@ -67,6 +72,7 @@ async function collectAssetStats(root) {
     for (const entry of entries) {
       const path = `${directory}/${entry.name}`;
       if (entry.isDirectory()) {
+        if (skip && path === `${root}/${skip}`) continue;
         directories.push(path);
         continue;
       }
@@ -80,7 +86,14 @@ async function collectAssetStats(root) {
 }
 
 async function checkAssets() {
-  const { fileCount, totalBytes } = await collectAssetStats(publicRoot);
+  const root = publicRoot.replace(/\/$/, "");
+  const { fileCount, totalBytes } = await collectAssetStats(
+    root,
+    fontDirectory,
+  );
+  const fonts = await collectAssetStats(`${root}/${fontDirectory}`).catch(
+    () => ({ fileCount: 0, totalBytes: 0 }),
+  );
   let manifest;
   try {
     manifest = JSON.parse(
@@ -111,6 +124,8 @@ async function checkAssets() {
     ["initial JS", jsBytes, maxInitialJsBytes, 1024, "KiB"],
     ["initial JS gzip", jsGzipBytes, maxInitialJsGzipBytes, 1024, "KiB"],
     ["initial CSS", cssBytes, maxInitialCssBytes, 1024, "KiB"],
+    ["font files", fonts.fileCount, maxFontFileCount, 1, "files"],
+    ["font total", fonts.totalBytes, maxFontBytes, 1024 * 1024, "MiB"],
   ];
   for (const [name, actual, max, unit, suffix] of checks) {
     const exceeded = actual > max;

@@ -19,13 +19,15 @@ upstream licensing terms documented in
 [`LICENSES/NERD-FONTS.txt`](./LICENSES/NERD-FONTS.txt) and the upstream
 [license audit](https://github.com/ryanoasis/nerd-fonts/blob/master/license-audit.md).
 
-## JetBrains Mono
+## Maple Mono NF CN
 
 The terminal's bundled "Roamgate Mono" face is
-[JetBrains Mono](https://github.com/JetBrains/JetBrainsMono), distributed through
-the `@fontsource-variable/jetbrains-mono` package. Copyright 2020 The JetBrains
-Mono Project Authors, licensed under the SIL Open Font License 1.1; see
-[`LICENSES/JETBRAINS-MONO.txt`](./LICENSES/JETBRAINS-MONO.txt).
+[Maple Mono NF CN](https://github.com/subframe7536/maple-font) 7.4 (Regular and
+Bold), sliced into unicode-range woff2 chunks under
+`web/public/assets/fonts/maple-mono-nf-cn/` by `scripts/build-terminal-font.ts`
+with [cn-font-split](https://github.com/KonghaYao/cn-font-split). Copyright 2022
+The Maple Mono Project Authors, licensed under the SIL Open Font License 1.1;
+see [`LICENSES/MAPLE-MONO.txt`](./LICENSES/MAPLE-MONO.txt).
 
 ## Lobe Icons
 
