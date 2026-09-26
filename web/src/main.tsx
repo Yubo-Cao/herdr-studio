@@ -1,3 +1,4 @@
+import { initLocale } from "./i18n";
 import { initializeLayoutPreferences } from "./layoutPreferences";
 import { initializeShortcutPreferences } from "./shortcutPreferences";
 import React from "react";
@@ -41,11 +42,14 @@ class ErrorBoundary extends React.Component<
 initializeLayoutPreferences();
 initializeShortcutPreferences();
 
-ReactDOM.createRoot(document.getElementById("root")!).render(
-  <React.StrictMode>
-    <ErrorBoundary>
-      <App />
-      <OverlayScrollbarLayer />
-    </ErrorBoundary>
-  </React.StrictMode>,
-);
+// Load the interface catalog before the first render so no text flips language.
+void initLocale().then(() => {
+  ReactDOM.createRoot(document.getElementById("root")!).render(
+    <React.StrictMode>
+      <ErrorBoundary>
+        <App />
+        <OverlayScrollbarLayer />
+      </ErrorBoundary>
+    </React.StrictMode>,
+  );
+});
