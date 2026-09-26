@@ -127,8 +127,19 @@
 
 .terminal-voice-actions {
   display: flex;
+  align-items: center;
   justify-content: flex-end;
   gap: 6px;
+}
+
+.terminal-voice-keys {
+  flex: 1 1 auto;
+  min-width: 0;
+  color: var(--muted);
+  font-size: 11px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .terminal-voice-panel button {
@@ -179,6 +190,10 @@
 
   .terminal-voice-actions button:not(.terminal-voice-cancel) {
     flex: 1 1 0;
+  }
+
+  .terminal-voice-keys {
+    display: none;
   }
 
   .terminal-voice-transcript {

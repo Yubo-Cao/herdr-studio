@@ -59,6 +59,8 @@ const base = {
   "preview.search": ["Ctrl+F"],
   "preview.selectAll": ["Ctrl+A"],
   "composer.send": ["Ctrl+Enter"],
+  // Held for push-to-talk; free on macOS, Windows, and KDE/GNOME defaults.
+  "voice.pushToTalk": ["Ctrl+Alt+M"],
   "annotation.submit": ["Ctrl+Enter"],
   "annotations.copy": ["Ctrl+Shift+C"],
   "annotations.prefill": ["Ctrl+Enter"],

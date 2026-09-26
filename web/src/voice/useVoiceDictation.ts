@@ -42,8 +42,15 @@ export function useVoiceDictation({
     text: string,
     join: (before: string, text: string) => string,
   ) => void;
-  /** After a clean stop; `tidy` is null when the bridge has no cleanup model. */
-  onFinish?: (tidy: typeof tidyDictation | null) => Promise<void>;
+  /**
+   * After a clean stop. `tidy` is null when the bridge has no cleanup model;
+   * `final` is the whole dictation re-recognized in one request, or null when
+   * the segment transcripts already stand (one segment, or the pass failed).
+   */
+  onFinish?: (
+    tidy: typeof tidyDictation | null,
+    final: string | null,
+  ) => Promise<void>;
   onError: (message: string) => void;
 }) {
   const [state, setState] = useState<VoiceDictationState>({
@@ -54,6 +61,7 @@ export function useVoiceDictation({
   const sessionRef = useRef<DictationSession | null>(null);
   const startingRef = useRef(false);
   const cancelledRef = useRef(false);
+  const stopWhenReadyRef = useRef(false);
   const onStartRef = useRef(onStart);
   const onTextRef = useRef(onText);
   const onFinishRef = useRef(onFinish);
@@ -65,16 +73,20 @@ export function useVoiceDictation({
 
   const stop = useCallback(async () => {
     const session = sessionRef.current;
-    if (!session) return;
+    if (!session) {
+      // Released while the microphone is still opening: stop once it is.
+      if (startingRef.current) stopWhenReadyRef.current = true;
+      return;
+    }
     sessionRef.current = null;
     setState((current) => ({ ...current, phase: "stopping", level: 0 }));
     try {
-      await session.stop();
+      const final = await session.stop();
       const finish = onFinishRef.current;
       if (finish) {
         setState((current) => ({ ...current, phase: "tidying" }));
         const { tidyDictation } = await import("./voiceDictation");
-        await finish(session.cleanup ? tidyDictation : null);
+        await finish(session.cleanup ? tidyDictation : null, final);
       }
     } catch (error) {
       onErrorRef.current(
@@ -98,6 +110,7 @@ export function useVoiceDictation({
     if (sessionRef.current || startingRef.current) return;
     startingRef.current = true;
     cancelledRef.current = false;
+    stopWhenReadyRef.current = false;
     const unlocked = unlockAudio();
     setState({ phase: "starting", pending: 0, level: 0 });
     try {
@@ -124,7 +137,13 @@ export function useVoiceDictation({
       if (cancelledRef.current) {
         session.cancel();
         setState({ phase: "off", pending: 0, level: 0 });
-      } else sessionRef.current = session;
+      } else {
+        sessionRef.current = session;
+        if (stopWhenReadyRef.current) {
+          startingRef.current = false;
+          void stop();
+        }
+      }
     } catch (error) {
       if (unlocked?.state !== "closed")
         void unlocked?.close().catch(() => undefined);

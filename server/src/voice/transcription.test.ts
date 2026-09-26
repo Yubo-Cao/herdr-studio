@@ -226,7 +226,7 @@ describe("voice audio", () => {
     new DataView(stereo.buffer).setUint16(22, 2, true);
     expect(() => assertVoiceWav(stereo)).toThrow("16 kHz mono");
     expect(() => assertVoiceWav(new Uint8Array(10))).toThrow("empty");
-    expect(() => assertVoiceWav(wav(16_000 * 61))).toThrow("60 seconds");
+    expect(() => assertVoiceWav(wav(16_000 * 301))).toThrow("300 seconds");
   });
 
   test("joins transcript lines like the local runtimes", () => {

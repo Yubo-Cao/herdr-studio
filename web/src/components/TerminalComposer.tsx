@@ -211,18 +211,32 @@ export function TerminalComposer({
         insertion,
       );
     },
-    onFinish: async (tidy) => {
+    // `final` is the whole dictation re-recognized with full context; it
+    // replaces the segment-by-segment text, tidied when cleanup is on.
+    onFinish: async (tidy, final) => {
       const { key, span } = dictationRef.current;
       dictationRef.current.span = null;
-      const mode = voiceCleanupMode();
-      if (!span || span.broken || mode === "off" || !tidy) return;
-      const spoken = span.text.trim();
+      if (!span || span.broken) return;
+      const spoken = (final ?? span.text).trim();
       if (!spoken) return;
-      const cleaned = await tidy(spoken, mode);
+      const mode = voiceCleanupMode();
+      let replacement = spoken;
+      if (tidy && mode !== "off") {
+        try {
+          replacement = await tidy(spoken, mode);
+        } catch (error) {
+          onError(
+            `Cleanup failed; kept the dictation. ${
+              error instanceof Error ? error.message : String(error)
+            }`,
+          );
+        }
+      }
+      if (replacement.trim() === span.text.trim()) return;
       const edit = dictationCleanupEdit(
         readTerminalComposerDraft(key),
         span,
-        cleaned,
+        replacement,
       );
       if (edit)
         replaceTerminalComposerDraftRange(key, edit.start, edit.end, edit.text);

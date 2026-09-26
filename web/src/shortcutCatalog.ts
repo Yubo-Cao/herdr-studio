@@ -65,6 +65,11 @@ const descriptions: [ShortcutId, string, string][] = [
   ["terminal.paste", "Paste text or images", "Terminal"],
   ["terminal.link", "Open links or preview workspace paths", "Terminal"],
   ["composer.send", "Send the terminal composer draft", "Terminal composer"],
+  [
+    "voice.pushToTalk",
+    "Voice typing: hold to talk, tap to start or insert",
+    "Terminal",
+  ],
   ["preview.search", "Search the raw file preview or diff", "Preview & review"],
   ["preview.selectAll", "Select all in the file preview", "Preview & review"],
   ["annotation.submit", "Add a review comment", "Preview & review"],

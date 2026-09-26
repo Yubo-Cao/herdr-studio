@@ -1,9 +1,13 @@
 /**
  * Voice activity segmentation for dictation, run inside the capture worklet
  * after the browser's WebRTC noise suppression, echo cancellation, and gain
- * control. Thresholds follow Koushu: a segment commits after 500 ms of
- * trailing silence, needs 320 ms of voiced audio, is forced out at 12 s, and
- * is dropped unless it lasts 650 ms and reaches RMS 0.006 or peak 0.025.
+ * control. A frame is voiced when it clears the adaptive energy threshold and,
+ * when a classifier is supplied, the WebRTC VAD also calls it speech; energy
+ * alone mistakes typing and broadband noise for speech, and the WebRTC VAD
+ * alone accepts quiet steady noise. Thresholds follow Koushu: a segment
+ * commits after 500 ms of trailing silence, needs 320 ms of voiced audio, is
+ * forced out at 12 s, and is dropped unless it lasts 650 ms and reaches RMS
+ * 0.006 or peak 0.025.
  */
 export const VOICE_SAMPLE_RATE = 16_000;
 
@@ -57,7 +61,10 @@ export class VoiceSegmenter {
   private noiseFloor = 0.002;
   private framesSinceLevel = 0;
 
-  constructor(options: Partial<VoiceSegmenterOptions> = {}) {
+  constructor(
+    options: Partial<VoiceSegmenterOptions> = {},
+    private readonly isSpeech?: (frame: Float32Array) => boolean,
+  ) {
     this.options = { ...DEFAULT_VOICE_SEGMENTER_OPTIONS, ...options };
     this.frameSize = Math.round(
       (VOICE_SAMPLE_RATE * this.options.frameMs) / 1000,
@@ -100,10 +107,11 @@ export class VoiceSegmenter {
       this.options.minFrameRms,
       this.noiseFloor * this.options.noiseRatio,
     );
-    const voiced = rms >= threshold;
+    const loud = rms >= threshold;
     // Track the background only between utterances so speech never raises it.
-    if (!this.speaking && !voiced)
+    if (!this.speaking && !loud)
       this.noiseFloor = Math.max(0.0005, this.noiseFloor * 0.95 + rms * 0.05);
+    const voiced = loud && (this.isSpeech?.(frame) ?? true);
 
     if (++this.framesSinceLevel >= 5) {
       this.framesSinceLevel = 0;

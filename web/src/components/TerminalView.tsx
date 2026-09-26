@@ -559,6 +559,7 @@ export function TerminalView({
         message: "Voice typing",
         detail: message,
       }),
+    keyboard: isActivePane && !control.access.viewOnly,
   });
   const viewOnlyRef = useRef(control.access.viewOnly);
   const closeTerminalInput = useCallback((blurInput = true) => {

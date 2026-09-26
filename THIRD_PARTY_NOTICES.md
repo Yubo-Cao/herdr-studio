@@ -47,6 +47,14 @@ When updating these website icons, copy them from the application sources
 used by `web/src/components/AgentIcon.tsx`. The deployed site includes their
 notices in `site/assets/agent-icons-LICENSE.txt`.
 
+## WebRTC VAD
+
+Voice activity detection runs the WebRTC voice activity detector through
+[libfvad](https://github.com/dpirch/libfvad), compiled to WebAssembly by
+[`@echogarden/fvad-wasm`](https://github.com/echogarden-project/fvad-wasm).
+It is Copyright (c) 2011, The WebRTC project authors, under the BSD 3-Clause
+License. See [`LICENSES/WEBRTC-VAD.txt`](./LICENSES/WEBRTC-VAD.txt).
+
 ## Trademarks
 
 Herdr, Pi, Codex, Claude, Gemini, Kimi, Grok, and other product names and logos

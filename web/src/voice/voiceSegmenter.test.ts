@@ -32,6 +32,27 @@ const segments = (events: VoiceSegmenterEvent[]) =>
   );
 
 describe("voice segmenter", () => {
+  test("requires the speech classifier as well as energy", () => {
+    const loudNoise = () =>
+      run(
+        new VoiceSegmenter({}, () => false),
+        silence(500),
+        tone(1200, 0.2),
+        silence(700),
+      );
+    expect(segments(loudNoise())).toHaveLength(0);
+    expect(
+      segments(
+        run(
+          new VoiceSegmenter({}, () => true),
+          silence(500),
+          tone(1200, 0.2),
+          silence(700),
+        ),
+      ),
+    ).toHaveLength(1);
+  });
+
   test("commits an utterance after trailing silence with pre-roll", () => {
     const events = run(
       new VoiceSegmenter(),

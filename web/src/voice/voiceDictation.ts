@@ -1,6 +1,13 @@
-import { encodeVoiceWav } from "./voiceSegmenter";
+import vadWasmUrl from "@echogarden/fvad-wasm/fvad.wasm?url";
+import type { VoiceCaptureOptions } from "./voiceCapture.worklet";
+import { encodeVoiceWav, VOICE_SAMPLE_RATE } from "./voiceSegmenter";
 import type { VoiceCleanupMode } from "./voicePreferences";
 import workletUrl from "./voiceCapture.worklet.ts?worker&url";
+
+/** The bridge's per-request audio limit, which bounds the final pass. */
+const FINAL_MAX_SECONDS = 300;
+/** Silence placed between speech segments in the final-pass audio. */
+const FINAL_GAP_SECONDS = 0.25;
 
 export type DictationPhase = "starting" | "listening" | "speaking";
 
@@ -13,8 +20,12 @@ export type DictationCallbacks = {
 };
 
 export type DictationSession = {
-  /** Flush the current utterance, wait for its transcript, release the mic. */
-  stop: () => Promise<void>;
+  /**
+   * Flush the current utterance, wait for its transcript, and release the
+   * mic. Resolves to the whole dictation re-recognized as one request, or
+   * null when that pass was unnecessary (one segment) or failed.
+   */
+  stop: () => Promise<string | null>;
   /** Release the mic immediately, discarding untranscribed audio. */
   cancel: () => void;
   /** Whether the bridge can rewrite the finished dictation with an LLM. */
@@ -27,6 +38,20 @@ type VoiceStatus = {
   error?: string;
   cleanup?: { available: boolean; model?: string };
 };
+
+let vadWasm: Promise<ArrayBuffer | null> | null = null;
+
+/** WebRTC VAD bytes for the worklet; null falls back to the energy VAD. */
+function loadVadWasm() {
+  vadWasm ??= fetch(vadWasmUrl)
+    .then((response) => (response.ok ? response.arrayBuffer() : null))
+    .catch(() => null)
+    .then((bytes) => {
+      if (!bytes) vadWasm = null;
+      return bytes;
+    });
+  return vadWasm;
+}
 
 export async function voiceStatus(): Promise<VoiceStatus> {
   const response = await fetch("/api/voice/status", {
@@ -98,7 +123,7 @@ export async function startDictation(
       throw new Error(
         "Voice input needs a secure origin (HTTPS or localhost) with microphone access.",
       );
-    const status = await voiceStatus();
+    const [status, wasm] = await Promise.all([voiceStatus(), loadVadWasm()]);
     if (!status.available)
       throw new Error(
         status.error ??
@@ -117,7 +142,7 @@ export async function startDictation(
     context ??= new AudioContext({ latencyHint: "interactive" });
     await context.audioWorklet.addModule(workletUrl);
     if (context.state !== "running") await context.resume();
-    return capture(callbacks, stream, context, status);
+    return capture(callbacks, stream, context, status, wasm);
   } catch (error) {
     for (const track of stream?.getTracks() ?? []) track.stop();
     void context?.close().catch(() => undefined);
@@ -130,12 +155,17 @@ function capture(
   stream: MediaStream,
   context: AudioContext,
   status: VoiceStatus,
+  vadWasm: ArrayBuffer | null,
 ): DictationSession {
   const source = context.createMediaStreamSource(stream);
+  const processorOptions: VoiceCaptureOptions = vadWasm
+    ? { vadWasm: vadWasm.slice(0) }
+    : {};
   const node = new AudioWorkletNode(context, "roamgate-voice-capture", {
     numberOfInputs: 1,
     numberOfOutputs: 1,
     channelCount: 1,
+    processorOptions,
   });
   const mute = context.createGain();
   mute.gain.value = 0;
@@ -145,6 +175,9 @@ function capture(
 
   let pending = 0;
   let queue = Promise.resolve();
+  // Speech-only audio of the whole session, re-recognized as one request on
+  // stop: segments split at pauses lose the context recognizers rely on.
+  const spoken: Float32Array[] = [];
   let released = false;
   let flushed: (() => void) | null = null;
 
@@ -170,6 +203,7 @@ function capture(
   };
 
   const enqueue = (samples: Float32Array) => {
+    spoken.push(samples);
     const wav = encodeVoiceWav(samples);
     callbacks.onPending(++pending);
     queue = queue
@@ -192,9 +226,14 @@ function capture(
       | { type: "level"; rms: number }
       | { type: "segment"; samples: Float32Array }
       | { type: "flushed" }
+      | { type: "vad"; engine: "webrtc" | "energy"; error: string }
     >,
   ) => {
     const message = event.data;
+    if (message.type === "vad" && message.engine === "energy")
+      console.warn(
+        `voice: WebRTC VAD unavailable, using energy detection. ${message.error}`,
+      );
     if (message.type === "segment") enqueue(message.samples);
     else if (message.type === "speech")
       callbacks.onPhase(message.active ? "speaking" : "listening");
@@ -208,9 +247,37 @@ function capture(
     );
   callbacks.onPhase("listening");
 
+  const finalPass = async (): Promise<string | null> => {
+    if (spoken.length < 2) return null;
+    const gap = Math.round(FINAL_GAP_SECONDS * VOICE_SAMPLE_RATE);
+    const length = spoken.reduce(
+      (total, samples) => total + samples.length + gap,
+      -gap,
+    );
+    if (length > FINAL_MAX_SECONDS * VOICE_SAMPLE_RATE) return null;
+    const joined = new Float32Array(length);
+    let offset = 0;
+    for (const samples of spoken) {
+      joined.set(samples, offset);
+      offset += samples.length + gap;
+    }
+    callbacks.onPending(++pending);
+    try {
+      return (await transcribe(encodeVoiceWav(joined))) || null;
+    } catch (error) {
+      console.warn(
+        "voice: whole-dictation pass failed; keeping segments",
+        error,
+      );
+      return null;
+    } finally {
+      callbacks.onPending(--pending);
+    }
+  };
+
   return {
     async stop() {
-      if (released) return;
+      if (released) return null;
       await new Promise<void>((resolve) => {
         const timer = setTimeout(resolve, 1500);
         flushed = () => {
@@ -221,6 +288,7 @@ function capture(
       });
       release();
       await queue;
+      return finalPass();
     },
     cancel: release,
     cleanup: status.cleanup?.available === true,

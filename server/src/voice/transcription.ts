@@ -18,11 +18,14 @@ import {
   voiceDictionary,
 } from "./dictionary";
 
-/** Browser segments are 16 kHz mono PCM16 WAV; the VAD commits within 12 s. */
+/**
+ * Browser audio is 16 kHz mono PCM16 WAV: VAD segments commit within 12 s,
+ * and the whole-dictation pass sent on stop is capped like Aoide at 5 min.
+ */
 export const VOICE_SAMPLE_RATE = 16_000;
-export const VOICE_MAX_SECONDS = 60;
+export const VOICE_MAX_SECONDS = 300;
 export const VOICE_MAX_BYTES = 44 + VOICE_MAX_SECONDS * VOICE_SAMPLE_RATE * 2;
-const TRANSCRIBE_TIMEOUT_MS = 60_000;
+const TRANSCRIBE_TIMEOUT_MS = 120_000;
 
 export type VoiceProvider =
   | { kind: "command"; label: string; argv: string[] }

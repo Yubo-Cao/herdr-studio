@@ -252,7 +252,12 @@ separate for desktop/mobile. Jump from a diff to its file preview.
   (desktop) or the floating microphone beside **Open device keyboard** (phones
   and tablets) dictates without opening the composer. Recognized text collects
   in a preview; **Insert** tidies it and types it into the pane, **Send** also
-  presses Enter, and tapping the microphone again equals **Insert**.
+  presses Enter, and tapping the microphone again equals **Insert**. On a
+  keyboard, hold **Ctrl+Alt+M** to talk and release to insert, or tap it to
+  start and tap again to insert; Enter sends and Esc discards
+  (**Configuration > Behavior > Keyboard shortcuts** can rebind it). The WebRTC voice activity
+  detector finds speech after the browser's noise suppression, and the whole
+  dictation is recognized once more in one request when you stop.
   Recognition falls back from cloud to local, a personal dictionary fixes
   names and terms, and the finished dictation is tidied by a language model
   (**Configuration > Behavior > Voice cleanup**).
@@ -313,6 +318,7 @@ Common defaults (Linux/Android exceptions follow):
 | Focus neighboring pane | `Cmd+Ctrl+Arrow` | `Ctrl+Shift+Arrow` |
 | Split right / down | `Cmd+D` / `Cmd+Shift+D` | `Ctrl+Alt+D` / `Ctrl+Alt+Shift+D` |
 | Zoom / restore pane | `Cmd+Shift+Enter` | `Ctrl+Alt+Enter` |
+| Voice typing (hold to talk, tap to toggle) | `Ctrl+Option+M` | `Ctrl+Alt+M` |
 | Numbered tab | `Ctrl+1…9` | `Ctrl+Alt+1…9` |
 | Numbered command menu action | `Option+1…9` | `Alt+1…9` |
 | Workspaces | `Ctrl+Shift+W` | `Ctrl+Alt+O` |
