@@ -221,13 +221,17 @@ export function attachTerminalRenderer(term: Terminal): () => void {
   ensureTerminalFontStylesheet();
   const fonts = typeof document === "undefined" ? undefined : document.fonts;
   if (fonts && !fonts.check(fontSpec())) {
-    // Both weights' Latin chunks (~14 KB each) carry the ligature features;
-    // bold output would otherwise draw with a fallback face.
-    void Promise.all([fonts.load(fontSpec()), fonts.load(`bold ${fontSpec()}`)])
-      // Wait for both: WebKit may cache bold glyphs from a fallback face and
-      // does not always fire loadingdone for loads started here.
-      .then(([regular, bold]) => {
-        if (regular.length > 0 || bold.length > 0) remeasure();
+    // The Latin chunks (~14 KB each) carry the ligature features; bold and
+    // italic output would otherwise draw with a fallback face.
+    // Wait for all: WebKit may cache glyphs from a fallback face and does not
+    // always fire loadingdone for loads started here.
+    void Promise.all([
+      fonts.load(fontSpec()),
+      fonts.load(`bold ${fontSpec()}`),
+      fonts.load(`italic ${fontSpec()}`),
+    ])
+      .then((loaded) => {
+        if (loaded.some((faces) => faces.length > 0)) remeasure();
       })
       .catch(() => {});
   }

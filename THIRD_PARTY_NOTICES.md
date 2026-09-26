@@ -22,8 +22,8 @@ upstream licensing terms documented in
 ## Maple Mono NF CN
 
 The terminal's bundled "Roamgate Mono" face is
-[Maple Mono NF CN](https://github.com/subframe7536/maple-font) 7.4 (Regular and
-Bold), sliced into unicode-range woff2 chunks under
+[Maple Mono NF CN](https://github.com/subframe7536/maple-font) 7.4 (Regular, Bold,
+and Italic), sliced into unicode-range woff2 chunks under
 `web/public/assets/fonts/maple-mono-nf-cn/` by `scripts/build-terminal-font.ts`
 with [cn-font-split](https://github.com/KonghaYao/cn-font-split). Copyright 2022
 The Maple Mono Project Authors, licensed under the SIL Open Font License 1.1;

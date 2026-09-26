@@ -14,8 +14,8 @@ const maxInitialCssBytes = 196 * 1024;
 // The bundled terminal font is sliced into many small unicode-range chunks that
 // load on demand (scripts/build-terminal-font.ts); budget it on its own.
 const fontDirectory = "assets/fonts";
-const maxFontFileCount = 640;
-const maxFontBytes = 24 * 1024 * 1024;
+const maxFontFileCount = 900;
+const maxFontBytes = 36 * 1024 * 1024;
 
 /** Follow eager imports only, from app entries or explicitly selected features. */
 export function initialAssetFiles(
