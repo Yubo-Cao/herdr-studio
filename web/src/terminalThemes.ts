@@ -664,3 +664,33 @@ export function applyTerminalTheme(term: Terminal, theme: ITheme) {
     );
   }
 }
+
+function normalizedHex(value: string | undefined): string | null {
+  const match = /^#?([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(value?.trim() ?? "");
+  if (!match) return null;
+  const hex =
+    match[1].length === 3
+      ? [...match[1]].map((digit) => digit + digit).join("")
+      : match[1];
+  return `#${hex.toLowerCase()}`;
+}
+
+/**
+ * The `terminal.host_theme` payload for an xterm theme: default colors, the
+ * 16 ANSI colors, and whether the background reads as light or dark.
+ */
+export function terminalHostThemeReport(theme: ITheme) {
+  const background = normalizedHex(theme.background);
+  const foreground = normalizedHex(theme.foreground);
+  if (!background || !foreground) return null;
+  const channel = (offset: number) =>
+    Number.parseInt(background.slice(offset, offset + 2), 16);
+  // Same luminance split Herdr uses to infer an appearance from OSC 11.
+  const luminance = channel(1) * 299 + channel(3) * 587 + channel(5) * 114;
+  return {
+    appearance: luminance >= 128_000 ? "light" : "dark",
+    background,
+    foreground,
+    palette: TERMINAL_ANSI_COLOR_KEYS.map((key) => normalizedHex(theme[key])),
+  };
+}

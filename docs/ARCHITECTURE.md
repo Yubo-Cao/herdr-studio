@@ -110,6 +110,14 @@ full frame, and a 10 s acknowledgement timeout releases the window. Viewers
 that do not opt in, popups, and legacy streams keep base64 `bytes` repaints.
 The browser writes only changed rows into xterm while its viewport is unchanged.
 
+The browser reports its terminal colors with `terminal.host_theme`
+(`appearance`, `foreground`, `background`, 16-color `palette`). Every endpoint
+client of that connection forwards them as Herdr `ClientShellHostTheme`
+updates (default colors, palette, then appearance), including right after each
+welcome, so a Roamgate client promoted to foreground never resets panes to an
+empty host theme. A light/dark change also blurs and refocuses the focused pane
+once so apps that re-probe colors on focus pick it up.
+
 Messages of at least 128 bytes use negotiated WebSocket compression with
 per-connection context for WebKit compatibility, so repeated rows and poll
 replies compress against earlier messages. Clipboard payloads stay

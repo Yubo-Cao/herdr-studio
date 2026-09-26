@@ -25,8 +25,36 @@ const CM = {
   ClientShellResize: 12,
   ClientShellPaneInput: 13,
   ClientShellEndpointRequest: 15,
+  ClientShellHostTheme: 17,
+  ClientShellFocus: 18,
   EndpointControl: 20,
 } as const;
+
+// ClientHostThemeUpdate variants and enum values from Herdr's wire protocol.
+const HOST_THEME_DEFAULT_COLOR = 0;
+const HOST_THEME_PALETTE = 1;
+const HOST_THEME_APPEARANCE = 2;
+const HOST_COLOR_FOREGROUND = 0;
+const HOST_COLOR_BACKGROUND = 1;
+
+export interface HostRgb {
+  r: number;
+  g: number;
+  b: number;
+}
+
+/**
+ * The colors this client "shows" panes with, reported the way a TUI client
+ * reports its outer terminal. Herdr answers pane OSC 10/11/4 queries and
+ * color-scheme (?996/?997) reports from the foreground client's theme, so
+ * without it Codex and Claude Code guess a dark terminal on a light page.
+ */
+export interface EndpointHostTheme {
+  appearance: "light" | "dark";
+  foreground: HostRgb;
+  background: HostRgb;
+  palette: [number, HostRgb][];
+}
 
 // ServerMessage tags (frozen for endpoint generation 1).
 const SM = {
@@ -121,6 +149,8 @@ export class EndpointClient extends EventEmitter {
       timer?: ReturnType<typeof setTimeout>;
     }
   >();
+
+  private hostTheme: EndpointHostTheme | null = null;
 
   constructor(
     private socketPath: string,
@@ -232,6 +262,63 @@ export class EndpointClient extends EventEmitter {
     w.varint(rows);
     w.bool(false); // pixel_mouse
     this.write(w.toBuffer());
+  }
+
+  /** Report the browser's terminal theme; resent after every (re)welcome. */
+  setHostTheme(theme: EndpointHostTheme | null) {
+    this.hostTheme = theme;
+    if (this.welcome && !this.closed) this.sendHostTheme();
+  }
+
+  /** Report focus of the viewer; apps re-read colors on focus regained. */
+  sendFocus(focused: boolean) {
+    if (!this.welcome || this.closed) return;
+    const w = new BinWriter();
+    w.variant(CM.ClientShellFocus);
+    w.bool(focused);
+    this.write(w.toBuffer());
+  }
+
+  private sendHostTheme() {
+    const theme = this.hostTheme;
+    if (!theme) return;
+    const rgb = (w: BinWriter, color: HostRgb) => {
+      w.u8(color.r);
+      w.u8(color.g);
+      w.u8(color.b);
+    };
+    const update = (fill: (w: BinWriter) => void) => {
+      const w = new BinWriter();
+      w.variant(CM.ClientShellHostTheme);
+      fill(w);
+      this.write(w.toBuffer());
+    };
+    for (const [kind, color] of [
+      [HOST_COLOR_FOREGROUND, theme.foreground],
+      [HOST_COLOR_BACKGROUND, theme.background],
+    ] as const) {
+      update((w) => {
+        w.variant(HOST_THEME_DEFAULT_COLOR);
+        w.variant(kind);
+        rgb(w, color);
+      });
+    }
+    if (theme.palette.length > 0) {
+      update((w) => {
+        w.variant(HOST_THEME_PALETTE);
+        w.varint(theme.palette.length);
+        for (const [index, color] of theme.palette) {
+          w.u8(index);
+          rgb(w, color);
+        }
+      });
+    }
+    // Appearance last: apps told of a scheme change re-query OSC 11 and must
+    // already see the new background.
+    update((w) => {
+      w.variant(HOST_THEME_APPEARANCE);
+      w.variant(theme.appearance === "light" ? 1 : 0);
+    });
   }
 
   /** Probe the server; any inbound message (pong or otherwise) is liveness. */
@@ -459,6 +546,9 @@ export class EndpointClient extends EventEmitter {
         capabilities: parsed.capabilities ?? [],
       };
       this.welcome = welcome;
+      // Before any focus/input promotes this client to foreground: an empty
+      // theme there resets every pane's reported colors.
+      this.sendHostTheme();
       this.welcomed = true;
       this.emit("welcome", welcome);
       this.resolveWelcome();

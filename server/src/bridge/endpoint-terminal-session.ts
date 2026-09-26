@@ -1,5 +1,9 @@
 import { EventEmitter } from "node:events";
-import { EndpointClient, type EndpointSurface } from "./endpoint-client";
+import {
+  type EndpointHostTheme,
+  EndpointClient,
+  type EndpointSurface,
+} from "./endpoint-client";
 import { EndpointCreationDeadline } from "./endpoint-creation";
 import { frameToAnsi } from "./frame-to-ansi";
 import type { FrameData } from "./thin-client";
@@ -39,6 +43,16 @@ export class EndpointTerminalSession extends EventEmitter {
   private paneId: string | null = null;
   get currentPaneId(): string | null {
     return this.paneId;
+  }
+
+  setHostTheme(theme: EndpointHostTheme | null) {
+    this.client.setHostTheme(theme);
+  }
+
+  /** Blur and refocus the pane so apps that probe colors on focus re-read them. */
+  nudgeFocus() {
+    this.client.sendFocus(false);
+    this.client.sendFocus(true);
   }
   private lastScroll: {
     offsetFromBottom: number;

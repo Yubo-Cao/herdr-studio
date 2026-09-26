@@ -14,7 +14,11 @@ import { ThinClient } from "./thin-client";
 import { roamgateEnv } from "../config/environment";
 import { isTerminalHelloProtocol } from "./protocol-compat";
 import { EndpointTerminalSession } from "./endpoint-terminal-session";
-import { EndpointClient } from "./endpoint-client";
+import {
+  EndpointClient,
+  type EndpointHostTheme,
+  type HostRgb,
+} from "./endpoint-client";
 import type { Popup, SurfaceBaseline } from "./endpoint-surface";
 import { frameToAnsi, frameToAnsiParts } from "./frame-to-ansi";
 import { TerminalFrameStream } from "./terminal-frame-stream";
@@ -57,6 +61,42 @@ const STANDARD_BASE64_RE =
   /^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/;
 
 type PopupIdentity = Pick<Popup, "terminalId" | "title" | "width" | "height">;
+
+const HEX_COLOR = /^#([0-9a-f]{2})([0-9a-f]{2})([0-9a-f]{2})$/i;
+
+function parseHexColor(value: unknown): HostRgb | null {
+  const match = typeof value === "string" ? HEX_COLOR.exec(value) : null;
+  return match
+    ? {
+        r: Number.parseInt(match[1], 16),
+        g: Number.parseInt(match[2], 16),
+        b: Number.parseInt(match[3], 16),
+      }
+    : null;
+}
+
+/** Validate a browser `terminal.host_theme` request. */
+export function parseHostTheme(
+  params: Record<string, unknown>,
+): EndpointHostTheme | null {
+  const appearance = params.appearance;
+  const foreground = parseHexColor(params.foreground);
+  const background = parseHexColor(params.background);
+  if (
+    (appearance !== "light" && appearance !== "dark") ||
+    !foreground ||
+    !background
+  )
+    return null;
+  const palette: [number, HostRgb][] = [];
+  if (Array.isArray(params.palette)) {
+    for (const [index, value] of params.palette.slice(0, 16).entries()) {
+      const color = parseHexColor(value);
+      if (color) palette.push([index, color]);
+    }
+  }
+  return { appearance, foreground, background, palette };
+}
 
 export function createTerminalBridge(args: {
   connectionId?: string;
@@ -107,6 +147,8 @@ export function createTerminalBridge(args: {
     Map<string, { cols: number; rows: number }>
   >();
   const sharedTerminals = new Map<string, SharedTerminalSession>();
+  // The browser's terminal colors, reported to Herdr as the host theme.
+  let hostTheme: EndpointHostTheme | null = null;
   // Viewers that attached with `frame_delta` get endpoint frames as row updates.
   const frameStreams = new Map<
     ServerWebSocket<unknown>,
@@ -319,6 +361,7 @@ export function createTerminalBridge(args: {
       const codecs = await (args.surfaceCodecsEnabled?.() ?? true);
       if (disposed || popupObserver) return;
       const observer = new EndpointClient(args.clientSocketPath, codecs);
+      observer.setHostTheme(hostTheme);
       popupObserver = observer;
       observer.on("surface", (surface: SurfaceBaseline) => {
         if (popupObserver !== observer) return;
@@ -694,6 +737,7 @@ export function createTerminalBridge(args: {
             surfaceCodecsEnabled,
           )
         : new ThinClient(args.clientSocketPath, args.herdrProtocol);
+    if (thin instanceof EndpointTerminalSession) thin.setHostTheme(hostTheme);
     let resolveFirstFrame!: (seen: boolean) => void;
     const firstFrame = new Promise<boolean>((resolve) => {
       resolveFirstFrame = resolve;
@@ -1377,6 +1421,25 @@ export function createTerminalBridge(args: {
               end_col: Math.min(r.end_col, viewport.cols - 1),
             })),
         });
+      }
+      if (method === "terminal.host_theme") {
+        const theme = parseHostTheme(params);
+        if (!theme) return fail("valid host theme colors required");
+        const appearanceChanged = hostTheme?.appearance !== theme.appearance;
+        hostTheme = theme;
+        popupObserver?.setHostTheme(theme);
+        let nudged = false;
+        for (const shared of sharedTerminals.values()) {
+          if (!(shared.thin instanceof EndpointTerminalSession)) continue;
+          shared.thin.setHostTheme(theme);
+          // Codex reads colors at startup and on focus; one blur/refocus of
+          // the focused pane lets it pick up the switch without a restart.
+          if (appearanceChanged && !nudged && !shared.thin.isClosed) {
+            shared.thin.nudgeFocus();
+            nudged = true;
+          }
+        }
+        return reply({ ok: true });
       }
       if (method === "terminal.frame_ack") {
         const stream = requestedTerminalId

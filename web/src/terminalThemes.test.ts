@@ -19,6 +19,7 @@ import {
   serializeTerminalThemeSelection,
   terminalColorToHex,
   terminalThemeFor,
+  terminalHostThemeReport,
 } from "./terminalThemes";
 
 describe("terminal themes", () => {
@@ -325,4 +326,24 @@ describe("terminal color helpers", () => {
     expect(terminalColorToHex(undefined)).toBe("");
     expect(terminalColorToHex("not-a-color")).toBe("");
   });
+});
+
+test("host theme reports follow the terminal background, not the page", () => {
+  expect(
+    terminalHostThemeReport({ background: "#FFF", foreground: "#1f2328" }),
+  ).toMatchObject({
+    appearance: "light",
+    background: "#ffffff",
+    foreground: "#1f2328",
+  });
+  expect(
+    terminalHostThemeReport({ background: "#0e1014", foreground: "#e6e6e6" })
+      ?.appearance,
+  ).toBe("dark");
+  expect(
+    terminalHostThemeReport({
+      background: "rgba(0,0,0,0.5)",
+      foreground: "#fff",
+    }),
+  ).toBeNull();
 });

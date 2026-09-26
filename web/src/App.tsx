@@ -114,6 +114,7 @@ import {
   serializeTerminalThemeSelection,
   TERMINAL_THEME_SELECTION_STORAGE_KEY,
   type TerminalThemeSelection,
+  terminalHostThemeReport,
 } from "./terminalThemes";
 import {
   activePaneIdForSnapshot,
@@ -3214,6 +3215,15 @@ export default function App() {
       document.removeEventListener("visibilitychange", refresh);
     };
   }, [connectionClient, s.status, systemTheme, theme]);
+  // Report the terminal colors panes are drawn with as Herdr's host theme, so
+  // apps that ask the terminal (Codex, Claude Code's auto theme) match the
+  // page instead of assuming a dark terminal.
+  useEffect(() => {
+    if (s.status !== "connected") return;
+    const report = terminalHostThemeReport(terminalTheme);
+    if (!report) return;
+    void connectionClient.call("terminal.host_theme", report).catch(() => {});
+  }, [connectionClient, s.status, terminalTheme]);
   useLayoutEffect(() => {
     document.documentElement.dataset.theme = resolvedTheme;
     document.documentElement.style.colorScheme = resolvedTheme;

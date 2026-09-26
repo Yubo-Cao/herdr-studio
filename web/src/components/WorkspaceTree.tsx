@@ -21,7 +21,7 @@ import {
   Layers,
   Pin,
 } from "lucide-react";
-import { WorktreeLifecycleDialog } from "./WorktreeLifecycleDialog";
+import { LazyWorktreeLifecycleDialog as WorktreeLifecycleDialog } from "./LazyWorktreeLifecycleDialog";
 import {
   WORKSPACE_PINS_STORAGE_KEY,
   isWorkspacePinned,

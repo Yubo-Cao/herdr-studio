@@ -49,6 +49,10 @@ the first pane a jump can reach.
 - Scroll by wheel, trackpad, touch, or explicit half-page history shortcuts.
   Full page keys route to terminal apps or Herdr history; unavailable endpoint
   history controls explain missing support.
+- Pane apps see the browser's terminal colors: OSC 10/11/4 queries and
+  color-scheme reports (`?996n`, mode 2031) follow the page's terminal theme,
+  so Codex and Claude Code (`/theme` auto) render for a light page. Codex
+  re-reads on focus; restart it if it keeps the old scheme.
 - Terminals render on the GPU (WebGL2) when available, with pixel-exact box
   drawing and Powerline glyphs and programming ligatures in the bundled
   JetBrains Mono; they fall back to the DOM renderer otherwise.

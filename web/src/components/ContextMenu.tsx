@@ -12,7 +12,7 @@ import { WorktreeHooksDialog } from "./WorktreeHooksDialog";
 import { WorktreeOpenDialog } from "./WorktreeOpenDialog";
 import { WorkspaceAutoSyncDialog } from "./WorkspaceAutoSyncDialog";
 import { worktreeCreationSource } from "../worktree";
-import { WorktreeLifecycleDialog } from "./WorktreeLifecycleDialog";
+import { LazyWorktreeLifecycleDialog as WorktreeLifecycleDialog } from "./LazyWorktreeLifecycleDialog";
 import { isWorkspacePinned } from "../workspacePins";
 import { workspaceDisplayName } from "../workspaceTreeBadges";
 import { copyTextFromUserGesture } from "../terminalClipboard";

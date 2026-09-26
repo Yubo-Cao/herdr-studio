@@ -53,7 +53,7 @@ import {
 } from "./ui/command";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 import { canCreateWorktree, worktreeCreationSource } from "../worktree";
-import { WorktreeLifecycleDialog } from "./WorktreeLifecycleDialog";
+import { LazyWorktreeLifecycleDialog as WorktreeLifecycleDialog } from "./LazyWorktreeLifecycleDialog";
 
 type TextAction =
   | { type: "rename-workspace"; workspace: Workspace }
