@@ -252,6 +252,8 @@ separate for desktop/mobile. Jump from a diff to its file preview.
   actions stay available; **Done**/Esc exits.
   Scroll first to select older output. Selection freezes the displayed frame,
   not the connection; legacy streams resume at a 1 MiB buffered UTF-16 limit.
+- The default grid holds latching **Ctrl**/**Alt**/**Shift**, Ctrl+C/D/R, Esc,
+  Tab, Enter, arrows, and PgUp/PgDn.
 - **Ctrl**, **Alt**, and **Shift** in the shortcut grid apply to the next key
   typed or tapped (Ctrl then `c` sends Ctrl+C, Shift then Tab sends Shift+Tab);
   double-tap to lock one on, tap again to release.

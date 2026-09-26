@@ -27,7 +27,7 @@ describe("mobile terminal shortcuts", () => {
         "mod-alt",
         "mod-shift",
         "ctrl-c",
-        null,
+        "ctrl-d",
         "arrow-up",
         null,
         "page-up",
@@ -36,7 +36,7 @@ describe("mobile terminal shortcuts", () => {
         "escape",
         "tab",
         "enter",
-        null,
+        "ctrl-r",
         "arrow-left",
         "arrow-down",
         "arrow-right",
@@ -199,7 +199,7 @@ describe("mobile terminal shortcuts", () => {
     const encoded = serializeMobileTerminalShortcutRows(first);
     const parsed = parseMobileTerminalShortcutRows(encoded);
     expect(parsed[0][0]?.label).toBe("Changed");
-    expect(mobileTerminalShortcutCount(parsed)).toBe(13);
+    expect(mobileTerminalShortcutCount(parsed)).toBe(15);
   });
 
   test("encodes control, navigation, and modified keys", () => {
