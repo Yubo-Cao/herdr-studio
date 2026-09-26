@@ -1,3 +1,5 @@
+import { t } from "./i18n";
+
 export type ShortcutPlatform = "mac" | "windows" | "linux";
 export const SHORTCUT_PLATFORMS: Record<ShortcutPlatform, string> = {
   mac: "macOS / iOS",
@@ -316,19 +318,23 @@ export function shortcutConflicts(
 
 export function validateShortcutKeys(id: ShortcutId, keys: unknown): string[] {
   if (!Array.isArray(keys) || keys.length > 3)
-    throw new Error("Use up to three shortcuts per action.");
+    throw new Error(t("Use up to three shortcuts per action."));
   const normalized = keys.map((key) =>
     typeof key === "string" ? normalizeShortcut(key) : null,
   );
   if (normalized.some((key) => !key))
     throw new Error(
-      "Use a key combination such as Ctrl+Alt+K. Escape is reserved for dismissal.",
+      t(
+        "Use a key combination such as Ctrl+Alt+K. Escape is reserved for dismissal.",
+      ),
     );
   const result = [...new Set(normalized as string[])];
   for (const key of result) {
     if ((id === "terminal.link") !== key.endsWith("Click"))
       throw new Error(
-        "Use a modified Click for terminal links and keyboard keys for other actions.",
+        t(
+          "Use a modified Click for terminal links and keyboard keys for other actions.",
+        ),
       );
     if (
       !/^(Ctrl|Alt|Meta)\+/.test(key) &&
@@ -337,17 +343,19 @@ export function validateShortcutKeys(id: ShortcutId, keys: unknown): string[] {
       )
     ) {
       throw new Error(
-        "Add Ctrl, Alt, or Cmd/Win to printable keys so typing remains available.",
+        t(
+          "Add Ctrl, Alt, or Cmd/Win to printable keys so typing remains available.",
+        ),
       );
     }
     if (key.endsWith("Click") && !key.includes("+"))
-      throw new Error("Choose a modifier for clicking links.");
+      throw new Error(t("Choose a modifier for clicking links."));
     if (
       shortcutScope(id) === "global" &&
       !key.includes("+") &&
       !/^F\d+$/.test(key)
     )
-      throw new Error("Global shortcuts need a modifier or a function key.");
+      throw new Error(t("Global shortcuts need a modifier or a function key."));
   }
   return result;
 }
@@ -360,6 +368,8 @@ export function shortcutWarning(keys: string[]): string | null {
         /^(?:Alt\+F4|Meta\+Q|F[15]|F11|F12)$/.test(key),
     )
   )
-    return "Your browser or operating system may reserve this combination. Use Record to check whether this page receives it.";
+    return t(
+      "Your browser or operating system may reserve this combination. Use Record to check whether this page receives it.",
+    );
   return null;
 }

@@ -2,6 +2,7 @@ import { memo, useEffect, useRef, useState } from "react";
 import { Copy } from "lucide-react";
 import { historyEntryLabel, type HistoryEntry } from "./agentHistory";
 import { formatBytes } from "./agentSession";
+import { t } from "../i18n";
 import { formatUiDateTime } from "../uiLocale";
 import { copyTextWithFeedback } from "../copyText";
 import "./AgentHistoryCard.css";
@@ -67,8 +68,8 @@ export const AgentHistoryCard = memo(function AgentHistoryCard({
             type="button"
             className="agent-history-copy"
             onClick={() => void copyTextWithFeedback(entry.text)}
-            aria-label={`Copy entry ${index}`}
-            title="Copy"
+            aria-label={t("Copy entry {index}", { index })}
+            title={t("Copy")}
           >
             <Copy size={13} />
           </button>
@@ -76,7 +77,7 @@ export const AgentHistoryCard = memo(function AgentHistoryCard({
       </div>
       {entry.source_call_id ? (
         <div className="agent-history-tool-id" title={entry.source_call_id}>
-          Call ID: {entry.source_call_id}
+          {t("Call ID: {id}", { id: entry.source_call_id })}
         </div>
       ) : null}
       {contentPending ? (
@@ -85,30 +86,42 @@ export const AgentHistoryCard = memo(function AgentHistoryCard({
           className="agent-history-tool-load"
           disabled={contentLoading}
           onClick={() => onLoadContent?.(entry)}
-          aria-label={`Load ${entry.kind === "tool_call" ? "arguments" : "output"} for entry ${index}`}
+          aria-label={
+            entry.kind === "tool_call"
+              ? t("Load arguments for entry {index}", { index })
+              : t("Load output for entry {index}", { index })
+          }
         >
           {contentLoading
-            ? "Loading…"
-            : `Load ${entry.kind === "tool_call" ? "arguments" : "output"} (${formatBytes(entry.text_bytes)})`}
+            ? t("Loading…")
+            : entry.kind === "tool_call"
+              ? t("Load arguments ({size})", {
+                  size: formatBytes(entry.text_bytes),
+                })
+              : t("Load output ({size})", {
+                  size: formatBytes(entry.text_bytes),
+                })}
         </button>
       ) : (
         <button
           type="button"
           className={`agent-history-card-open ${truncated ? "is-truncated" : ""}`}
           onClick={() => onExpand(entry)}
-          aria-label={`View ${label} entry ${index}`}
+          aria-label={t("View {label} entry {index}", { label, index })}
         >
           {entry.kind === "tool_call" ? (
-            <div className="agent-history-tool-label">Arguments</div>
+            <div className="agent-history-tool-label">{t("Arguments")}</div>
           ) : entry.kind === "tool_result" ? (
             <div className="agent-history-tool-label">
-              {entry.is_error ? "Error output" : "Output"}
+              {entry.is_error ? t("Error output") : t("Output")}
             </div>
           ) : null}
           <pre ref={contentRef}>{preview}</pre>
           {truncated ? (
             <span>
-              View full {entry.role === "tool" ? "tool details" : "message"}
+              {entry.role === "tool"
+                ? t("View full tool details")
+                : t("View full message")}
             </span>
           ) : null}
         </button>

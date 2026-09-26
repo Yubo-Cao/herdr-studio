@@ -1,11 +1,13 @@
+import { msg } from "./i18n";
+
 export const ACCENT_OPTIONS = [
-  { value: "neutral", label: "Default" },
-  { value: "blue", label: "Blue" },
-  { value: "teal", label: "Teal" },
-  { value: "green", label: "Green" },
-  { value: "amber", label: "Amber" },
-  { value: "rose", label: "Rose" },
-  { value: "violet", label: "Violet" },
+  { value: "neutral", label: msg("Default") },
+  { value: "blue", label: msg("Blue") },
+  { value: "teal", label: msg("Teal") },
+  { value: "green", label: msg("Green") },
+  { value: "amber", label: msg("Amber") },
+  { value: "rose", label: msg("Rose") },
+  { value: "violet", label: msg("Violet") },
 ] as const;
 
 export type AccentColor = (typeof ACCENT_OPTIONS)[number]["value"];
@@ -13,7 +15,7 @@ export type AccentColor = (typeof ACCENT_OPTIONS)[number]["value"];
 export const TERMINAL_FONT_STORAGE_KEY = "terminalFontFamily";
 
 const TERMINAL_FONT_PRESETS = [
-  ["", "Default (Maple Mono NF CN)", ""],
+  ["", msg("Default (Maple Mono NF CN)"), ""],
   ["jetbrains-mono", "JetBrains Mono", '"JetBrains Mono"'],
   ["fira-code", "Fira Code", '"Fira Code"'],
   ["cascadia-mono", "Cascadia Mono", '"Cascadia Mono"'],
@@ -73,10 +75,10 @@ export function normalizeAccentColor(value: string | null): AccentColor {
 }
 
 export const THEME_OPTIONS = [
-  { value: "session", label: "Session" },
-  { value: "dark", label: "Dark" },
-  { value: "light", label: "Light" },
-  { value: "system", label: "System" },
+  { value: "session", label: msg("Session") },
+  { value: "dark", label: msg("Dark") },
+  { value: "light", label: msg("Light") },
+  { value: "system", label: msg("System") },
 ] as const;
 
 export type ThemePreference = (typeof THEME_OPTIONS)[number]["value"];

@@ -1,5 +1,6 @@
 import { useState } from "react";
 import { Copy, X } from "lucide-react";
+import { t } from "../i18n";
 import { formatUiDateTime } from "../uiLocale";
 import { copyTextWithFeedback } from "../copyText";
 import { CloseButton } from "./CloseButton";
@@ -19,11 +20,14 @@ export type AgentMessage = {
 };
 
 export function agentMessageRoleLabel(message: AgentMessage) {
-  return message.role === "tool"
-    ? `${message.kind === "tool_call" ? "Tool arguments" : message.is_error ? "Tool error" : "Tool output"}: ${message.tool_name ?? "tool"}`
-    : message.role === "assistant"
-      ? "Assistant"
-      : "User";
+  if (message.role !== "tool")
+    return message.role === "assistant" ? t("Assistant") : t("User");
+  const tool = message.tool_name ?? t("tool");
+  return message.kind === "tool_call"
+    ? t("Tool arguments: {tool}", { tool })
+    : message.is_error
+      ? t("Tool error: {tool}", { tool })
+      : t("Tool output: {tool}", { tool });
 }
 
 // Message rendering is shared by the modal and the inline History reader.
@@ -58,12 +62,12 @@ export function AgentMessageContent({
         className={`modal-head agent-message-modal-head ${embedded ? "is-embedded" : ""}`}
       >
         <div>
-          <h3>{roleLabel} Message</h3>
+          <h3>{t("{role} Message", { role: roleLabel })}</h3>
           <time dateTime={message.sent_at}>
             {formatUiDateTime(message.sent_at)}
           </time>
           {message.source_call_id ? (
-            <p>Call ID: {message.source_call_id}</p>
+            <p>{t("Call ID: {id}", { id: message.source_call_id })}</p>
           ) : null}
         </div>
         <div className="agent-message-modal-actions">
@@ -78,12 +82,14 @@ export function AgentMessageContent({
               }
               aria-label={
                 viewMode === "rendered"
-                  ? "Show raw markdown"
-                  : "Show rendered markdown"
+                  ? t("Show raw markdown")
+                  : t("Show rendered markdown")
               }
-              title={viewMode === "rendered" ? "Show raw" : "Show rendered"}
+              title={
+                viewMode === "rendered" ? t("Show raw") : t("Show rendered")
+              }
             >
-              {viewMode === "rendered" ? "Raw" : "Rendered"}
+              {viewMode === "rendered" ? t("Raw") : t("Rendered")}
             </button>
           ) : null}
           {!contentPending ? (
@@ -91,8 +97,8 @@ export function AgentMessageContent({
               type="button"
               className="agent-history-icon"
               onClick={() => void copyTextWithFeedback(message.text)}
-              aria-label="Copy message"
-              title="Copy"
+              aria-label={t("Copy message")}
+              title={t("Copy")}
             >
               <Copy size={15} />
             </button>
@@ -102,18 +108,20 @@ export function AgentMessageContent({
               type="button"
               className="agent-history-icon"
               onClick={onClose}
-              aria-label="Close message detail"
-              title="Close detail"
+              aria-label={t("Close message detail")}
+              title={t("Close detail")}
             >
               <X size={15} />
             </button>
           ) : (
-            <CloseButton label="Close message" onClick={onClose} />
+            <CloseButton label={t("Close message")} onClick={onClose} />
           )}
         </div>
       </div>
       {contentPending ? (
-        <pre className="agent-message-modal-content">Loading tool content…</pre>
+        <pre className="agent-message-modal-content">
+          {t("Loading tool content…")}
+        </pre>
       ) : !isTool && viewMode === "rendered" ? (
         <div className="agent-message-modal-content is-rendered">
           <MarkdownPreview

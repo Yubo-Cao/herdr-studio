@@ -3,12 +3,13 @@ import {
   type HistoryCategory,
   type HistoryFilters,
 } from "./agentHistory";
+import { msg, t } from "../i18n";
 import "./AgentHistoryFilters.css";
 
 const labels: Record<HistoryCategory, string> = {
-  user: "User",
-  agent: "Agent",
-  tool: "Tool",
+  user: msg("User"),
+  agent: msg("Agent"),
+  tool: msg("Tool"),
 };
 
 export function AgentHistoryFilters({
@@ -24,19 +25,27 @@ export function AgentHistoryFilters({
     <div
       className="agent-history-filters"
       role="group"
-      aria-label="Filter history by message type"
+      aria-label={t("Filter history by message type")}
     >
       {HISTORY_CATEGORIES.map((category) => (
         <button
           key={category}
           type="button"
           className={`agent-history-filter is-${category}`}
-          aria-label={labels[category]}
+          aria-label={t(labels[category])}
           aria-pressed={filters[category]}
-          title={`${filters[category] ? "Hide" : "Show"} ${labels[category]} entries`}
+          title={
+            filters[category]
+              ? t("Hide {category} entries", {
+                  category: t(labels[category]),
+                })
+              : t("Show {category} entries", {
+                  category: t(labels[category]),
+                })
+          }
           onClick={() => onToggle(category)}
         >
-          {labels[category]}
+          {t(labels[category])}
           <span>{counts[category]}</span>
         </button>
       ))}
