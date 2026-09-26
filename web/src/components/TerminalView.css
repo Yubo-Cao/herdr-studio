@@ -153,7 +153,7 @@
   }
 
   .terminal-mobile-key-spacer {
-    width: 48px;
+    min-width: 0;
     height: 28px;
     pointer-events: none;
   }
@@ -165,12 +165,7 @@
   }
 
   .terminal-mobile-keys-panel {
-    max-width: calc(100vw - 62px - env(safe-area-inset-right, 0px));
     padding: 3px;
-    overflow-x: auto;
-    /* Anchor overflow at the right edge so the directional and page keys stay
-       visible on narrow screens. The nested grid resets item order to LTR. */
-    direction: rtl;
     opacity: 0;
     pointer-events: none;
     transform: translateX(10px) scale(0.9);
@@ -185,11 +180,28 @@
     display: none;
   }
 
+  /* Keys shrink to fit the width beside the toggle, so every column stays
+     visible on phones instead of overflowing off one edge. */
   .terminal-mobile-keys-grid {
-    width: max-content;
+    width: min(
+      calc(
+        var(--mobile-shortcut-columns) *
+        48px +
+        (var(--mobile-shortcut-columns) - 1) *
+        2px
+      ),
+      calc(
+        100vw -
+        64px -
+        env(safe-area-inset-left, 0px) -
+        env(safe-area-inset-right, 0px)
+      )
+    );
     display: grid;
-    grid-template-columns: repeat(var(--mobile-shortcut-columns), 48px);
-    direction: ltr;
+    grid-template-columns: repeat(
+        var(--mobile-shortcut-columns),
+        minmax(0, 1fr)
+      );
     gap: 2px;
   }
 
@@ -197,7 +209,10 @@
     width: 100%;
     grid-column: 1 / -1;
     display: grid;
-    grid-template-columns: repeat(var(--mobile-shortcut-columns), 48px);
+    grid-template-columns: repeat(
+        var(--mobile-shortcut-columns),
+        minmax(0, 1fr)
+      );
     gap: 2px;
   }
 
@@ -221,20 +236,19 @@
   }
 
   .terminal-mobile-keys-panel button {
-    width: 48px;
+    width: 100%;
     min-width: 0;
     height: 28px;
-    flex: 0 0 48px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    padding: 0 4px;
+    padding: 0 2px;
     border: 0;
     background: color-mix(in srgb, var(--panel-2) 76%, transparent);
     color: var(--text-strong);
     overflow: hidden;
     font:
-      700 11px / 1 ui-monospace,
+      700 clamp(9.5px, 2.8vw, 11px) / 1 ui-monospace,
       SFMono-Regular,
       Menlo,
       Consolas,
