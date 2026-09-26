@@ -14,6 +14,7 @@ import { roamgateLocalStorage } from "../browserStorage";
 import { isMobileLayout } from "../layoutPreferences";
 import { terminalPushMatches } from "../terminalConnection";
 import { terminalCellAt, terminalWheelScroll } from "../terminalScroll";
+import { attachTerminalRenderer } from "../terminalRenderer";
 
 const RESIZE_DEBOUNCE_MS = 150;
 
@@ -122,6 +123,7 @@ export function PopupOverlay({ terminalTheme }: { terminalTheme: ITheme }) {
     const fit = new FitAddon();
     term.loadAddon(fit);
     term.open(container);
+    const detachRenderer = attachTerminalRenderer(term);
     // Size the view to the container before anything else. xterm starts at its
     // default 80x24, and the only other fit runs behind a debounce that used
     // to bail out while the attach was still in flight, which left the
@@ -279,6 +281,7 @@ export function PopupOverlay({ terminalTheme }: { terminalTheme: ITheme }) {
           .catch(() => {});
       }
       attachedTerminalIdRef.current = null;
+      detachRenderer();
       term.dispose();
       termRef.current = null;
       fitRef.current = null;

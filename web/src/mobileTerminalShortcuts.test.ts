@@ -23,10 +23,10 @@ describe("mobile terminal shortcuts", () => {
       rows.map((row) => row.map((shortcut) => shortcut?.action ?? null)),
     ).toEqual([
       [
+        "mod-ctrl",
+        "mod-alt",
+        "mod-shift",
         "ctrl-c",
-        "ctrl-d",
-        "ctrl-r",
-        "alt-up",
         null,
         "arrow-up",
         null,
@@ -194,7 +194,7 @@ describe("mobile terminal shortcuts", () => {
   test("round-trips normalized rows without sharing mutable defaults", () => {
     const first = defaultMobileTerminalShortcutRows();
     first[0][0]!.label = "Changed";
-    expect(defaultMobileTerminalShortcutRows()[0][0]?.label).toBe("C-c");
+    expect(defaultMobileTerminalShortcutRows()[0][0]?.label).toBe("Ctrl");
 
     const encoded = serializeMobileTerminalShortcutRows(first);
     const parsed = parseMobileTerminalShortcutRows(encoded);

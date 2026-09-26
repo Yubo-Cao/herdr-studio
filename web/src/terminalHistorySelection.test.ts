@@ -65,3 +65,47 @@ describe("selection across terminal history viewports", () => {
     expect(range.text).toBe("\u754ce\u0301\ud83d\ude00");
   });
 });
+
+test("history rows must still match after scrolling, except the live bottom page", () => {
+  const range = new TerminalHistoryRange(
+    { start: { x: 0, y: 0 }, end: { x: 2, y: 1 } },
+    10,
+    false,
+  );
+  range.capture(10, [
+    ["a", "b"],
+    ["c", "d"],
+  ]);
+  expect(
+    range.matches(
+      9,
+      [
+        ["z", "z"],
+        ["a", "b"],
+      ],
+      100,
+    ),
+  ).toBe(true);
+  // Scrollback trimming shifted every row: the absolute mapping is gone.
+  expect(
+    range.matches(
+      9,
+      [
+        ["z", "z"],
+        ["c", "d"],
+      ],
+      100,
+    ),
+  ).toBe(false);
+  // A spinner repainting the live page in place is not a history shift.
+  expect(
+    range.matches(
+      10,
+      [
+        ["x", "x"],
+        ["c", "d"],
+      ],
+      10,
+    ),
+  ).toBe(true);
+});

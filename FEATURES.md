@@ -49,10 +49,15 @@ the first pane a jump can reach.
 - Scroll by wheel, trackpad, touch, or explicit half-page history shortcuts.
   Full page keys route to terminal apps or Herdr history; unavailable endpoint
   history controls explain missing support.
+- Terminals render on the GPU (WebGL2) when available, with pixel-exact box
+  drawing and Powerline glyphs and programming ligatures in the bundled
+  JetBrains Mono; they fall back to the DOM renderer otherwise.
 - Mouse-aware apps receive pane-local clicks/drags/wheels. Select browser text
   with Option-drag (macOS) or Shift-drag (elsewhere); ordinary output needs no
-  modifier. Selection freezes presentation until cleared. Desktop edge-drag
-  captures offscreen rows; release, blur, or changed content stops scrolling.
+  modifier. Releasing a selection copies it, as in Herdr. Selection freezes
+  presentation until cleared. To select more than a screen, drag to the edge or
+  scroll the wheel while holding the button; after release, scroll and
+  Shift-click to extend. Streaming output below does not interrupt it.
 - Paste images to upload them to the connected host and insert their paths.
   OSC 52 clipboard writes follow Herdr's foreground recipient, not proven source
   pane ownership; see [clipboard limits](docs/DEPLOYMENT.md#herdr-compatibility).
@@ -240,11 +245,16 @@ separate for desktop/mobile. Jump from a diff to its file preview.
   Automatic defaults to 768 CSS px (adjustable 320–2560); `?layout=mobile`,
   `desktop`, or `auto` overrides saved mode until a menu choice clears it.
   Agent/workspace panel order is saved separately for each layout.
-- Touch reads output without opening the keyboard. Use **Open device keyboard**
-  to type; a light terminal tap dismisses it without input. Long-press selects
-  text for **Copy**, **Add comment**, or link actions; **Done**/Esc exits.
+- Touch reads output without opening the keyboard. Tap the last rows (where
+  agent input boxes sit) or **Open device keyboard** to type; a tap higher up
+  dismisses it without input. Long-press selects text and copies it on
+  release; handles adjust and recopy. **Copy**, **Add comment**, and link
+  actions stay available; **Done**/Esc exits.
   Scroll first to select older output. Selection freezes the displayed frame,
   not the connection; legacy streams resume at a 1 MiB buffered UTF-16 limit.
+- **Ctrl**, **Alt**, and **Shift** in the shortcut grid apply to the next key
+  typed or tapped (Ctrl then `c` sends Ctrl+C, Shift then Tab sends Shift+Tab);
+  double-tap to lock one on, tap again to release.
 - Customize the floating `2×8` grid and up to four side buttons under
   **Configuration > Behavior > Mobile terminal shortcuts**. The Tabs sheet and
   pane controls work when the tab strip is hidden.

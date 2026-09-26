@@ -22,6 +22,24 @@ export function terminalTouchShouldDismissInput(
   return started && !moved && inputActive;
 }
 
+/**
+ * Whether a tap should open the device keyboard. Agent CLIs keep their input
+ * box on the last rows around the cursor, so a tap there means "type here";
+ * taps higher up are for reading and selecting.
+ */
+export function terminalTapOpensInput(
+  tapRow: number,
+  rows: number,
+  cursorRow: number | null,
+): boolean {
+  if (rows <= 0 || tapRow < 0) return false;
+  const bottomBand = Math.max(3, Math.ceil(rows * 0.3));
+  return (
+    tapRow >= rows - bottomBand ||
+    (cursorRow !== null && Math.abs(tapRow - cursorRow) <= 2)
+  );
+}
+
 export function terminalPointerShouldBlurInput(
   coarsePointer: boolean,
   editableTarget: boolean,

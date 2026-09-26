@@ -80,6 +80,8 @@ import {
 } from "../store";
 import {
   copyTextFromUserGesture,
+  type PendingClipboardWrite,
+  reserveClipboardWrite,
   createTerminalClipboardProvider,
   decodeTerminalClipboard,
 } from "../terminalClipboard";
@@ -108,8 +110,19 @@ import {
 import { TerminalFrameDecoder } from "../terminalFrameDecoder";
 import { TerminalInputBatcher } from "../terminalInputBatcher";
 import {
+  applyTerminalModifiers,
+  consumeTerminalModifiers,
+  NO_TERMINAL_MODIFIERS,
+  type TerminalModifier,
+  type TerminalModifierState,
+  tapTerminalModifier,
+  terminalModifiersActive,
+} from "../terminalModifiers";
+import { attachTerminalRenderer } from "../terminalRenderer";
+import {
   terminalFocusBlockedByOverlay,
   terminalPointerShouldBlurInput,
+  terminalTapOpensInput,
   terminalTouchShouldDismissInput,
 } from "../terminalFocus";
 import { uploadTerminalImage } from "../terminalImageUpload";
@@ -296,6 +309,24 @@ function isSafariBrowser() {
 
 function trimCopiedLinePadding(text: string) {
   return text.replace(/[ \t]+(?=\r?\n|$)/g, "");
+}
+
+/**
+ * Copy a finished selection, as Herdr's own client does. Call it from the
+ * gesture that ended the selection: Safari only allows clipboard writes there.
+ */
+function copyFinishedSelection(text: string) {
+  const copied = trimCopiedLinePadding(text);
+  if (!copied) return;
+  void copyTextFromUserGesture(copied).then(
+    () =>
+      store.notify({
+        kind: "info",
+        message: `Copied ${copied.length.toLocaleString()} characters`,
+        autoDismissMs: 1500,
+      }),
+    () => {},
+  );
 }
 
 function withTimeout<T>(
@@ -582,6 +613,28 @@ export function TerminalView({
     keyboard: isActivePane && !control.access.viewOnly,
   });
   const viewOnlyRef = useRef(control.access.viewOnly);
+  // Latched Ctrl/Alt/Shift from the mobile shortcut bar.
+  const [modifiers, setModifiers] = useState(NO_TERMINAL_MODIFIERS);
+  const modifiersRef = useRef(modifiers);
+  const modifierTapAtRef = useRef<Partial<Record<TerminalModifier, number>>>(
+    {},
+  );
+  const updateModifiers = useCallback((next: TerminalModifierState) => {
+    modifiersRef.current = next;
+    setModifiers(next);
+  }, []);
+  const applyLatchedModifiersRef = useRef((data: string) => {
+    const state = modifiersRef.current;
+    if (!terminalModifiersActive(state)) return data;
+    const applied = applyTerminalModifiers(data, {
+      ctrl: state.ctrl !== "off",
+      alt: state.alt !== "off",
+      shift: state.shift !== "off",
+    });
+    if (applied === null) return data;
+    updateModifiers(consumeTerminalModifiers(state));
+    return applied;
+  });
   const closeTerminalInput = useCallback((blurInput = true) => {
     inputActiveRef.current = false;
     inputSessionRef.current++;
@@ -831,7 +884,10 @@ export function TerminalView({
     if (shouldAvoidVirtualKeyboard()) blurTerminalInput();
     const terminalId = desiredTerminalRef.current ?? pane?.terminal_id;
     if (!terminalId) return;
-    sendBytes(connectionClient, new Uint8Array(bytes), terminalId);
+    const data = applyLatchedModifiersRef.current(
+      String.fromCharCode(...bytes),
+    );
+    sendBytes(connectionClient, new TextEncoder().encode(data), terminalId);
   };
 
   const scrollPage = useCallback(
@@ -935,6 +991,7 @@ export function TerminalView({
     };
     let latestLinkFrame: string | undefined;
     let latestEndpointText: string | undefined;
+    let reservedClipboard: PendingClipboardWrite | null = null;
     let oscHover: {
       text: string;
       state: string | null;
@@ -979,6 +1036,8 @@ export function TerminalView({
       ...terminalDensity(uiScaleRef.current),
       theme: terminalThemeRef.current,
       allowProposedApi: true,
+      // Nerd Font icons wider than a cell shrink to fit instead of spilling.
+      rescaleOverlappingGlyphs: true,
       linkHandler: {
         // Opt in only to route local file URIs below; all other schemes stay inert.
         allowNonHttpProtocols: true,
@@ -1075,6 +1134,7 @@ export function TerminalView({
     term.loadAddon(new UnicodeGraphemesAddon());
     term.loadAddon(fit);
     term.open(container);
+    const detachRenderer = attachTerminalRenderer(term);
     if (isApplePlatform()) {
       term.element?.classList.add("xterm-apple-row-spacing-fix");
     }
@@ -1185,7 +1245,9 @@ export function TerminalView({
       const terminalId = desiredTerminalRef.current;
       if (!terminalId) return;
       imeKeyEvent.recordXtermData(unsuppressedData);
-      const bytes = new TextEncoder().encode(unsuppressedData);
+      const bytes = new TextEncoder().encode(
+        applyLatchedModifiersRef.current(unsuppressedData),
+      );
       sendBytes(connectionClient, bytes, terminalId);
     });
 
@@ -1335,7 +1397,16 @@ export function TerminalView({
       }
       const text = decodeTerminalClipboard(clipboard.data);
       if (text !== null && connectionClient.isCurrent()) {
-        clipboardProvider.writeText(SYSTEM_CLIPBOARD, text);
+        const reserved = reservedClipboard;
+        reservedClipboard = null;
+        if (!reserved) {
+          clipboardProvider.writeText(SYSTEM_CLIPBOARD, text);
+          return;
+        }
+        // The write reserved at the end of the drag keeps WebKit's gesture.
+        reserved
+          .resolve(text)
+          .catch(() => clipboardProvider.writeText(SYSTEM_CLIPBOARD, text));
       }
     });
     const offClosed = bridge.onTerminalClosed((closed) => {
@@ -1456,7 +1527,9 @@ export function TerminalView({
       if (!acceptsInput()) return;
       const terminalId = desiredTerminalRef.current;
       if (!terminalId) return;
-      const bytes = new TextEncoder().encode(text);
+      const bytes = new TextEncoder().encode(
+        applyLatchedModifiersRef.current(text),
+      );
       sendBytes(connectionClient, bytes, terminalId);
     };
     const pasteText = async (
@@ -2048,6 +2121,12 @@ export function TerminalView({
       );
     };
     container.addEventListener("copy", onCopy, { capture: true });
+    // WebKit enables Copy only for a DOM range selection unless beforecopy is
+    // cancelled; xterm's textarea holds just a caret, so opt in explicitly.
+    const onBeforeCopy = (e: Event) => {
+      if (term.hasSelection() || historySelection.active) e.preventDefault();
+    };
+    container.addEventListener("beforecopy", onBeforeCopy, { capture: true });
 
     const onClick = (e: MouseEvent) => {
       if (
@@ -2108,6 +2187,10 @@ export function TerminalView({
       );
     };
     let reviewSelectionDrag = false;
+    // A drag handed to the pane app (mouse reporting) may end in an OSC 52
+    // copy that arrives after the gesture; reserve the write while it lasts.
+    let appDragStart: { x: number; y: number } | null = null;
+    const copySelection = copyFinishedSelection;
     let lastPointerType = "";
     // WebKit lacks sourceCapabilities. Compatibility mouse events retain the
     // touch pointer type until a genuine mouse pointerdown replaces it.
@@ -2138,13 +2221,30 @@ export function TerminalView({
       if (term.textarea)
         term.textarea.readOnly = term.options.disableStdin === true;
       if (
+        e.button === 0 &&
+        e.shiftKey &&
+        historySelection.extendTo(e.clientX, e.clientY)
+      ) {
+        // Shift-click after scrolling extends a selection across history.
+        e.preventDefault();
+        e.stopImmediatePropagation();
+        if (historySelection.text) copySelection(historySelection.text);
+        return;
+      }
+      if (
         !terminalMouseUsesSelection(
           endpointPresentation.mouseReporting,
           e,
           applePlatform,
         )
-      )
+      ) {
+        appDragStart =
+          e.button === 0 && endpointPresentation.mouseReporting
+            ? { x: e.clientX, y: e.clientY }
+            : null;
         return;
+      }
+      appDragStart = null;
       selectionDragGuard.mouseDown(e.button);
       if (e.button !== 0) return;
       reviewSelectionDrag = true;
@@ -2291,10 +2391,25 @@ export function TerminalView({
         e.stopImmediatePropagation();
         return;
       }
+      if (
+        appDragStart &&
+        e.button === 0 &&
+        Math.hypot(e.clientX - appDragStart.x, e.clientY - appDragStart.y) > 4
+      ) {
+        reservedClipboard?.cancel();
+        reservedClipboard = reserveClipboardWrite();
+      }
+      appDragStart = null;
       const offerReview =
         reviewSelectionDrag &&
         e.button === 0 &&
         !terminalLinkModifierMatches(e);
+      if (offerReview) {
+        // Copy inside the release itself: Safari only allows clipboard
+        // writes during the gesture.
+        const selected = historySelection.text ?? term.getSelection();
+        if (selected) copySelection(selected);
+      }
       reviewSelectionDrag = false;
       selectionDragGuard.mouseUp();
       endpointPresentation.selectionDrag = false;
@@ -2407,7 +2522,11 @@ export function TerminalView({
       );
       if (
         selectionScroll &&
-        historySelection.wheel(selectionScroll.direction, selectionScroll.lines)
+        historySelection.wheel(
+          selectionScroll.direction,
+          selectionScroll.lines,
+          (e.buttons & 1) === 1 || endpointPresentation.selectionDrag,
+        )
       ) {
         e.preventDefault();
         e.stopPropagation();
@@ -2493,6 +2612,7 @@ export function TerminalView({
       touchLastY = touch.clientY;
       touchMoved = false;
       touchRemainder = 0;
+      touchSelectionBeforeTouch = touchSelection.active;
       touchSelection.start({ x: touch.clientX, y: touch.clientY });
     };
     const onTouchMove = (e: TouchEvent) => {
@@ -2552,12 +2672,46 @@ export function TerminalView({
     };
     const onTouchEnd = (e: TouchEvent) => {
       touchSelection.cancelPending();
+      // A long-press that just selected a word copies it on release.
+      if (touchSelection.active && !touchSelectionBeforeTouch)
+        copySelection(terminalSelectedText(term));
+      touchSelectionBeforeTouch = touchSelection.active;
       if (!touchSelection.active) endpointPresentation.cancelSelection();
-      const dismissInput = terminalTouchShouldDismissInput(
-        touchStartX !== null && touchStartY !== null,
-        touchMoved,
-        inputActiveRef.current,
-      );
+      const tapped =
+        touchStartX !== null && touchStartY !== null && !touchMoved;
+      const endTouch = e.changedTouches[0];
+      const screen = term.element
+        ?.querySelector(".xterm-screen")
+        ?.getBoundingClientRect();
+      // Taps on the agent input rows mean "type here": open the keyboard, or
+      // keep it open. Taps higher up are for reading and dismiss it.
+      const inInputZone =
+        tapped &&
+        !touchSelection.active &&
+        !!endTouch &&
+        !!screen &&
+        screen.height > 0 &&
+        terminalTapOpensInput(
+          Math.floor(
+            ((endTouch.clientY - screen.top) / screen.height) * term.rows,
+          ),
+          term.rows,
+          term.buffer.active.cursorY,
+        );
+      const openInput =
+        inInputZone &&
+        !inputActiveRef.current &&
+        !composerOpenRef.current &&
+        !viewOnlyRef.current &&
+        acceptsEndpointInput() &&
+        isActivePaneRef.current;
+      const dismissInput =
+        !inInputZone &&
+        terminalTouchShouldDismissInput(
+          touchStartX !== null && touchStartY !== null,
+          touchMoved,
+          inputActiveRef.current,
+        );
       touchStartX = null;
       touchStartY = null;
       touchLastY = null;
@@ -2567,7 +2721,17 @@ export function TerminalView({
       e.preventDefault();
       e.stopImmediatePropagation();
       if (dismissInput) closeTerminalInput();
+      if (openInput) {
+        // Focus inside touchend: iOS only raises the keyboard for a focus()
+        // made during the gesture.
+        inputActiveRef.current = true;
+        setInputActive(true);
+        term.options.disableStdin = false;
+        if (term.textarea) term.textarea.readOnly = false;
+        term.focus();
+      }
     };
+    let touchSelectionBeforeTouch = false;
     const onTouchCancel = () => {
       retireTouchLink();
       touchSelection.cancelPending();
@@ -2724,6 +2888,9 @@ export function TerminalView({
       container.removeEventListener("paste", onPaste);
       document.removeEventListener("paste", onPaste, { capture: true });
       container.removeEventListener("copy", onCopy, { capture: true });
+      container.removeEventListener("beforecopy", onBeforeCopy, {
+        capture: true,
+      });
       container.removeEventListener("click", onClick);
       container.removeEventListener("mousedown", onTerminalMouseDown, {
         capture: true,
@@ -2767,6 +2934,8 @@ export function TerminalView({
           .call("terminal.detach", { terminal_id: terminalId })
           .catch(() => null);
       }
+      reservedClipboard?.cancel();
+      detachRenderer();
       term.dispose();
       termRef.current = null;
       setTermInstance(null);
@@ -3107,9 +3276,28 @@ export function TerminalView({
     if (!execution) return;
     if (execution.type === "scroll") {
       scrollPage(execution.direction, execution.amount);
+    } else if (execution.type === "modifier") {
+      const now = performance.now();
+      const since =
+        now -
+        (modifierTapAtRef.current[execution.modifier] ??
+          Number.NEGATIVE_INFINITY);
+      modifierTapAtRef.current[execution.modifier] = now;
+      updateModifiers(
+        tapTerminalModifier(modifiersRef.current, execution.modifier, since),
+      );
     } else {
       sendControl(execution.bytes);
     }
+  };
+  // Latched modifier keys show whether they apply to the next key or stay on.
+  const modifierLatchProps = (
+    option: ReturnType<typeof mobileTerminalShortcutOption>,
+  ) => {
+    const modifier = option && "modifier" in option ? option.modifier : null;
+    if (!modifier) return {};
+    const latch = modifiers[modifier];
+    return { "aria-pressed": latch !== "off", "data-latch": latch };
   };
   const hasMobileShortcuts = mobileShortcuts.some((row) =>
     row.some((shortcut) => shortcut !== null),
@@ -3354,10 +3542,17 @@ export function TerminalView({
                   }}
                   onPointerUp={(event) => {
                     event.preventDefault();
-                    if (event.currentTarget.hasPointerCapture(event.pointerId))
+                    if (
+                      event.currentTarget.hasPointerCapture(event.pointerId)
+                    ) {
                       event.currentTarget.releasePointerCapture(
                         event.pointerId,
                       );
+                      if (termRef.current)
+                        copyFinishedSelection(
+                          terminalSelectedText(termRef.current),
+                        );
+                    }
                   }}
                   onKeyDown={(event) => {
                     const delta = {
@@ -3686,6 +3881,7 @@ export function TerminalView({
                     aria-label={`Run ${option?.label ?? shortcut.label}`}
                     onPointerDown={preventShortcutFocus}
                     onClick={() => runMobileShortcut(shortcut)}
+                    {...modifierLatchProps(option)}
                     key={shortcut.id}
                   >
                     {shortcut.label}
@@ -3755,6 +3951,7 @@ export function TerminalView({
                           aria-label={`Send ${option?.label ?? shortcut.label}`}
                           onPointerDown={preventShortcutFocus}
                           onClick={() => runMobileShortcut(shortcut)}
+                          {...modifierLatchProps(option)}
                           key={shortcut.id}
                         >
                           {shortcut.label}

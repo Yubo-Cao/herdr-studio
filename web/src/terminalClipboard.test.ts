@@ -247,24 +247,44 @@ describe("terminal OSC 52 clipboard access", () => {
     expect(errors).toEqual([]);
   });
 
-  test("retries from a user gesture with a synchronous HTTP fallback", async () => {
+  test("prefers the Clipboard API inside a gesture, since iOS execCommand can silently no-op", async () => {
     const copied: string[] = [];
-    let browserWrites = 0;
+    const fallbacks: string[] = [];
 
     await copyTextFromUserGesture("remote tree", {
       clipboard: {
-        writeText: async () => {
-          browserWrites += 1;
+        writeText: async (text) => {
+          copied.push(text);
         },
       },
       fallback: (text) => {
-        copied.push(text);
+        fallbacks.push(text);
         return true;
       },
     });
 
     expect(copied).toEqual(["remote tree"]);
-    expect(browserWrites).toBe(0);
+    expect(fallbacks).toEqual([]);
+  });
+
+  test("falls back to the synchronous document copy on insecure origins or rejection", async () => {
+    const fallbacks: string[] = [];
+    const fallback = (text: string) => {
+      fallbacks.push(text);
+      return true;
+    };
+
+    await copyTextFromUserGesture("http tree", { clipboard: null, fallback });
+    await copyTextFromUserGesture("denied tree", {
+      clipboard: {
+        writeText: async () => {
+          throw new Error("NotAllowedError");
+        },
+      },
+      fallback,
+    });
+
+    expect(fallbacks).toEqual(["http tree", "denied tree"]);
   });
 
   test("uses Clipboard API when the user-gesture fallback is unavailable", async () => {

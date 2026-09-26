@@ -33,6 +33,8 @@ Herdr 0.9.0 uses stable endpoint generation 1, distinct from protocol 22.
 
 **OSC 52 clipboard writes:** only the browser with input in the last 30 seconds
 matching the receiving endpoint session receives them, never passive viewers.
+Input counts whether typed into the terminal or sent through pane RPCs
+(composer, paste, keys) for a pane that browser is viewing.
 Herdr supplies no producing-pane/input identity: a delayed write from A after B
 becomes foreground can reach B's recent input owner. This is not source-PTY or
 original-browser isolation. Detach/replacement/disposal invalidates ownership.

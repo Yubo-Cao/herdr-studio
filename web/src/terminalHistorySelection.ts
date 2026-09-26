@@ -32,6 +32,21 @@ export class TerminalHistoryRange {
     });
   }
 
+  /**
+   * Whether rows captured earlier still hold the same text at the same
+   * absolute rows. Rows at or below `liveFrom` belong to the live bottom page
+   * (spinners, prompts) and may legitimately change in place.
+   */
+  matches(top: number, rows: CapturedRow[], liveFrom: number): boolean {
+    return rows.every((row, index) => {
+      const absolute = top + index;
+      const captured = this.captured.get(absolute);
+      return (
+        absolute >= liveFrom || !captured || captured.join("") === row.join("")
+      );
+    });
+  }
+
   get ordered(): [Point, Point] {
     const a = this.anchor,
       b = this.cursor;
@@ -127,28 +142,39 @@ export class TerminalHistorySelection {
     this.pointer = { x: e.clientX, y: e.clientY };
     if (!this.range) {
       const edge = this.edge();
-      const history = this.options.frame()?.history;
-      const selection = this.term.getSelectionPosition();
-      if (
-        !edge ||
-        !history ||
-        !selection ||
-        history.total <= history.rows ||
-        history.cols !== this.term.cols ||
-        history.rows !== this.term.rows
-      )
-        return false;
-      const base = this.term.buffer.active.viewportY;
-      this.range = new TerminalHistoryRange(
-        {
-          start: { x: selection.start.x, y: selection.start.y - base },
-          end: { x: selection.end.x, y: selection.end.y - base },
-        },
-        history.top,
-        edge === "up",
-      );
-      this.viewport = history;
-      this.capture();
+      if (!edge || !this.promote(edge === "up", true)) return false;
+    }
+    if (!this.dragging) return false;
+    this.extend();
+    this.schedule();
+    return true;
+  }
+
+  /** Take over xterm's selection in absolute history rows. */
+  private promote(backwards: boolean, dragging: boolean): boolean {
+    const history = this.options.frame()?.history;
+    const selection = this.term.getSelectionPosition();
+    if (
+      !history ||
+      !selection ||
+      history.total <= history.rows ||
+      history.cols !== this.term.cols ||
+      history.rows !== this.term.rows
+    )
+      return false;
+    const base = this.term.buffer.active.viewportY;
+    this.range = new TerminalHistoryRange(
+      {
+        start: { x: selection.start.x, y: selection.start.y - base },
+        end: { x: selection.end.x, y: selection.end.y - base },
+      },
+      history.top,
+      backwards,
+    );
+    this.viewport = history;
+    this.stopped = false;
+    this.capture();
+    if (dragging) {
       // Retire xterm's document drag timer before taking over absolute rows.
       this.releasingNative = true;
       try {
@@ -160,14 +186,11 @@ export class TerminalHistorySelection {
       }
       this.dragging = true;
     }
-    if (!this.dragging) return false;
-    this.extend();
-    this.schedule();
     return true;
   }
 
-  private capture() {
-    if (!this.range || !this.viewport) return;
+  private capture(): boolean {
+    if (!this.range || !this.viewport) return false;
     const buffer = this.term.buffer.active;
     const rows: CapturedRow[] = [];
     for (let y = 0; y < this.term.rows; y++) {
@@ -179,7 +202,12 @@ export class TerminalHistorySelection {
         }),
       );
     }
+    // Live output may repaint the bottom page in place; history above it
+    // must still read the same, or the absolute rows no longer line up.
+    const liveFrom = this.viewport.total - this.viewport.rows;
+    if (!this.range.matches(this.viewport.top, rows, liveFrom)) return false;
     this.range.capture(this.viewport.top, rows);
+    return true;
   }
 
   private extend() {
@@ -250,13 +278,7 @@ export class TerminalHistorySelection {
 
   private scroll(direction: "up" | "down" | null, requestedLines = 3) {
     const viewport = this.viewport;
-    if (
-      !direction ||
-      !viewport ||
-      this.pending ||
-      this.stopped ||
-      !this.dragging
-    )
+    if (!direction || !viewport || !this.range || this.pending || this.stopped)
       return;
     if (
       direction === "up"
@@ -284,21 +306,39 @@ export class TerminalHistorySelection {
     });
   }
 
-  wheel(direction: "up" | "down", lines: number): boolean {
-    if (!this.active || !this.dragging) return false;
+  /**
+   * Scroll history while keeping the selection. With the button held the
+   * selection end follows the pointer into newly exposed rows; after release
+   * the selection stays put and a shift-click can extend it.
+   */
+  wheel(direction: "up" | "down", lines: number, buttonHeld: boolean): boolean {
+    if (!this.range) {
+      if (!this.term.hasSelection()) return false;
+      this.pointer = null;
+      if (!this.promote(direction === "up", buttonHeld)) return false;
+    }
     this.scroll(direction, lines);
+    return true;
+  }
+
+  /** Move the selection end to a pointer position, e.g. on shift-click. */
+  extendTo(x: number, y: number): boolean {
+    if (!this.range || !this.viewport || this.dragging) return false;
+    this.pointer = { x, y };
+    this.extend();
+    this.pointer = null;
     return true;
   }
 
   accepts(frame: TerminalPresentationFrame): boolean {
     if (!this.pending || !this.viewport || !this.range) return false;
     const next = frame.history;
+    // Output may keep arriving (agents stream, spinners animate); presented()
+    // verifies the overlapping history rows before trusting the new viewport.
     if (
       !next ||
       next.cols !== this.viewport.cols ||
-      next.rows !== this.viewport.rows ||
-      next.revision !== this.viewport.revision ||
-      next.total !== this.viewport.total
+      next.rows !== this.viewport.rows
     ) {
       this.stop(
         "Terminal output changed. Finish this selection before scrolling further.",
@@ -318,7 +358,12 @@ export class TerminalHistorySelection {
     this.pending = null;
     if (this.timeout) clearTimeout(this.timeout);
     this.timeout = null;
-    this.capture();
+    if (!this.capture()) {
+      this.stop(
+        "Terminal history moved while selecting. The text selected so far is kept.",
+      );
+      return;
+    }
     if (this.dragging) this.extend();
     else this.highlight();
     this.schedule();

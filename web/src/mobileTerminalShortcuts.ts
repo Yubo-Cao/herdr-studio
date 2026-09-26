@@ -13,8 +13,10 @@ type MobileTerminalShortcutOptionDefinition = {
   id: string;
   label: string;
   defaultButtonLabel: string;
-  group: "Control" | "Basic" | "Navigation" | "Modified";
+  group: "Modifier" | "Control" | "Basic" | "Navigation" | "Modified";
   bytes?: readonly number[];
+  /** Latches a modifier for the next key instead of sending input. */
+  modifier?: "ctrl" | "alt" | "shift";
   scroll?: {
     direction: "up" | "down";
     amount: "full" | "half";
@@ -22,6 +24,27 @@ type MobileTerminalShortcutOptionDefinition = {
 };
 
 export const MOBILE_TERMINAL_SHORTCUT_OPTIONS = [
+  {
+    id: "mod-ctrl",
+    label: "Ctrl (next key)",
+    defaultButtonLabel: "Ctrl",
+    group: "Modifier",
+    modifier: "ctrl",
+  },
+  {
+    id: "mod-alt",
+    label: "Alt (next key)",
+    defaultButtonLabel: "Alt",
+    group: "Modifier",
+    modifier: "alt",
+  },
+  {
+    id: "mod-shift",
+    label: "Shift (next key)",
+    defaultButtonLabel: "Shift",
+    group: "Modifier",
+    modifier: "shift",
+  },
   {
     id: "ctrl-a",
     label: "Ctrl+A",
@@ -294,10 +317,10 @@ const optionById = new Map<
 
 const defaultRows: MobileTerminalShortcutRows = [
   [
+    { id: "default-mod-ctrl", label: "Ctrl", action: "mod-ctrl" },
+    { id: "default-mod-alt", label: "Alt", action: "mod-alt" },
+    { id: "default-mod-shift", label: "Shift", action: "mod-shift" },
     { id: "default-ctrl-c", label: "C-c", action: "ctrl-c" },
-    { id: "default-ctrl-d", label: "C-d", action: "ctrl-d" },
-    { id: "default-ctrl-r", label: "C-R", action: "ctrl-r" },
-    { id: "default-alt-up", label: "A-Up", action: "alt-up" },
     null,
     { id: "default-arrow-up", label: "▲", action: "arrow-up" },
     null,
@@ -337,6 +360,12 @@ export function mobileTerminalShortcutBytes(
   action: MobileTerminalShortcutAction,
 ): number[] {
   return [...(optionById.get(action)?.bytes ?? [])];
+}
+
+export function mobileTerminalShortcutModifier(
+  action: MobileTerminalShortcutAction,
+): "ctrl" | "alt" | "shift" | null {
+  return optionById.get(action)?.modifier ?? null;
 }
 
 export function mobileTerminalShortcutScroll(

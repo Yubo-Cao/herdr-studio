@@ -53,6 +53,8 @@ function copyWithDocument(text: string): boolean {
   try {
     textarea.focus({ preventScroll: true });
     textarea.select();
+    // iOS ignores select() on a read-only field; an explicit range selects it.
+    textarea.setSelectionRange(0, text.length);
     copied = document.execCommand("copy");
   } catch {
     copied = false;
@@ -126,20 +128,76 @@ export async function copyTextFromUserGesture(
   > = {},
 ): Promise<void> {
   const fallback = options.fallback ?? copyWithDocument;
-  // The legacy path is synchronous, so it retains the gesture's transient user
-  // activation even on insecure HTTP origins where Clipboard API is absent.
-  if (fallback(text)) return;
-
   const clipboard =
     options.clipboard === undefined
       ? typeof navigator !== "undefined"
         ? navigator.clipboard
         : null
       : options.clipboard;
-  if (!clipboard?.writeText) {
-    throw new Error("browser clipboard access is unavailable");
+  // The Clipboard API call starts synchronously inside the gesture, which is
+  // what WebKit requires. iOS execCommand("copy") can report success without
+  // copying, so it is only the fallback (insecure origins, older browsers).
+  if (clipboard?.writeText) {
+    try {
+      await clipboard.writeText(text);
+      return;
+    } catch (error) {
+      if (fallback(text)) return;
+      throw clipboardError(error);
+    }
   }
-  await clipboard.writeText(text);
+  if (fallback(text)) return;
+  throw new Error("browser clipboard access is unavailable");
+}
+
+export interface PendingClipboardWrite {
+  resolve(text: string): Promise<void>;
+  cancel(): void;
+}
+
+/**
+ * Reserve a clipboard write inside a user gesture for text that arrives later
+ * (a terminal app copying via OSC 52 after a drag). WebKit rejects writes
+ * made outside the gesture, but accepts a ClipboardItem whose content is a
+ * promise created during it. Returns null where that is unsupported.
+ */
+export function reserveClipboardWrite(
+  timeoutMs = 4000,
+): PendingClipboardWrite | null {
+  if (
+    typeof window === "undefined" ||
+    !window.isSecureContext ||
+    typeof ClipboardItem === "undefined" ||
+    typeof navigator === "undefined" ||
+    !navigator.clipboard?.write
+  )
+    return null;
+  let settle!: (text: string | null) => void;
+  const content = new Promise<string | null>((resolve) => {
+    settle = resolve;
+  });
+  const timer = setTimeout(() => settle(null), timeoutMs);
+  const written = navigator.clipboard
+    .write([
+      new ClipboardItem({
+        "text/plain": content.then((text) => {
+          if (text === null) throw new Error("no terminal clipboard arrived");
+          return new Blob([text], { type: "text/plain" });
+        }),
+      }),
+    ])
+    .finally(() => clearTimeout(timer));
+  // An unused reservation rejects quietly.
+  written.catch(() => {});
+  return {
+    resolve(text) {
+      settle(text);
+      return written;
+    },
+    cancel() {
+      settle(null);
+    },
+  };
 }
 
 /** Allow OSC 52 writes while deliberately refusing terminal clipboard reads. */

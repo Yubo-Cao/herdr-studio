@@ -29,6 +29,15 @@
     "calt" 0;
 }
 
+/* The GPU renderer draws joined ligature runs as one glyph; the texture
+   atlas canvas inherits these features from the terminal element. */
+.terminal-view .xterm.xterm-gpu {
+  font-variant-ligatures: contextual;
+  font-feature-settings:
+    "liga" 1,
+    "calt" 1;
+}
+
 .terminal-view .xterm.xterm-apple-row-spacing-fix .xterm-rows {
   /*
    * xterm's DOM renderer derives a fractional correction from integer
@@ -190,6 +199,19 @@
     display: grid;
     grid-template-columns: repeat(var(--mobile-shortcut-columns), 48px);
     gap: 2px;
+  }
+
+  .terminal-mobile-keys-panel button[data-latch="once"],
+  .terminal-mobile-side-shortcuts button[data-latch="once"] {
+    background: var(--accent-soft);
+    color: var(--accent);
+  }
+
+  .terminal-mobile-keys-panel button[data-latch="locked"],
+  .terminal-mobile-side-shortcuts button[data-latch="locked"] {
+    background: var(--accent-active);
+    color: var(--text);
+    text-decoration: underline;
   }
 
   .terminal-mobile-keys.is-open .terminal-mobile-keys-panel {

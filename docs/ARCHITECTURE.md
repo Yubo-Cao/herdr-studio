@@ -143,11 +143,18 @@ requests and invalidates clipboard ownership.
   become authoritative when no newer intent is queued. Input, missing metrics or
   panes, and closure cancel queued movement.
 - Browser selection holds the latest repaint until cleared. Session changes
-  retire pending presentation; replay never sends input. Edge-drag history reads
-  one overlapping viewport at a time, accepting matching content revisions and
-  retaining immutable cells for the complete copied range. Release, blur, lost
-  mouse-up, resize, or reset stops scrolling. Content/geometry changes preserve
-  captured text but stop further history requests.
+  retire pending presentation; replay never sends input. Edge-drag, or a wheel
+  over an existing selection, promotes it to absolute history rows and reads one
+  overlapping viewport at a time, retaining immutable cells for the complete
+  copied range. New output may change the content revision; each new viewport
+  must reproduce the captured rows it overlaps (the live bottom page excepted),
+  otherwise history shifted and further requests stop with captured text kept.
+  Release, blur, lost mouse-up, resize, or reset stops edge scrolling; after
+  release, wheel scrolling keeps the range and Shift-click extends it.
+- Finished selections are copied inside the releasing gesture (mouseup,
+  touchend, handle pointerup) because WebKit rejects clipboard writes outside
+  user activation. A drag handed to a mouse-aware app reserves a
+  `ClipboardItem` write at mouseup that its later OSC 52 copy fulfills.
 
 ### Links
 

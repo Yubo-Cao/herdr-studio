@@ -188,6 +188,14 @@ const IMPORTANT_RPC_METHODS = new Set([
   "worktree.open",
   "worktree.remove",
 ]);
+// Pane-addressed input also makes this browser the OSC 52 clipboard owner.
+const PANE_INPUT_METHODS = new Set([
+  "pane.send_input",
+  "pane.send_text",
+  "pane.send_key",
+  "pane.send_keys",
+  "pane.paste",
+]);
 const SLOW_RPC_LOG_MS = 750;
 const legacyRoutingLogger = createLegacyRoutingLogger({
   log: (message) =>
@@ -1178,6 +1186,12 @@ async function handleRpc(ws: ServerWebSocket<unknown>, raw: string) {
     }
     return;
   }
+  if (
+    PANE_INPUT_METHODS.has(method) &&
+    typeof params?.pane_id === "string" &&
+    params.pane_id
+  )
+    terminalBridge.notePaneInput(ws, params.pane_id);
   try {
     const rawResult = await herdr.call(method, params ?? {});
     let result = rawResult;

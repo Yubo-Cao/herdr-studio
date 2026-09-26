@@ -37,6 +37,9 @@ export class EndpointTerminalSession extends EventEmitter {
   private pressedMouseButtons = new Set<number>();
   private escFlushTimer: ReturnType<typeof setTimeout> | null = null;
   private paneId: string | null = null;
+  get currentPaneId(): string | null {
+    return this.paneId;
+  }
   private lastScroll: {
     offsetFromBottom: number;
     maxOffsetFromBottom: number;

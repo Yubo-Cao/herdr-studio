@@ -2,6 +2,7 @@ import { describe, expect, test } from "bun:test";
 import {
   terminalFocusBlockedByOverlay,
   terminalPointerShouldBlurInput,
+  terminalTapOpensInput,
   terminalTouchShouldDismissInput,
 } from "./terminalFocus";
 
@@ -73,4 +74,12 @@ describe("terminal pointer focus", () => {
     expect(terminalTouchShouldDismissInput(true, false, false)).toBe(false);
     expect(terminalTouchShouldDismissInput(false, false, true)).toBe(false);
   });
+});
+
+test("taps on the input rows near the bottom or cursor open the keyboard", () => {
+  expect(terminalTapOpensInput(38, 40, null)).toBe(true);
+  expect(terminalTapOpensInput(29, 40, null)).toBe(true);
+  expect(terminalTapOpensInput(10, 40, null)).toBe(false);
+  expect(terminalTapOpensInput(11, 40, 12)).toBe(true);
+  expect(terminalTapOpensInput(2, 4, null)).toBe(true);
 });

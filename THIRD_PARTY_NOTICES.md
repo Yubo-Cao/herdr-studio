@@ -19,6 +19,14 @@ upstream licensing terms documented in
 [`LICENSES/NERD-FONTS.txt`](./LICENSES/NERD-FONTS.txt) and the upstream
 [license audit](https://github.com/ryanoasis/nerd-fonts/blob/master/license-audit.md).
 
+## JetBrains Mono
+
+The terminal's bundled "Roamgate Mono" face is
+[JetBrains Mono](https://github.com/JetBrains/JetBrainsMono), distributed through
+the `@fontsource-variable/jetbrains-mono` package. Copyright 2020 The JetBrains
+Mono Project Authors, licensed under the SIL Open Font License 1.1; see
+[`LICENSES/JETBRAINS-MONO.txt`](./LICENSES/JETBRAINS-MONO.txt).
+
 ## Lobe Icons
 
 Agent brand icons imported from `@lobehub/icons-static-svg` are provided by

@@ -1484,6 +1484,25 @@ export function createTerminalBridge(args: {
     }
   }
 
+  /**
+   * Composer, paste, and key RPCs address a pane, not a terminal stream, but
+   * they are input from this browser all the same: let a copy the pane app
+   * makes in response (OSC 52) come back to it.
+   */
+  function notePaneInput(ws: ServerWebSocket<unknown>, paneId: string) {
+    for (const terminalId of terminalViewers.get(ws)?.keys() ?? []) {
+      const session = sharedTerminals.get(terminalId);
+      if (
+        session &&
+        session.thin instanceof EndpointTerminalSession &&
+        session.thin.currentPaneId === paneId
+      ) {
+        clipboardTarget = { ws, terminalId, inputAt: Date.now(), session };
+        return;
+      }
+    }
+  }
+
   function cleanupWs(ws: ServerWebSocket<unknown>) {
     focusIntents.delete(ws);
     focusChains.delete(ws);
@@ -1546,6 +1565,7 @@ export function createTerminalBridge(args: {
     endpointAvailability,
     handleTerminalRpc,
     cleanupWs,
+    notePaneInput,
     viewedTerminals,
     statusTerminals,
     browserClientCountChanged,
