@@ -14,6 +14,7 @@ import {
   useRef,
   useState,
 } from "react";
+import { t } from "../i18n";
 import {
   shortcutLabel,
   shortcutMatches,
@@ -88,9 +89,9 @@ export function useTerminalVoiceTyping({
           text = (await tidy(text, mode)).trim();
         } catch (error) {
           onError(
-            `Cleanup failed; typing the raw dictation. ${
-              error instanceof Error ? error.message : String(error)
-            }`,
+            t("Cleanup failed; typing the raw dictation. {error}", {
+              error: error instanceof Error ? error.message : String(error),
+            }),
           );
         }
       }
@@ -230,12 +231,12 @@ const keepTerminalFocus = (event: PointerEvent<HTMLButtonElement>) =>
 
 function statusLabel(voice: TerminalVoiceTyping) {
   const { phase, pending } = voice.state;
-  if (voice.inserting) return "Typing into the terminal…";
-  if (phase === "starting") return "Starting microphone…";
-  if (phase === "tidying") return "Tidying…";
-  if (phase === "stopping" || pending > 0) return "Transcribing…";
-  if (phase === "speaking") return "Listening: speech";
-  return "Listening…";
+  if (voice.inserting) return t("Typing into the terminal…");
+  if (phase === "starting") return t("Starting microphone…");
+  if (phase === "tidying") return t("Tidying…");
+  if (phase === "stopping" || pending > 0) return t("Transcribing…");
+  if (phase === "speaking") return t("Listening: speech");
+  return t("Listening…");
 }
 
 /** Always-available microphone toggle for one terminal pane. */
@@ -253,12 +254,12 @@ export function TerminalVoiceButton({
   useShortcutPreferences();
   const busy = voice.active && !voice.recording;
   const label = voice.recording
-    ? "Stop voice typing and type into the terminal"
-    : "Voice typing";
+    ? t("Stop voice typing and type into the terminal")
+    : t("Voice typing");
   const title = voice.recording
     ? label
     : shortcutTitle(
-        "Voice typing: hold to talk, tap to toggle",
+        t("Voice typing: hold to talk, tap to toggle"),
         "voice.pushToTalk",
       );
   return (
@@ -300,7 +301,7 @@ export function TerminalVoicePanel({ voice }: { voice: TerminalVoiceTyping }) {
     <div
       className="terminal-voice-panel"
       role="region"
-      aria-label="Voice typing"
+      aria-label={t("Voice typing")}
     >
       <div className="terminal-voice-panel-head">
         <span
@@ -316,8 +317,8 @@ export function TerminalVoicePanel({ voice }: { voice: TerminalVoiceTyping }) {
         <button
           type="button"
           className="terminal-voice-cancel"
-          title="Discard this dictation"
-          aria-label="Discard this dictation"
+          title={t("Discard this dictation")}
+          aria-label={t("Discard this dictation")}
           disabled={voice.inserting}
           onPointerDown={keepTerminalFocus}
           onClick={voice.cancel}
@@ -332,32 +333,34 @@ export function TerminalVoicePanel({ voice }: { voice: TerminalVoiceTyping }) {
         }`}
       >
         {voice.transcript ||
-          "Speak, then tap Insert or Send. Recognized text appears here."}
+          t("Speak, then tap Insert or Send. Recognized text appears here.")}
       </div>
       <div className="terminal-voice-actions">
         <span className="terminal-voice-keys">
-          {`${shortcutLabel("voice.pushToTalk")} inserts · Enter sends · Esc discards`}
+          {t("{shortcut} inserts · Enter sends · Esc discards", {
+            shortcut: shortcutLabel("voice.pushToTalk"),
+          })}
         </span>
         <button
           type="button"
-          title="Type into the terminal without pressing Enter"
+          title={t("Type into the terminal without pressing Enter")}
           disabled={committing}
           onPointerDown={keepTerminalFocus}
           onClick={() => voice.finish(false)}
         >
           <CornerDownRight size={14} />
-          Insert
+          {t("Insert")}
         </button>
         <button
           type="button"
           className="is-primary"
-          title="Type into the terminal and press Enter"
+          title={t("Type into the terminal and press Enter")}
           disabled={committing}
           onPointerDown={keepTerminalFocus}
           onClick={() => voice.finish(true)}
         >
           <CornerDownLeft size={14} />
-          Send
+          {t("Send")}
         </button>
       </div>
     </div>

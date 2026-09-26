@@ -1,14 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from "react";
 import { Info, Wifi } from "lucide-react";
 import { bridge } from "../api";
+import { msg, t } from "../i18n";
 import { useConnectionClient } from "../useConnectionClient";
 import { Popover, PopoverContent, PopoverTrigger } from "./ui/popover";
 
-const TRANSPORT_DESCRIPTION =
-  "Reduces Herdr-to-Roamgate traffic when the server supports delta and reuse frames. " +
-  "Saved on the Roamgate server for this connection and shared by all viewers. " +
-  "Changes briefly reconnect terminal displays; running tasks are not stopped. " +
-  "Older Herdr servers keep their existing transport.";
+const TRANSPORT_DESCRIPTION = msg(
+  "Reduces Herdr-to-Roamgate traffic when the server supports delta and reuse frames. Saved on the Roamgate server for this connection and shared by all viewers. Changes briefly reconnect terminal displays; running tasks are not stopped. Older Herdr servers keep their existing transport.",
+);
 
 export function TerminalTransportSettings() {
   const client = useConnectionClient();
@@ -26,7 +25,7 @@ export function TerminalTransportSettings() {
     try {
       const result = await client.call("settings.terminal_transport.get");
       if (typeof result?.surface_codecs !== "boolean")
-        throw new Error("Invalid terminal transport settings");
+        throw new Error(t("Invalid terminal transport settings"));
       if (
         !mounted.current ||
         !client.isCurrent() ||
@@ -95,39 +94,39 @@ export function TerminalTransportSettings() {
         <div className="config-item-copy">
           <div className="configuration-setting-label">
             <strong id="terminal-transport-label">
-              Terminal incremental transport
+              {t("Terminal incremental transport")}
             </strong>
             <Popover>
               <PopoverTrigger asChild>
                 <button
                   type="button"
                   className="configuration-help"
-                  aria-label="About terminal incremental transport"
-                  title={TRANSPORT_DESCRIPTION}
+                  aria-label={t("About terminal incremental transport")}
+                  title={t(TRANSPORT_DESCRIPTION)}
                 >
                   <Info size={14} aria-hidden="true" />
                 </button>
               </PopoverTrigger>
               <PopoverContent
                 className="configuration-help-content"
-                aria-label="About terminal incremental transport"
+                aria-label={t("About terminal incremental transport")}
                 aria-describedby="terminal-transport-description"
                 collisionPadding={12}
               >
-                {TRANSPORT_DESCRIPTION}
+                {t(TRANSPORT_DESCRIPTION)}
               </PopoverContent>
             </Popover>
           </div>
           <span role="status">
             {saving
-              ? "Saving..."
+              ? t("Saving...")
               : enabled === null
                 ? error
-                  ? "Unavailable"
-                  : "Loading..."
+                  ? t("Unavailable")
+                  : t("Loading...")
                 : enabled
-                  ? "Enabled"
-                  : "Disabled"}
+                  ? t("Enabled")
+                  : t("Disabled")}
           </span>
         </div>
         <button
@@ -146,7 +145,7 @@ export function TerminalTransportSettings() {
         </button>
       </div>
       <p id="terminal-transport-description" hidden>
-        {TRANSPORT_DESCRIPTION}
+        {t(TRANSPORT_DESCRIPTION)}
       </p>
       {error ? (
         <div className="configuration-error" role="alert">
@@ -158,7 +157,7 @@ export function TerminalTransportSettings() {
               void (error.value === undefined ? load() : save(error.value))
             }
           >
-            Retry
+            {t("Retry")}
           </button>
         </div>
       ) : null}

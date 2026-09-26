@@ -1,4 +1,5 @@
 import vadWasmUrl from "@echogarden/fvad-wasm/fvad.wasm?url";
+import { t } from "../i18n";
 import type { VoiceCaptureOptions } from "./voiceCapture.worklet";
 import { encodeVoiceWav, VOICE_SAMPLE_RATE } from "./voiceSegmenter";
 import type { VoiceCleanupMode } from "./voicePreferences";
@@ -78,7 +79,10 @@ async function transcribe(wav: Uint8Array, attempt = 0): Promise<string> {
     error?: string;
   };
   if (!response.ok)
-    throw new Error(body.error ?? `transcription failed (${response.status})`);
+    throw new Error(
+      body.error ??
+        t("transcription failed ({status})", { status: response.status }),
+    );
   return body.text?.trim() ?? "";
 }
 
@@ -98,7 +102,9 @@ export async function tidyDictation(
     error?: string;
   };
   if (!response.ok)
-    throw new Error(body.error ?? `cleanup failed (${response.status})`);
+    throw new Error(
+      body.error ?? t("cleanup failed ({status})", { status: response.status }),
+    );
   return body.text ?? "";
 }
 
@@ -121,13 +127,15 @@ export async function startDictation(
   try {
     if (!window.isSecureContext || !navigator.mediaDevices?.getUserMedia)
       throw new Error(
-        "Voice input needs a secure origin (HTTPS or localhost) with microphone access.",
+        t(
+          "Voice input needs a secure origin (HTTPS or localhost) with microphone access.",
+        ),
       );
     const [status, wasm] = await Promise.all([voiceStatus(), loadVadWasm()]);
     if (!status.available)
       throw new Error(
         status.error ??
-          "Voice input is not configured on this Roamgate server.",
+          t("Voice input is not configured on this Roamgate server."),
       );
 
     callbacks.onPhase("starting");
@@ -243,7 +251,7 @@ function capture(
   };
   for (const track of stream.getAudioTracks())
     track.addEventListener("ended", () =>
-      callbacks.onError("The microphone was disconnected.", true),
+      callbacks.onError(t("The microphone was disconnected."), true),
     );
   callbacks.onPhase("listening");
 

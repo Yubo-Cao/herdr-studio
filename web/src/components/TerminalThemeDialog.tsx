@@ -3,6 +3,7 @@ import type { KeyboardEvent as ReactKeyboardEvent } from "react";
 import type { ITheme } from "@xterm/xterm";
 import { Check, Copy, Moon, Pencil, Plus, Sun, Trash2 } from "lucide-react";
 import type { ResolvedTheme } from "../appearance";
+import { msg, t } from "../i18n";
 import {
   type CustomTerminalTheme,
   customTerminalThemeToITheme,
@@ -50,27 +51,27 @@ const EDITOR_FALLBACK_COLORS: Record<TerminalThemeColorKey, string> = {
 };
 
 const COLOR_KEY_LABELS: Record<TerminalThemeColorKey, string> = {
-  background: "Background",
-  foreground: "Foreground",
-  cursor: "Cursor",
-  cursorAccent: "Cursor text",
-  selectionBackground: "Selection",
-  black: "Black",
-  red: "Red",
-  green: "Green",
-  yellow: "Yellow",
-  blue: "Blue",
-  magenta: "Magenta",
-  cyan: "Cyan",
-  white: "White",
-  brightBlack: "Bright black",
-  brightRed: "Bright red",
-  brightGreen: "Bright green",
-  brightYellow: "Bright yellow",
-  brightBlue: "Bright blue",
-  brightMagenta: "Bright magenta",
-  brightCyan: "Bright cyan",
-  brightWhite: "Bright white",
+  background: msg("Background"),
+  foreground: msg("Foreground"),
+  cursor: msg("Cursor"),
+  cursorAccent: msg("Cursor text"),
+  selectionBackground: msg("Selection"),
+  black: msg("Black"),
+  red: msg("Red"),
+  green: msg("Green"),
+  yellow: msg("Yellow"),
+  blue: msg("Blue"),
+  magenta: msg("Magenta"),
+  cyan: msg("Cyan"),
+  white: msg("White"),
+  brightBlack: msg("Bright black"),
+  brightRed: msg("Bright red"),
+  brightGreen: msg("Bright green"),
+  brightYellow: msg("Bright yellow"),
+  brightBlue: msg("Bright blue"),
+  brightMagenta: msg("Bright magenta"),
+  brightCyan: msg("Bright cyan"),
+  brightWhite: msg("Bright white"),
 };
 
 const ALL_COLOR_KEYS: readonly TerminalThemeColorKey[] = [
@@ -78,9 +79,27 @@ const ALL_COLOR_KEYS: readonly TerminalThemeColorKey[] = [
   ...TERMINAL_ANSI_COLOR_KEYS,
 ];
 
-const THEME_VARIANTS: readonly { value: ResolvedTheme; label: string }[] = [
-  { value: "dark", label: "Dark mode" },
-  { value: "light", label: "Light mode" },
+const THEME_VARIANTS: readonly {
+  value: ResolvedTheme;
+  label: string;
+  usedWhen: string;
+  create: string;
+  group: string;
+}[] = [
+  {
+    value: "dark",
+    label: msg("Dark mode"),
+    usedWhen: msg("Used when the app is in dark mode"),
+    create: msg("Create a custom theme for dark mode"),
+    group: msg("Dark mode terminal theme"),
+  },
+  {
+    value: "light",
+    label: msg("Light mode"),
+    usedWhen: msg("Used when the app is in light mode"),
+    create: msg("Create a custom theme for light mode"),
+    group: msg("Light mode terminal theme"),
+  },
 ];
 
 let nextCustomThemeId = 1;
@@ -251,12 +270,15 @@ export function TerminalThemeDialog({
       selection,
       customThemes,
     );
-    setDraft(draftFromDefinition(current, "Custom theme"));
+    setDraft(draftFromDefinition(current, t("Custom theme")));
   };
 
   const duplicateTheme = (card: ThemeCardData) => {
     setDraft(
-      draftFromDefinition(card.definition, `${card.definition.name} copy`),
+      draftFromDefinition(
+        card.definition,
+        t("{name} copy", { name: card.definition.name }),
+      ),
     );
   };
 
@@ -264,7 +286,7 @@ export function TerminalThemeDialog({
     if (!draft || missingDraft || (!draft.id && !canCreate)) return;
     const theme: CustomTerminalTheme = {
       id: draft.id ?? newCustomThemeId(),
-      name: draft.name.trim() || "Custom theme",
+      name: draft.name.trim() || t("Custom theme"),
       variant: draft.variant,
       colors: { ...draft.colors },
     };
@@ -319,7 +341,8 @@ export function TerminalThemeDialog({
     buttons?.[nextIndex]?.focus();
   };
 
-  const renderSection = (variant: ResolvedTheme, label: string) => {
+  const renderSection = (section: (typeof THEME_VARIANTS)[number]) => {
+    const variant = section.value;
     const cards = cardsFor(variant);
     // A stale selection id (e.g. edited storage) marks no card active; keep
     // the first card tabbable so the group stays keyboard-reachable.
@@ -336,9 +359,9 @@ export function TerminalThemeDialog({
               ) : (
                 <Sun size={14} aria-hidden="true" />
               )}
-              {label}
+              {t(section.label)}
             </strong>
-            <span>Used when the app is in {label.toLowerCase()}</span>
+            <span>{t(section.usedWhen)}</span>
           </div>
           <button
             type="button"
@@ -346,19 +369,21 @@ export function TerminalThemeDialog({
             disabled={!canCreate}
             title={
               canCreate
-                ? `Create a custom theme for ${label.toLowerCase()}`
-                : `Custom theme limit reached (${MAX_CUSTOM_TERMINAL_THEMES})`
+                ? t(section.create)
+                : t("Custom theme limit reached ({limit})", {
+                    limit: MAX_CUSTOM_TERMINAL_THEMES,
+                  })
             }
             onClick={() => startNewTheme(variant)}
           >
             <Plus size={14} aria-hidden="true" />
-            New theme
+            {t("New theme")}
           </button>
         </div>
         <div
           className="terminal-theme-grid"
           role="radiogroup"
-          aria-label={`${label} terminal theme`}
+          aria-label={t(section.group)}
         >
           {cards.map((card, index) => {
             const active = selection[variant] === card.definition.id;
@@ -385,17 +410,23 @@ export function TerminalThemeDialog({
                   <span className="terminal-theme-card-name">
                     {active ? <Check size={13} aria-hidden="true" /> : null}
                     {card.definition.name}
-                    {custom ? <span className="badge">Custom</span> : null}
+                    {custom ? (
+                      <span className="badge">{t("Custom")}</span>
+                    ) : null}
                   </span>
                 </button>
                 <span className="terminal-theme-card-actions">
                   <button
                     type="button"
-                    aria-label={`Duplicate ${card.definition.name}`}
+                    aria-label={t("Duplicate {name}", {
+                      name: card.definition.name,
+                    })}
                     title={
                       canCreate
-                        ? "Duplicate as custom theme"
-                        : `Custom theme limit reached (${MAX_CUSTOM_TERMINAL_THEMES})`
+                        ? t("Duplicate as custom theme")
+                        : t("Custom theme limit reached ({limit})", {
+                            limit: MAX_CUSTOM_TERMINAL_THEMES,
+                          })
                     }
                     disabled={!canCreate}
                     onClick={() => duplicateTheme(card)}
@@ -406,16 +437,20 @@ export function TerminalThemeDialog({
                     <>
                       <button
                         type="button"
-                        aria-label={`Edit ${card.definition.name}`}
-                        title="Edit theme"
+                        aria-label={t("Edit {name}", {
+                          name: card.definition.name,
+                        })}
+                        title={t("Edit theme")}
                         onClick={() => setDraft(draftFromCustom(custom))}
                       >
                         <Pencil size={13} aria-hidden="true" />
                       </button>
                       <button
                         type="button"
-                        aria-label={`Delete ${card.definition.name}`}
-                        title="Delete theme"
+                        aria-label={t("Delete {name}", {
+                          name: card.definition.name,
+                        })}
+                        title={t("Delete theme")}
                         onClick={() => setPendingDelete(custom)}
                       >
                         <Trash2 size={13} aria-hidden="true" />
@@ -442,7 +477,7 @@ export function TerminalThemeDialog({
           value={current.colors[key]}
           onChange={(event) => setColor(key, event.target.value)}
         />
-        <span>{COLOR_KEY_LABELS[key]}</span>
+        <span>{t(COLOR_KEY_LABELS[key])}</span>
         <code>{current.colors[key]}</code>
       </label>
     );
@@ -450,8 +485,8 @@ export function TerminalThemeDialog({
       <>
         <div className="modal-head">
           <div>
-            <h2>{current.id ? "Edit theme" : "New theme"}</h2>
-            <p>Pick colors; the preview updates as you go.</p>
+            <h2>{current.id ? t("Edit theme") : t("New theme")}</h2>
+            <p>{t("Pick colors; the preview updates as you go.")}</p>
           </div>
           <CloseButton onClick={onClose} />
         </div>
@@ -459,7 +494,7 @@ export function TerminalThemeDialog({
         <div className="terminal-theme-editor">
           <div className="terminal-theme-editor-top">
             <label className="form-field terminal-theme-name-field">
-              <span>Theme name</span>
+              <span>{t("Theme name")}</span>
               <input
                 value={current.name}
                 maxLength={MAX_TERMINAL_THEME_NAME_LENGTH}
@@ -469,16 +504,16 @@ export function TerminalThemeDialog({
               />
             </label>
             <div className="terminal-theme-variant-field">
-              <span>Suggested for</span>
+              <span>{t("Suggested for")}</span>
               <div
                 className="config-theme-control"
-                aria-label="Suggested appearance"
+                aria-label={t("Suggested appearance")}
               >
                 {THEME_VARIANTS.map((variant) => (
                   <button
                     key={variant.value}
                     type="button"
-                    aria-label={variant.label}
+                    aria-label={t(variant.label)}
                     aria-pressed={current.variant === variant.value}
                     className={
                       current.variant === variant.value ? "is-active" : ""
@@ -501,13 +536,13 @@ export function TerminalThemeDialog({
           <TerminalThemePreview colors={current.colors} />
 
           <div className="terminal-theme-color-group">
-            <strong>Base colors</strong>
+            <strong>{t("Base colors")}</strong>
             <div className="terminal-theme-color-grid">
               {TERMINAL_BASE_COLOR_KEYS.map(colorField)}
             </div>
           </div>
           <div className="terminal-theme-color-group">
-            <strong>ANSI colors</strong>
+            <strong>{t("ANSI colors")}</strong>
             <div className="terminal-theme-color-grid">
               {TERMINAL_ANSI_COLOR_KEYS.map(colorField)}
             </div>
@@ -516,14 +551,17 @@ export function TerminalThemeDialog({
 
         {missingDraft ? (
           <p role="alert">
-            This theme no longer exists. Your unsaved edits are kept here until
-            you close the editor.
+            {t(
+              "This theme no longer exists. Your unsaved edits are kept here until you close the editor.",
+            )}
           </p>
         ) : null}
         {!current.id && !canCreate ? (
           <p role="alert">
-            Custom theme limit reached ({MAX_CUSTOM_TERMINAL_THEMES}). Delete a
-            theme before creating another.
+            {t(
+              "Custom theme limit reached ({limit}). Delete a theme before creating another.",
+              { limit: MAX_CUSTOM_TERMINAL_THEMES },
+            )}
           </p>
         ) : null}
         <div className="modal-actions">
@@ -532,7 +570,7 @@ export function TerminalThemeDialog({
             className="ghost"
             onClick={() => setDraft(null)}
           >
-            Cancel
+            {t("Cancel")}
           </button>
           <button
             type="button"
@@ -543,7 +581,7 @@ export function TerminalThemeDialog({
             }
             onClick={saveDraft}
           >
-            {current.id ? "Save theme" : "Create theme"}
+            {current.id ? t("Save theme") : t("Create theme")}
           </button>
         </div>
       </>
@@ -561,7 +599,7 @@ export function TerminalThemeDialog({
           className="modal terminal-themes-modal"
           role="dialog"
           aria-modal="true"
-          aria-label="Terminal themes"
+          aria-label={t("Terminal themes")}
           tabIndex={-1}
           onMouseDown={(event) => event.stopPropagation()}
         >
@@ -571,26 +609,27 @@ export function TerminalThemeDialog({
             <>
               <div className="modal-head">
                 <div>
-                  <h2>Terminal Themes</h2>
+                  <h2>{t("Terminal Themes")}</h2>
                   <p>
-                    Choose a theme per appearance mode, or create your own from
-                    any preset.
+                    {t(
+                      "Choose a theme per appearance mode, or create your own from any preset.",
+                    )}
                   </p>
                 </div>
                 <CloseButton onClick={onClose} />
               </div>
-              {THEME_VARIANTS.map((variant) =>
-                renderSection(variant.value, variant.label),
-              )}
+              {THEME_VARIANTS.map((variant) => renderSection(variant))}
             </>
           )}
         </div>
       </div>
       <ConfirmDialog
         open={pendingDelete !== null}
-        title="Delete theme"
-        message={`Delete "${pendingDelete?.name ?? ""}"? This cannot be undone.`}
-        confirmLabel="Delete"
+        title={t("Delete theme")}
+        message={t("Delete {name}? This cannot be undone.", {
+          name: `"${pendingDelete?.name ?? ""}"`,
+        })}
+        confirmLabel={t("Delete")}
         danger
         onConfirm={() => {
           if (pendingDelete) deleteCustomTheme(pendingDelete);

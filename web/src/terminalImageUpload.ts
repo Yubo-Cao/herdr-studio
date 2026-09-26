@@ -1,5 +1,6 @@
 import type { ConnectionClient } from "./api";
 import { connectionHttpPath } from "./connectionHttp";
+import { t } from "./i18n";
 
 /**
  * Uploads an image through the connection's HTTP endpoint and returns the
@@ -10,7 +11,8 @@ export async function uploadTerminalImage(
   client: ConnectionClient,
   file: File,
 ): Promise<string> {
-  if (!client.isCurrent()) throw new Error("connection changed during upload");
+  if (!client.isCurrent())
+    throw new Error(t("connection changed during upload"));
   const ext = (file.type.split("/")[1] || "png").toLowerCase();
   const uploadUrl = new URL(
     connectionHttpPath(
@@ -21,7 +23,7 @@ export async function uploadTerminalImage(
     window.location.origin,
   );
   if (uploadUrl.origin !== window.location.origin) {
-    throw new Error("invalid upload origin");
+    throw new Error(t("invalid upload origin"));
   }
   const res = await fetch(uploadUrl, {
     method: "POST",
@@ -34,7 +36,7 @@ export async function uploadTerminalImage(
   if (!res.ok) {
     const body = (await res.text()).trim();
     if (!client.isCurrent()) {
-      throw new Error("connection changed during upload");
+      throw new Error(t("connection changed during upload"));
     }
     let detail = body;
     if (body) {
@@ -50,18 +52,21 @@ export async function uploadTerminalImage(
       }
     }
     throw new Error(
-      detail || res.statusText || `Image upload failed (${res.status})`,
+      detail ||
+        res.statusText ||
+        t("Image upload failed ({status})", { status: res.status }),
     );
   }
 
   const data: unknown = await res.json();
-  if (!client.isCurrent()) throw new Error("connection changed during upload");
+  if (!client.isCurrent())
+    throw new Error(t("connection changed during upload"));
   if (data === null || typeof data !== "object" || Array.isArray(data)) {
-    throw new Error("image upload response was not an object");
+    throw new Error(t("image upload response was not an object"));
   }
   const payload = data as { path?: unknown };
   if (typeof payload.path !== "string" || payload.path.length === 0) {
-    throw new Error("image upload response did not include a path");
+    throw new Error(t("image upload response did not include a path"));
   }
   return payload.path;
 }

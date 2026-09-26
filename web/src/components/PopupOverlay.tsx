@@ -3,6 +3,7 @@ import { Terminal, type ITheme } from "@xterm/xterm";
 import { FitAddon } from "@xterm/addon-fit";
 import { X } from "lucide-react";
 import { bridge } from "../api";
+import { t } from "../i18n";
 import { store, useStoreSelector, type PopupInfo } from "../store";
 import { useConnectionClient } from "../useConnectionClient";
 import {
@@ -179,7 +180,7 @@ export function PopupOverlay({ terminalTheme }: { terminalTheme: ITheme }) {
         }
       })
       .catch(() => {
-        if (!detached) term.writeln("Unable to attach popup terminal.");
+        if (!detached) term.writeln(t("Unable to attach popup terminal."));
       });
 
     const offTerminal = bridge.onTerminal((t) => {
@@ -204,7 +205,7 @@ export function PopupOverlay({ terminalTheme }: { terminalTheme: ITheme }) {
         retryAttach((value) => value + 1);
       } else {
         term.writeln(
-          "Popup terminal stream closed; reopen the popup to retry.",
+          t("Popup terminal stream closed; reopen the popup to retry."),
         );
       }
     });
@@ -346,7 +347,7 @@ export function PopupOverlay({ terminalTheme }: { terminalTheme: ITheme }) {
           <span>{popup.title}</span>
           <button
             type="button"
-            aria-label="Close popup"
+            aria-label={t("Close popup")}
             onClick={() => void store.closePopup()}
             style={{
               background: "transparent",

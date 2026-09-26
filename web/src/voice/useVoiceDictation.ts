@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { t } from "../i18n";
 import type {
   DictationPhase,
   DictationSession,
@@ -151,7 +152,7 @@ export function useVoiceDictation({
       if (cancelledRef.current) return;
       const message =
         error instanceof DOMException && error.name === "NotAllowedError"
-          ? "Microphone permission was denied."
+          ? t("Microphone permission was denied.")
           : error instanceof Error
             ? error.message
             : String(error);
